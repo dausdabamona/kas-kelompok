@@ -15,14 +15,21 @@ function toDateStr_(val) {
   return String(val);
 }
 
-// Buat header-to-index map dari baris header sheet (case-insensitive, trim).
+// Buat header-to-index map dari baris header sheet.
+// Key dinormalisasi: lowercase, trim, hapus semua spasi dan karakter '/'.
+// "Periode ID" → 'periodeid', "1/10 IR" → '110ir', dst.
 function headerMap_(headerRow) {
   var map = {};
   for (var i = 0; i < headerRow.length; i++) {
-    var key = String(headerRow[i] || '').toLowerCase().trim();
+    var key = String(headerRow[i] || '').toLowerCase().trim().replace(/[\s\/]/g, '');
     if (key) map[key] = i;
   }
   return map;
+}
+// Helper lookup: ambil nilai dari row via headerMap_, fallback ke defaultIdx
+function hGet_(row, map, key, defaultIdx) {
+  var idx = map[key] !== undefined ? map[key] : defaultIdx;
+  return idx >= 0 ? row[idx] : undefined;
 }
 
 // ──────────────────────────────────────────────────────
@@ -148,17 +155,17 @@ function getDashboardData() {
 
 function calculateSaldo(periodeId, periode) {
   var ss = getSS_();
-  // Mulai dari saldo awal periode (jika ada)
   var tunai = (periode && periode.saldoAwalTunai) ? Number(periode.saldoAwalTunai) : 0;
   var bank  = (periode && periode.saldoAwalBank)  ? Number(periode.saldoAwalBank)  : 0;
 
   var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
   if (sheetP && sheetP.getLastRow() > 1) {
     var dp = sheetP.getDataRange().getValues();
+    var dpH = headerMap_(dp[0]);
     for (var i = 1; i < dp.length; i++) {
-      if (!periodeId || dp[i][1] === periodeId) {
-        var nominal = Number(dp[i][5]) || 0;
-        var sumber = dp[i][6];
+      if (!periodeId || String(hGet_(dp[i], dpH, 'periodeid', 1)) === periodeId) {
+        var nominal = Number(hGet_(dp[i], dpH, 'nominal', 5)) || 0;
+        var sumber  = String(hGet_(dp[i], dpH, 'sumberkas', 6) || '');
         if (sumber === 'Tunai') tunai += nominal;
         else if (sumber === 'Bank') bank += nominal;
       }
@@ -168,10 +175,11 @@ function calculateSaldo(periodeId, periode) {
   var sheetPK = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
   if (sheetPK && sheetPK.getLastRow() > 1) {
     var dpk = sheetPK.getDataRange().getValues();
+    var dpkH = headerMap_(dpk[0]);
     for (var i = 1; i < dpk.length; i++) {
-      if (!periodeId || dpk[i][1] === periodeId) {
-        var nominal = Number(dpk[i][4]) || 0;
-        var sumber = dpk[i][5];
+      if (!periodeId || String(hGet_(dpk[i], dpkH, 'periodeid', 1)) === periodeId) {
+        var nominal = Number(hGet_(dpk[i], dpkH, 'nominal', 4)) || 0;
+        var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
         if (sumber === 'Tunai') tunai -= nominal;
         else if (sumber === 'Bank') bank -= nominal;
       }
@@ -181,10 +189,11 @@ function calculateSaldo(periodeId, periode) {
   var sheetS = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
   if (sheetS && sheetS.getLastRow() > 1) {
     var ds = sheetS.getDataRange().getValues();
+    var dsH = headerMap_(ds[0]);
     for (var i = 1; i < ds.length; i++) {
-      if (!periodeId || ds[i][1] === periodeId) {
-        var nominal = Number(ds[i][3]) || 0;
-        var arah = ds[i][4];
+      if (!periodeId || String(hGet_(ds[i], dsH, 'periodeid', 1)) === periodeId) {
+        var nominal = Number(hGet_(ds[i], dsH, 'nominal', 3)) || 0;
+        var arah    = String(hGet_(ds[i], dsH, 'arah', 4) || '');
         if (arah === 'setor') { tunai -= nominal; bank += nominal; }
         else if (arah === 'tarik') { bank -= nominal; tunai += nominal; }
       }
@@ -616,12 +625,20 @@ function getRekapitulasiData() {
 
     if (sheetP && sheetP.getLastRow() > 1) {
       var dp = sheetP.getDataRange().getValues();
+      var dpH = headerMap_(dp[0]);
       for (var i = 1; i < dp.length; i++) {
-        if (!dp[i][0]) continue;
-        if (periodeId && dp[i][1] !== periodeId) continue;
-        var nominal = Number(dp[i][5]) || 0;
-        var sumber = dp[i][6];
-        pemasukan.push({ id: dp[i][0], jenis: masterPMap[dp[i][2]] || dp[i][2], tanggal: dp[i][4], nominal: nominal, sumber: sumber, catatan: dp[i][7] });
+        if (!hGet_(dp[i], dpH, 'id', 0)) continue;
+        if (periodeId && String(hGet_(dp[i], dpH, 'periodeid', 1)) !== periodeId) continue;
+        var nominal = Number(hGet_(dp[i], dpH, 'nominal', 5)) || 0;
+        var sumber  = String(hGet_(dp[i], dpH, 'sumberkas', 6) || '');
+        var jenisId = String(hGet_(dp[i], dpH, 'jenisid', 2) || '');
+        pemasukan.push({
+          id: String(hGet_(dp[i], dpH, 'id', 0)),
+          jenis: masterPMap[jenisId] || jenisId,
+          tanggal: toDateStr_(hGet_(dp[i], dpH, 'tanggal', 4)),
+          nominal: nominal, sumber: sumber,
+          catatan: String(hGet_(dp[i], dpH, 'catatan', 7) || '')
+        });
         if (sumber === 'Tunai') totalPTunai += nominal;
         else if (sumber === 'Bank') totalPBank += nominal;
       }
@@ -629,12 +646,20 @@ function getRekapitulasiData() {
 
     if (sheetPK && sheetPK.getLastRow() > 1) {
       var dpk = sheetPK.getDataRange().getValues();
+      var dpkH = headerMap_(dpk[0]);
       for (var i = 1; i < dpk.length; i++) {
-        if (!dpk[i][0]) continue;
-        if (periodeId && dpk[i][1] !== periodeId) continue;
-        var nominal = Number(dpk[i][4]) || 0;
-        var sumber = dpk[i][5];
-        pengeluaran.push({ id: dpk[i][0], jenis: masterPKMap[dpk[i][2]] || dpk[i][2], tanggal: dpk[i][3], nominal: nominal, sumber: sumber, catatan: dpk[i][6] });
+        if (!hGet_(dpk[i], dpkH, 'id', 0)) continue;
+        if (periodeId && String(hGet_(dpk[i], dpkH, 'periodeid', 1)) !== periodeId) continue;
+        var nominal = Number(hGet_(dpk[i], dpkH, 'nominal', 4)) || 0;
+        var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
+        var jenisId = String(hGet_(dpk[i], dpkH, 'jenisid', 2) || '');
+        pengeluaran.push({
+          id: String(hGet_(dpk[i], dpkH, 'id', 0)),
+          jenis: masterPKMap[jenisId] || jenisId,
+          tanggal: toDateStr_(hGet_(dpk[i], dpkH, 'tanggal', 3)),
+          nominal: nominal, sumber: sumber,
+          catatan: String(hGet_(dpk[i], dpkH, 'catatan', 6) || '')
+        });
         if (sumber === 'Tunai') totalPKTunai += nominal;
         else if (sumber === 'Bank') totalPKBank += nominal;
       }
@@ -1103,19 +1128,25 @@ function getBankDaily(periodeId) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_DAILY);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
     var result = [];
     for (var i = 1; i < rows.length; i++) {
-      if (!rows[i][0]) continue;
-      if (periodeId && rows[i][1] !== periodeId) continue;
+      if (!hGet_(rows[i], h, 'id', 0)) continue;
+      if (periodeId && String(hGet_(rows[i], h, 'periodeid', 1)) !== periodeId) continue;
       result.push({
-        id: rows[i][0], periodeId: rows[i][1], tanggal: rows[i][2],
-        saldoAwal: Number(rows[i][3]) || 0, pemasukan: Number(rows[i][4]) || 0,
-        pengeluaran: Number(rows[i][5]) || 0, saldoAkhirTeoritis: Number(rows[i][6]) || 0,
-        saldoAkhirActual: Number(rows[i][7]) || 0, selisih: Number(rows[i][8]) || 0,
-        status: rows[i][9], catatan: rows[i][10]
+        id: String(hGet_(rows[i], h, 'id', 0)),
+        periodeId: String(hGet_(rows[i], h, 'periodeid', 1)),
+        tanggal: toDateStr_(hGet_(rows[i], h, 'tanggal', 2)),
+        saldoAwal: Number(hGet_(rows[i], h, 'saldoawal', 3)) || 0,
+        pemasukan: Number(hGet_(rows[i], h, 'pemasukan', 4)) || 0,
+        pengeluaran: Number(hGet_(rows[i], h, 'pengeluaran', 5)) || 0,
+        saldoAkhirTeoritis: Number(hGet_(rows[i], h, 'saldoakhirteoritis', 6)) || 0,
+        saldoAkhirActual: Number(hGet_(rows[i], h, 'saldoakhiractual', 7)) || 0,
+        selisih: Number(hGet_(rows[i], h, 'selisih', 8)) || 0,
+        status: String(hGet_(rows[i], h, 'status', 9) || ''),
+        catatan: String(hGet_(rows[i], h, 'catatan', 10) || '')
       });
     }
-    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: result };
   } catch(e) {
     return { success: false, message: e.message };
@@ -1135,10 +1166,10 @@ function addBankTransaction(data) {
     var id = generateID('BNK');
     var saldoAkhirTeoritis = (Number(data.saldoAwal) || 0) + (Number(data.pemasukan) || 0) - (Number(data.pengeluaran) || 0);
     var selisih = (Number(data.saldoAkhirActual) || 0) - saldoAkhirTeoritis;
-    sheet.appendRow([id, data.periodeId, data.tanggal,
+    sheet.appendRow([id, data.periodeId, toDateStr_(data.tanggal),
       Number(data.saldoAwal) || 0, Number(data.pemasukan) || 0, Number(data.pengeluaran) || 0,
       saldoAkhirTeoritis, Number(data.saldoAkhirActual) || 0, selisih,
-      selisih === 0 ? 'Balance' : 'Selisih', data.catatan || '', new Date()]);
+      selisih === 0 ? 'Balance' : 'Selisih', data.catatan || '', toDateStr_(new Date())]);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
@@ -1161,7 +1192,7 @@ function updateBankDaily(data) {
         sheet.getRange(i + 1, 4, 1, 9).setValues([[
           Number(data.saldoAwal) || 0, Number(data.pemasukan) || 0, Number(data.pengeluaran) || 0,
           saldoAkhirTeoritis, Number(data.saldoAkhirActual) || 0, selisih,
-          selisih === 0 ? 'Balance' : 'Selisih', data.catatan || '', new Date()
+          selisih === 0 ? 'Balance' : 'Selisih', data.catatan || '', toDateStr_(new Date())
         ]]);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
@@ -1181,18 +1212,23 @@ function getBankPending(periodeId) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_PENDING);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
     var result = [];
     for (var i = 1; i < rows.length; i++) {
-      if (!rows[i][0]) continue;
-      if (periodeId && rows[i][1] !== periodeId) continue;
+      if (!hGet_(rows[i], h, 'id', 0)) continue;
+      if (periodeId && String(hGet_(rows[i], h, 'periodeid', 1)) !== periodeId) continue;
       result.push({
-        id: rows[i][0], periodeId: rows[i][1], tanggal: rows[i][2],
-        keterangan: rows[i][3], nominal: Number(rows[i][4]) || 0,
-        sumber: rows[i][5], status: rows[i][6],
-        tanggalFound: rows[i][7], catatan: rows[i][8]
+        id: String(hGet_(rows[i], h, 'id', 0)),
+        periodeId: String(hGet_(rows[i], h, 'periodeid', 1)),
+        tanggal: toDateStr_(hGet_(rows[i], h, 'tanggal', 2)),
+        keterangan: String(hGet_(rows[i], h, 'keterangan', 3) || ''),
+        nominal: Number(hGet_(rows[i], h, 'nominal', 4)) || 0,
+        sumber: String(hGet_(rows[i], h, 'sumber', 5) || ''),
+        status: String(hGet_(rows[i], h, 'status', 6) || ''),
+        tanggalFound: toDateStr_(hGet_(rows[i], h, 'tanggalfound', 7)),
+        catatan: String(hGet_(rows[i], h, 'catatan', 8) || '')
       });
     }
-    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: result };
   } catch(e) {
     return { success: false, message: e.message };
@@ -1226,8 +1262,8 @@ function addPendingTransaction(data) {
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
     var id = generateID('PND');
-    sheet.appendRow([id, periode.id, data.tanggal, data.keterangan, Number(data.nominal) || 0,
-      data.sumber || 'Manual', 'Pending', '', data.catatan || '', new Date()]);
+    sheet.appendRow([id, periode.id, toDateStr_(data.tanggal), data.keterangan, Number(data.nominal) || 0,
+      data.sumber || 'Manual', 'Pending', '', data.catatan || '', toDateStr_(new Date())]);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
@@ -1316,9 +1352,9 @@ function updatePendingStatus(id, status, catatan) {
       if (rows[i][0] === id) {
         sheet.getRange(i + 1, 7, 1, 4).setValues([[
           status,
-          status === 'Found' ? new Date() : rows[i][7],
+          status === 'Found' ? toDateStr_(new Date()) : toDateStr_(rows[i][7]),
           catatan || rows[i][8],
-          new Date()
+          toDateStr_(new Date())
         ]]);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
@@ -1655,15 +1691,16 @@ function getJamaahBelumBayar(posNama) {
       }
     }
 
+    // Tentukan nama kolom yang dimaksud untuk lookup targetBayar dari anggota
+    var colName = mapPosNamaToIRColName(posFormula, posNama);
     var belumBayar = [], sudahBayar = [];
     for (var aid in anggotaMap) {
       var ang = anggotaMap[aid];
-      // Tentukan target bayar per anggota berdasarkan kolom
       var targetBayar = 0;
-      if (colIdx === 5) targetBayar = ang.ir;
-      else if (colIdx === 6) targetBayar = ang.ir10;
-      else if (colIdx === 8) targetBayar = ang.infakDaerah;
-      else if (colIdx === 9) targetBayar = ang.index;
+      if (colName === 'ir') targetBayar = ang.ir;
+      else if (colName === 'ir10') targetBayar = ang.ir10;
+      else if (colName === 'infakdaerah') targetBayar = ang.infakDaerah;
+      else if (colName === 'index') targetBayar = ang.index;
 
       if (sudahBayarMap[aid]) {
         sudahBayar.push({ id: aid, nama: ang.nama, noTelp: ang.noTelp, jumlahBayar: sudahBayarMap[aid] });
