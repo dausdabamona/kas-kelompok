@@ -152,6 +152,7 @@ var App = {
     var u = data.user || {};
     var inisial = (u.nama || 'U').charAt(0).toUpperCase();
     var isAdmin = u.role === 'ADMIN';
+    var isPenerobos = u.role === 'PENEROBOS';
     var periode = data.periode;
 
     var html = '<div class="page-content" style="padding-top:20px;">' +
@@ -185,14 +186,16 @@ var App = {
 
       '<div class="section-title mb-8">Menu</div>' +
       '<div class="menu-grid">' +
-        '<div class="menu-item' + (data.belumDirincikanCount > 0 ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()">' +
-          '<span class="icon">📖</span><span>Buku IR' + (data.belumDirincikanCount > 0 ? ' <span class="menu-badge">' + data.belumDirincikanCount + '</span>' : '') + '</span>' +
-        '</div>' +
-        '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' +
-        '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' +
+        (isPenerobos
+          ? '<div class="menu-item" style="border:2px solid var(--primary);background:#EFF6FF;" onclick="App.pagePenerobos()"><span class="icon">📋</span><span>Tagihan Infak</span></div>'
+          : '<div class="menu-item' + (data.belumDirincikanCount > 0 ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()">' +
+              '<span class="icon">📖</span><span>Buku IR' + (data.belumDirincikanCount > 0 ? ' <span class="menu-badge">' + data.belumDirincikanCount + '</span>' : '') + '</span>' +
+            '</div>') +
+        (!isPenerobos ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '') +
+        (!isPenerobos ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '') +
         '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' +
-        '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' +
-        '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' +
+        (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '') +
+        (!isPenerobos ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '') +
         (isAdmin ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
         '<div class="menu-item" onclick="App.loadDashboard()"><span class="icon">🔄</span><span>Refresh</span></div>' +
       '</div>' +
@@ -1721,6 +1724,127 @@ var App = {
       '<div class="tabs">' +
         '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderJamaahBelumBayar(App._jamaahBayarData, \'belum\')">Belum Infak <span class="badge">' + belum.length + '</span></button>' +
         '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderJamaahBelumBayar(App._jamaahBayarData, \'sudah\')">Sudah Infak <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
+      '</div>' +
+      (activeTab === 'belum' ? listBelum : listSudah)
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  // ─────────────────────────────────────────────────
+  // PENEROBOS — Dashboard Tagihan Infak
+  // ─────────────────────────────────────────────────
+  pagePenerobos: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat data tagihan...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.renderPenerobos(res);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getTagihanPenerobos();
+  },
+
+  renderPenerobos: function(res) {
+    this._penerobosData = res;
+    var summary = res.summary || [];
+
+    var cards = summary.map(function(pos, idx) {
+      var pct = pos.totalAnggota > 0 ? Math.round((pos.sudah / pos.totalAnggota) * 100) : 0;
+      var fillClass = pct >= 100 ? '' : pct >= 60 ? 'warning' : 'danger';
+      return '<div class="pos-card" style="cursor:pointer;" onclick="App.pagePenerobosDetail(' + idx + ')">' +
+        '<div class="pos-card-header">' +
+          '<div>' +
+            '<div class="pos-card-nama">' + pos.nama + '</div>' +
+            '<div class="text-small text-muted" style="margin-top:2px;">' + (pos.kategori || '') + '</div>' +
+            '<div class="progress-bar" style="width:100%;margin-top:6px;"><div class="progress-fill ' + fillClass + '" style="width:' + pct + '%;"></div></div>' +
+          '</div>' +
+          '<div style="text-align:right;min-width:60px;">' +
+            '<div style="font-size:18px;font-weight:700;color:' + (pct >= 100 ? 'var(--success)' : 'var(--danger)') + ';">' + pct + '%</div>' +
+            '<div class="text-small text-muted">' + pos.sudah + '/' + pos.totalAnggota + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:10px;margin-top:8px;">' +
+          '<div style="flex:1;text-align:center;background:#FEF2F2;border-radius:8px;padding:8px 0;">' +
+            '<div style="font-size:16px;font-weight:700;color:var(--danger);">' + pos.belum + '</div>' +
+            '<div style="font-size:11px;color:#6B7280;">Belum</div>' +
+          '</div>' +
+          '<div style="flex:1;text-align:center;background:#F0FDF4;border-radius:8px;padding:8px 0;">' +
+            '<div style="font-size:16px;font-weight:700;color:var(--success);">' + pos.sudah + '</div>' +
+            '<div style="font-size:11px;color:#6B7280;">Sudah</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="text-small text-muted" style="margin-top:6px;text-align:right;">Tap untuk detail →</div>' +
+      '</div>';
+    }).join('') || '<div class="info-box">Belum ada pos pemasukan aktif.</div>';
+
+    var periode = res.periode || {};
+    var html = this.pageWrapper('Dashboard Penerobos',
+      '<div class="card" style="margin-bottom:12px;">' +
+        '<div class="stat-row"><span class="stat-label">📅 Periode</span><span class="stat-value">' + (periode.nama || '-') + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">👥 Total Jamaah</span><span class="stat-value">' + ((summary[0] || {}).totalAnggota || 0) + '</span></div>' +
+      '</div>' +
+      '<div class="section-title mb-8">Status Infak per Pos</div>' +
+      cards
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  pagePenerobosDetail: function(idx) {
+    this.history.push('penerobos');
+    var pos = (this._penerobosData && this._penerobosData.summary) ? this._penerobosData.summary[idx] : null;
+    if (!pos) { this.showError('Data tidak ditemukan.'); return; }
+    this._penerobosDetail = pos;
+    this.renderPenerobosDetail(pos, 'belum');
+  },
+
+  renderPenerobosDetail: function(pos, activeTab) {
+    var belum = pos.belumBayar || [];
+    var sudah = pos.sudahBayar || [];
+
+    var listBelum = belum.length === 0
+      ? '<div class="text-center text-muted" style="padding:32px;">🎉 Semua jamaah sudah infak!</div>'
+      : belum.map(function(a) {
+          var wa = a.noTelp ? a.noTelp.replace(/[^0-9]/g, '') : '';
+          var waBtn = wa
+            ? '<a href="https://wa.me/62' + wa.replace(/^0/, '') + '?text=' + encodeURIComponent('Assalamu\'alaikum ' + a.nama + ', mohon segera melunasi ' + pos.nama + '. Jazakallah khair 🙏') + '" target="_blank" style="display:inline-block;background:#25D366;color:#fff;border-radius:6px;padding:4px 10px;font-size:12px;text-decoration:none;">WA</a>'
+            : '';
+          return '<div class="jamaah-card">' +
+            '<div class="jamaah-avatar" style="background:linear-gradient(135deg,#EF4444,#B91C1C);">' + (a.nama || 'J').charAt(0).toUpperCase() + '</div>' +
+            '<div class="jamaah-info">' +
+              '<div class="jamaah-nama">' + a.nama + '</div>' +
+              '<div class="jamaah-detail">' + (a.noTelp || 'No. HP tidak ada') + '</div>' +
+            '</div>' +
+            waBtn +
+          '</div>';
+        }).join('');
+
+    var listSudah = sudah.length === 0
+      ? '<div class="text-center text-muted" style="padding:32px;">Belum ada yang membayar.</div>'
+      : sudah.map(function(a) {
+          return '<div class="jamaah-card">' +
+            '<div class="jamaah-avatar" style="background:linear-gradient(135deg,var(--success),#047857);">' + (a.nama || 'J').charAt(0).toUpperCase() + '</div>' +
+            '<div class="jamaah-info">' +
+              '<div class="jamaah-nama">' + a.nama + '</div>' +
+              '<div class="jamaah-detail">' + (a.noTelp || '-') + '</div>' +
+              '<div class="jamaah-detail" style="color:var(--success);font-weight:600;">' + App.formatNumber(a.jumlah) + '</div>' +
+            '</div>' +
+            '<span class="status-badge lunas">✓</span>' +
+          '</div>';
+        }).join('');
+
+    var pct = pos.totalAnggota > 0 ? Math.round((pos.sudah / pos.totalAnggota) * 100) : 0;
+    var html = this.pageWrapper(pos.nama,
+      '<div class="card" style="margin-bottom:12px;">' +
+        '<div class="stat-row"><span class="stat-label">Total Jamaah</span><span class="stat-value">' + pos.totalAnggota + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Belum Infak</span><span class="stat-value text-danger">' + belum.length + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Sudah Infak</span><span class="stat-value text-success">' + sudah.length + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Progress</span><span class="stat-value">' + pct + '%</span></div>' +
+      '</div>' +
+      '<div class="tabs">' +
+        '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderPenerobosDetail(App._penerobosDetail, \'belum\')">Belum Infak <span class="badge">' + belum.length + '</span></button>' +
+        '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderPenerobosDetail(App._penerobosDetail, \'sudah\')">Sudah Infak <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
       '</div>' +
       (activeTab === 'belum' ? listBelum : listSudah)
     );

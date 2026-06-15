@@ -1777,6 +1777,105 @@ function getLaporanSetoran() {
   }
 }
 
+// ──────────────────────────────────────────────────────
+// PENEROBOS — Tagihan Infak per Jamaah
+// ──────────────────────────────────────────────────────
+
+// Ringkasan semua pos pemasukan (non-BukuIR) dan status bayar jamaah.
+// Digunakan oleh halaman dashboard Penerobos.
+function getTagihanPenerobos() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+    var periodeId = periode.id;
+
+    // Ambil semua jenis pemasukan aktif
+    var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    var jenisAktif = [];
+    if (sheetMaster && sheetMaster.getLastRow() > 1) {
+      var mRows = sheetMaster.getDataRange().getValues();
+      var mH = headerMap_(mRows[0]);
+      for (var i = 1; i < mRows.length; i++) {
+        if (!hGet_(mRows[i], mH, 'id', 0) && !hGet_(mRows[i], mH, 'kode', 0)) continue;
+        var id = String(hGet_(mRows[i], mH, 'kode', 0) || hGet_(mRows[i], mH, 'id', 0) || '');
+        var nama = String(hGet_(mRows[i], mH, 'namapemasukan', 1) || hGet_(mRows[i], mH, 'nama', 1) || '');
+        var kategori = String(hGet_(mRows[i], mH, 'kategori', 2) || '');
+        var statusP = String(hGet_(mRows[i], mH, 'status', 7) || hGet_(mRows[i], mH, 'status', 3) || '').toLowerCase();
+        if (statusP === 'nonaktif') continue;
+        if (!id || !nama) continue;
+        jenisAktif.push({ id: id, nama: nama, kategori: kategori });
+      }
+    }
+
+    // Ambil semua anggota aktif
+    var sheetAnggota = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    var anggotaList = [];
+    if (sheetAnggota && sheetAnggota.getLastRow() > 1) {
+      var angRows = sheetAnggota.getDataRange().getValues();
+      var angH = headerMap_(angRows[0]);
+      for (var i = 1; i < angRows.length; i++) {
+        var angId = String(hGet_(angRows[i], angH, 'id', 0) || '');
+        if (!angId) continue;
+        var statusAng = String(hGet_(angRows[i], angH, 'status', 4) || '').toLowerCase();
+        if (statusAng === 'nonaktif') continue;
+        anggotaList.push({
+          id: angId,
+          nama: String(hGet_(angRows[i], angH, 'nama', 1) || ''),
+          noTelp: String(hGet_(angRows[i], angH, 'notelp', 2) || '')
+        });
+      }
+    }
+    var totalAnggota = anggotaList.length;
+
+    // Baca semua penerimaan periode ini — bangun map jenisId → Set(anggotaId) + nominal
+    var bayarMap = {}; // jenisId → { [anggotaId]: nominal }
+    var sheetPmsk = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (sheetPmsk && sheetPmsk.getLastRow() > 1) {
+      var pRows = sheetPmsk.getDataRange().getValues();
+      var pH = headerMap_(pRows[0]);
+      for (var i = 1; i < pRows.length; i++) {
+        if (!hGet_(pRows[i], pH, 'id', 0)) continue;
+        if (String(hGet_(pRows[i], pH, 'periodeid', 1)) !== periodeId) continue;
+        var jId = String(hGet_(pRows[i], pH, 'jenisid', 2) || '');
+        var aId = String(hGet_(pRows[i], pH, 'anggotaid', 3) || '');
+        var nom = Number(hGet_(pRows[i], pH, 'nominal', 5)) || 0;
+        if (!jId) continue;
+        if (!bayarMap[jId]) bayarMap[jId] = {};
+        if (aId) bayarMap[jId][aId] = (bayarMap[jId][aId] || 0) + nom;
+      }
+    }
+
+    // Per jenis: hitung belum bayar
+    var summary = jenisAktif.map(function(j) {
+      var paid = bayarMap[j.id] || {};
+      var sudahBayar = [], belumBayar = [];
+      anggotaList.forEach(function(a) {
+        if (paid[a.id]) {
+          sudahBayar.push({ id: a.id, nama: a.nama, noTelp: a.noTelp, jumlah: paid[a.id] });
+        } else {
+          belumBayar.push({ id: a.id, nama: a.nama, noTelp: a.noTelp });
+        }
+      });
+      return {
+        id: j.id, nama: j.nama, kategori: j.kategori,
+        totalAnggota: totalAnggota,
+        sudah: sudahBayar.length,
+        belum: belumBayar.length,
+        belumBayar: belumBayar,
+        sudahBayar: sudahBayar
+      };
+    });
+
+    return { success: true, periode: periode, summary: summary };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 function getJamaahBelumBayar(jenisId) {
   try {
     var auth = checkAuth();
