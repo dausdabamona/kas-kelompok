@@ -16,18 +16,39 @@ function getPeriodeAktif() {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
     if (!sheet) return null;
     var data = sheet.getDataRange().getValues();
+    if (data.length < 2) return null;
+
+    // Temukan posisi kolom dari header row
+    var header = data[0];
+    var colStatus = -1, colNama = -1, colTglMulai = -1, colTglTutup = -1;
+    var colSaldoTunai = -1, colSaldoBank = -1;
+    for (var c = 0; c < header.length; c++) {
+      var h = String(header[c]).toLowerCase().trim();
+      if (h === 'status') colStatus = c;
+      else if (h.indexOf('nama') !== -1 || h.indexOf('periode') !== -1) { if (colNama < 0) colNama = c; }
+      else if (h.indexOf('mulai') !== -1) colTglMulai = c;
+      else if (h.indexOf('tutup') !== -1) colTglTutup = c;
+      else if (h.indexOf('tunai') !== -1) colSaldoTunai = c;
+      else if (h.indexOf('bank') !== -1) colSaldoBank = c;
+    }
+    // Fallback jika header tidak standar: asumsi ID=0, Nama=1, TglMulai=2, Status=3
+    if (colStatus < 0) colStatus = 3;
+    if (colNama < 0) colNama = 1;
+    if (colTglMulai < 0) colTglMulai = 2;
+
     for (var i = 1; i < data.length; i++) {
-      if (String(data[i][3]) === CONFIG.STATUS.OPEN) {
-        // Konversi Date ke string agar bisa di-serialize google.script.run
-        var tgl = data[i][2];
+      if (String(data[i][colStatus]).trim() === CONFIG.STATUS.OPEN) {
+        var tgl = colTglMulai >= 0 ? data[i][colTglMulai] : '';
         if (tgl instanceof Date) {
           try { tgl = Utilities.formatDate(tgl, Session.getScriptTimeZone(), 'dd/MM/yyyy'); } catch(e) { tgl = String(tgl); }
         }
         return {
           id: String(data[i][0] || ''),
-          nama: String(data[i][1] || ''),
-          tanggalMulai: tgl ? String(tgl) : '',
-          status: String(data[i][3] || '')
+          nama: String(colNama >= 0 ? (data[i][colNama] || '') : ''),
+          tanggalMulai: String(tgl || ''),
+          status: CONFIG.STATUS.OPEN,
+          saldoAwalTunai: colSaldoTunai >= 0 ? (Number(data[i][colSaldoTunai]) || 0) : 0,
+          saldoAwalBank: colSaldoBank >= 0 ? (Number(data[i][colSaldoBank]) || 0) : 0
         };
       }
     }
@@ -77,7 +98,7 @@ function getDashboardData() {
         if (sheetK && sheetK.getLastRow() > 1) namaKelompok = sheetK.getRange(2, 2).getValue() || namaKelompok;
       } catch(e) {}
       var saldo = { tunai: 0, bank: 0 };
-      try { saldo = calculateSaldo(periodeId); } catch(e) {}
+      try { saldo = calculateSaldo(periodeId, periode); } catch(e) {}
       saldoData = { namaKelompok: namaKelompok, tunai: saldo.tunai, bank: saldo.bank };
       try { cache.put(cacheKey, JSON.stringify(saldoData), 60); } catch(e) {}
     }
@@ -96,9 +117,11 @@ function getDashboardData() {
   }
 }
 
-function calculateSaldo(periodeId) {
+function calculateSaldo(periodeId, periode) {
   var ss = getSS_();
-  var tunai = 0, bank = 0;
+  // Mulai dari saldo awal periode (jika ada)
+  var tunai = (periode && periode.saldoAwalTunai) ? Number(periode.saldoAwalTunai) : 0;
+  var bank  = (periode && periode.saldoAwalBank)  ? Number(periode.saldoAwalBank)  : 0;
 
   var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
   if (sheetP && sheetP.getLastRow() > 1) {
@@ -540,7 +563,7 @@ function getRekapitulasiData() {
       }
     }
 
-    var saldo = calculateSaldo(periodeId);
+    var saldo = calculateSaldo(periodeId, periode);
 
     return {
       success: true,
@@ -1120,7 +1143,7 @@ function getRekonsiliasiData() {
     var periodeId = periode.id;
     var bankDaily = getBankDaily(periodeId);
     var bankPending = getBankPending(periodeId);
-    var saldo = calculateSaldo(periodeId);
+    var saldo = calculateSaldo(periodeId, periode);
 
     var totalPending = 0;
     (bankPending.data || []).forEach(function(p) {
