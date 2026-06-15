@@ -229,9 +229,15 @@ var App = {
     var today = new Date().toISOString().split('T')[0];
 
     if (tipe === 'masuk') {
-      var opts = (masterP || []).filter(function(p) { return p.status === 'Aktif'; }).map(function(p) {
+      // Filter lenient: tampilkan semua kecuali yang statusnya eksplisit 'Nonaktif'
+      var filteredP = (masterP || []).filter(function(p) {
+        var s = (p.status || '').toString().trim().toLowerCase();
+        return s !== 'nonaktif';
+      });
+      var opts = filteredP.map(function(p) {
         return '<option value="' + p.id + '" data-kategori="' + (p.kategori || '') + '">' + p.nama + '</option>';
       }).join('');
+      if (!opts) opts = '<option value="">-- Belum ada data. Tambah di Setting > Pos Pemasukan --</option>';
       var angOpts = '<option value="">-- Pilih Jamaah --</option>' + (anggota || []).map(function(a) {
         return '<option value="' + a.id + '">' + a.nama + '</option>';
       }).join('');
@@ -249,9 +255,14 @@ var App = {
         '<div class="form-group"><label>Catatan</label><textarea id="trxCatatan" placeholder="Opsional..."></textarea></div>';
       setTimeout(function() { App.onJenisMasukChange(); }, 100);
     } else if (tipe === 'keluar') {
-      var opts = (masterPK || []).filter(function(p) { return p.status === 'Aktif'; }).map(function(p) {
+      var filteredPK = (masterPK || []).filter(function(p) {
+        var s = (p.status || '').toString().trim().toLowerCase();
+        return s !== 'nonaktif';
+      });
+      var opts = filteredPK.map(function(p) {
         return '<option value="' + p.id + '">' + p.nama + '</option>';
       }).join('');
+      if (!opts) opts = '<option value="">-- Belum ada data. Tambah di Setting > Pos Pengeluaran --</option>';
       formHtml =
         '<div class="form-group"><label>Jenis Pengeluaran</label><select id="trxJenis">' + opts + '</select></div>' +
         '<div class="form-group"><label>Nominal (Rp)</label>' +
