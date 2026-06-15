@@ -799,14 +799,22 @@ var App = {
     var item = (App._setoranData || [])[idx] || {};
     this._editSetoranItem = item;
     var targetRow = item.isAuto
-      ? '<div class="pos-card-row" style="margin-bottom:8px;"><span class="pos-card-label">Terkumpul dari IR</span><span class="pos-card-value">' + App.formatNumber(item.target) + '</span></div>'
+      ? '<div class="pos-card-row" style="margin-bottom:8px;"><span class="pos-card-label">' + (item.sumberKet || 'Otomatis') + '</span><span class="pos-card-value">' + App.formatNumber(item.target) + '</span></div>'
       : '<div class="form-group"><label>Target (Rp)</label><input type="number" id="sTarget" value="' + item.target + '"/></div>';
+    var kas = item.sumberKas || 'Tunai';
+    var kasRow = '<div class="form-group"><label>Sumber Kas (uang keluar dari)</label>' +
+      '<select id="sSumberKas"><option value="Tunai"' + (kas !== 'Bank' ? ' selected' : '') + '>Tunai</option><option value="Bank"' + (kas === 'Bank' ? ' selected' : '') + '>Bank</option></select></div>';
+    var pkInfo = item.pengeluaranRef
+      ? '<div class="info-box" style="margin-bottom:10px;">💸 Realisasi akan dicatat otomatis sebagai <b>pengeluaran kas</b>, sehingga saldo berkurang.</div>'
+      : '<div class="info-box" style="margin-bottom:10px;background:#FEF3C7;border-color:#F59E0B;">⚠️ Pos ini belum terhubung ke pengeluaran. Realisasi <b>tidak</b> mengurangi saldo. Atur di Setting → Pos Setoran.</div>';
     document.getElementById('setoranModal').innerHTML =
       '<div class="modal-overlay" onclick="App.closeModalSetoran(event)">' +
         '<div class="modal">' +
           '<div class="modal-title">Update Setoran: ' + item.nama + '</div>' +
           targetRow +
           '<div class="form-group"><label>Jumlah Disetor (Rp)</label><input type="number" id="sRealisasi" value="' + item.realisasi + '"/></div>' +
+          kasRow +
+          pkInfo +
           '<div class="form-group"><label>Catatan</label><input type="text" id="sCatatan" value="' + (item.catatan || '') + '"/></div>' +
           '<div id="setoranError"></div>' +
           '<button class="btn btn-primary" onclick="App.submitSetoran()">Simpan</button>' +
@@ -827,10 +835,12 @@ var App = {
   submitSetoran: function() {
     var item = this._editSetoranItem;
     var sTargetEl = document.getElementById('sTarget');
+    var kasEl = document.getElementById('sSumberKas');
     var data = {
       posId: item.id,
       target: sTargetEl ? (parseInt(sTargetEl.value) || 0) : item.target,
       realisasi: parseInt(document.getElementById('sRealisasi').value) || 0,
+      sumberKas: kasEl ? kasEl.value : 'Tunai',
       catatan: document.getElementById('sCatatan').value
     };
     document.getElementById('setoranError').innerHTML = '<div class="info-box">Menyimpan...</div>';
@@ -1141,6 +1151,7 @@ var App = {
     google.script.run
       .withSuccessHandler(function(res) {
         self._pemasukanListForSetoran = res.pemasukanList || [];
+        self._pengeluaranListForSetoran = res.pengeluaranList || [];
         self.renderSettingList('Pos Setoran', res.data || [], 'posSetoran');
       })
       .withFailureHandler(function(err) { self.showError(err.message); })
@@ -1205,6 +1216,9 @@ var App = {
       // Opsi jenis pemasukan (FK ke Master Pemasukan)
       var pmList = this._pemasukanListForSetoran || [];
       var pmOpts = pmList.map(function(p){ return '<option value="' + p.kode + '"' + (v.sumberRef === p.kode ? ' selected' : '') + '>' + p.nama + '</option>'; }).join('');
+      // Opsi pengeluaran (FK untuk catat realisasi setoran sebagai pengeluaran kas)
+      var pkList = this._pengeluaranListForSetoran || [];
+      var pkOpts = '<option value="">-- Tidak dicatat sebagai pengeluaran --</option>' + pkList.map(function(p){ return '<option value="' + p.kode + '"' + (v.pengeluaranRef === p.kode ? ' selected' : '') + '>' + p.nama + '</option>'; }).join('');
       fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
         '<div class="form-group"><label>Sumber Data</label><select id="sSumberTipe" onchange="App.onSumberTipeChange()">' +
           '<option value="manual"' + (st === 'manual' ? ' selected' : '') + '>Manual (isi target sendiri)</option>' +
@@ -1214,6 +1228,8 @@ var App = {
         '<div class="form-group" id="grpRefBukuIR" style="display:' + (st === 'bukuir' ? 'block' : 'none') + ';"><label>Kolom Buku IR</label><select id="sRefBukuIR">' + irOpts + '</select></div>' +
         '<div class="form-group" id="grpRefPemasukan" style="display:' + (st === 'pemasukan' ? 'block' : 'none') + ';"><label>Jenis Pemasukan</label><select id="sRefPemasukan"><option value="">-- Pilih --</option>' + pmOpts + '</select></div>' +
         '<div class="form-group" id="grpTarget" style="display:' + (st === 'manual' ? 'block' : 'none') + ';"><label>Target (Rp)</label><input type="number" id="sTarget" value="' + (v.target || 0) + '"/></div>' +
+        '<div class="form-group"><label>Catat Realisasi sebagai Pengeluaran</label><select id="sPengeluaranRef">' + pkOpts + '</select>' +
+          '<div class="text-small text-muted" style="margin-top:4px;">Saat realisasi setoran diinput, uang keluar dicatat otomatis ke pos pengeluaran ini agar saldo kas berkurang.</div></div>' +
         '<div class="form-group"><label>Status</label><select id="sStatus"><option value="Aktif"' + (v.status !== 'Nonaktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>';
     } else if (mode === 'musyawaroh') {
       fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
@@ -1273,6 +1289,7 @@ var App = {
       else if (st === 'pemasukan') data.sumberRef = document.getElementById('sRefPemasukan').value;
       else data.sumberRef = '';
       data.target = st === 'manual' ? (parseInt(document.getElementById('sTarget').value) || 0) : 0;
+      data.pengeluaranRef = document.getElementById('sPengeluaranRef').value;
       data.status = document.getElementById('sStatus').value;
       if (st === 'pemasukan' && !data.sumberRef) {
         document.getElementById('settingFormError').innerHTML = '<div class="error-box">Pilih jenis pemasukan terlebih dahulu.</div>';

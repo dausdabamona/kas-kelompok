@@ -151,13 +151,13 @@ function setupSheets() {
     },
     {
       name: CONFIG.SHEETS.POS_SETORAN,
-      headers: ['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target'],
-      note: 'Sumber Tipe: bukuir / pemasukan / manual | Sumber Ref: kolom Buku IR (ir/ir10/cicilan/infakdaerah/index) atau Kode Pemasukan | Status: Aktif / Nonaktif'
+      headers: ['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target', 'Pengeluaran Ref'],
+      note: 'Sumber Tipe: bukuir / pemasukan / manual | Sumber Ref: kolom Buku IR (ir/ir10/cicilan/infakdaerah/index) atau Kode Pemasukan | Pengeluaran Ref: Kode Master Pengeluaran (FK) untuk mencatat realisasi setoran sebagai pengeluaran kas | Status: Aktif / Nonaktif'
     },
     {
       name: CONFIG.SHEETS.SETORAN_DESA,
-      headers: ['ID', 'Pos ID', 'Target', 'Realisasi', 'Catatan', 'Updated By', 'Updated At'],
-      note: 'JANGAN edit manual — diisi dari halaman Setoran Desa'
+      headers: ['ID', 'PosID', 'PeriodeID', 'Realisasi', 'Catatan', 'Sumber Kas', 'Pengeluaran ID', 'Updated By', 'Updated At'],
+      note: 'JANGAN edit manual — diisi dari halaman Setoran Desa | Pengeluaran ID = FK ke Input Pengeluaran (otomatis)'
     },
     {
       name: CONFIG.SHEETS.BANK_DAILY,
@@ -309,8 +309,8 @@ function migratePosSetoran() {
   var rows = sheet.getDataRange().getValues();
   var log = [];
 
-  // Tulis header baru (kolom 3 & 4 berubah nama)
-  var newHeader = ['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target'];
+  // Tulis header baru (kolom 3 & 4 berubah nama, tambah Pengeluaran Ref)
+  var newHeader = ['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target', 'Pengeluaran Ref'];
   sheet.getRange(1, 1, 1, newHeader.length).setValues([newHeader]);
 
   for (var i = 1; i < rows.length; i++) {

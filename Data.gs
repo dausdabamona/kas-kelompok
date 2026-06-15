@@ -32,6 +32,22 @@ function hGet_(row, map, key, defaultIdx) {
   return idx >= 0 ? row[idx] : undefined;
 }
 
+// Pastikan sheet punya semua kolom header yang diperlukan; tambah di akhir jika belum ada.
+// Membuat penambahan kolom (evolusi skema) aman untuk sheet yang sudah berisi data.
+function ensureColumns_(sheet, headers) {
+  var lastCol = sheet.getLastColumn();
+  var existing = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  var map = headerMap_(existing);
+  var toAdd = [];
+  for (var i = 0; i < headers.length; i++) {
+    var key = String(headers[i]).toLowerCase().trim().replace(/[\s\/]/g, '');
+    if (map[key] === undefined) toAdd.push(headers[i]);
+  }
+  if (toAdd.length > 0) {
+    sheet.getRange(1, lastCol + 1, 1, toAdd.length).setValues([toAdd]);
+  }
+}
+
 // ──────────────────────────────────────────────────────
 // PERIODE
 // ──────────────────────────────────────────────────────
@@ -939,7 +955,8 @@ function getPosSetoranAll() {
         sumberTipe: String(hGet_(rows[i], h, 'sumbertipe', 2) || 'manual'),
         sumberRef: String(hGet_(rows[i], h, 'sumberref', 3) || ''),
         status: String(hGet_(rows[i], h, 'status', 4) || 'Aktif'),
-        target: Number(hGet_(rows[i], h, 'target', 5)) || 0
+        target: Number(hGet_(rows[i], h, 'target', 5)) || 0,
+        pengeluaranRef: String(hGet_(rows[i], h, 'pengeluaranref', 6) || '')
       });
     }
     // Daftar jenis pemasukan (untuk dropdown Sumber Ref tipe 'pemasukan')
@@ -952,7 +969,17 @@ function getPosSetoranAll() {
         pemasukanList.push({ kode: String(pRows[j][0]), nama: String(pRows[j][1] || '') });
       }
     }
-    return { success: true, data: result, pemasukanList: pemasukanList };
+    // Daftar jenis pengeluaran (untuk dropdown Pengeluaran Ref)
+    var pengeluaranList = [];
+    var sheetPK = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
+    if (sheetPK && sheetPK.getLastRow() > 1) {
+      var pkRows = sheetPK.getDataRange().getValues();
+      for (var j = 1; j < pkRows.length; j++) {
+        if (!pkRows[j][0]) continue;
+        pengeluaranList.push({ kode: String(pkRows[j][0]), nama: String(pkRows[j][1] || '') });
+      }
+    }
+    return { success: true, data: result, pemasukanList: pemasukanList, pengeluaranList: pengeluaranList };
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -966,13 +993,14 @@ function addPosSetoran(data) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.POS_SETORAN);
-      sheet.appendRow(['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target']);
+      sheet.appendRow(['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target', 'Pengeluaran Ref']);
     }
+    ensureColumns_(sheet, ['Pengeluaran Ref']);
     var id = generateID('PST');
     // Sumber Ref hanya relevan untuk tipe bukuir/pemasukan
     var sumberTipe = data.sumberTipe || 'manual';
     var sumberRef = (sumberTipe === 'manual') ? '' : (data.sumberRef || '');
-    sheet.appendRow([id, data.nama, sumberTipe, sumberRef, data.status || 'Aktif', Number(data.target) || 0]);
+    sheet.appendRow([id, data.nama, sumberTipe, sumberRef, data.status || 'Aktif', Number(data.target) || 0, data.pengeluaranRef || '']);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
@@ -987,12 +1015,16 @@ function updatePosSetoran(data) {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
+    ensureColumns_(sheet, ['Pengeluaran Ref']);
     var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var colPK = h['pengeluaranref'] !== undefined ? h['pengeluaranref'] : 6;
     var sumberTipe = data.sumberTipe || 'manual';
     var sumberRef = (sumberTipe === 'manual') ? '' : (data.sumberRef || '');
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0] === data.id) {
         sheet.getRange(i + 1, 2, 1, 5).setValues([[data.nama, sumberTipe, sumberRef, data.status, Number(data.target) || 0]]);
+        sheet.getRange(i + 1, colPK + 1).setValue(data.pengeluaranRef || '');
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
@@ -1120,12 +1152,14 @@ function getRekapSetoran() {
       var s_perid = sHdr['periodeid'] !== undefined ? sHdr['periodeid'] : 2;
       var s_real = sHdr['realisasi'] !== undefined ? sHdr['realisasi'] : 3;
       var s_cat = sHdr['catatan'] !== undefined ? sHdr['catatan'] : 4;
+      var s_kas = sHdr['sumberkas'] !== undefined ? sHdr['sumberkas'] : -1;
       for (var i = 1; i < sRows.length; i++) {
         if (!sRows[i][0]) continue;
         // Filter per periode aktif jika ada PeriodeID
         if (periodeId && sRows[i][s_perid] && String(sRows[i][s_perid]) !== periodeId) continue;
         setoranMap[String(sRows[i][s_posid])] = {
-          id: sRows[i][0], realisasi: Number(sRows[i][s_real]) || 0, catatan: String(sRows[i][s_cat] || '')
+          id: sRows[i][0], realisasi: Number(sRows[i][s_real]) || 0, catatan: String(sRows[i][s_cat] || ''),
+          sumberKas: s_kas >= 0 ? String(sRows[i][s_kas] || '') : ''
         };
       }
     }
@@ -1180,6 +1214,7 @@ function getRekapSetoran() {
       var posNama = posRows[i][posH['nama'] !== undefined ? posH['nama'] : 1];
       var sumberTipe = String(posRows[i][posH['sumbertipe'] !== undefined ? posH['sumbertipe'] : 2] || 'manual').toLowerCase();
       var sumberRef = String(posRows[i][posH['sumberref'] !== undefined ? posH['sumberref'] : 3] || '');
+      var pengeluaranRef = String(posRows[i][posH['pengeluaranref'] !== undefined ? posH['pengeluaranref'] : 6] || '');
 
       // Hitung target sesuai sumber data (FK eksplisit — tidak ada tebak nama)
       var target = 0;
@@ -1207,9 +1242,11 @@ function getRekapSetoran() {
       result.push({
         id: posId, nama: posNama,
         sumberTipe: sumberTipe, sumberRef: sumberRef, sumberKet: sumberKet,
+        pengeluaranRef: pengeluaranRef,
         target: target, realisasi: realisasi, sisa: sisa, persen: pctReal,
         status: pctReal >= 100 ? 'Lunas' : 'Belum Lunas',
         catatan: setoranMap[posId] ? setoranMap[posId].catatan : '',
+        sumberKas: setoranMap[posId] ? (setoranMap[posId].sumberKas || 'Tunai') : 'Tunai',
         isAuto: sumberTipe !== 'manual'
       });
     }
@@ -1229,40 +1266,120 @@ function submitRealisasiSetoran(data) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.SETORAN_DESA);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.SETORAN_DESA);
-      // PeriodeID ditambah agar data bisa dipisah per periode
-      sheet.appendRow(['ID', 'PosID', 'PeriodeID', 'Realisasi', 'Catatan', 'UpdatedBy', 'UpdatedAt']);
+      sheet.appendRow(['ID', 'PosID', 'PeriodeID', 'Realisasi', 'Catatan', 'Sumber Kas', 'Pengeluaran ID', 'Updated By', 'Updated At']);
     }
+    // Pastikan kolom baru ada (evolusi skema aman)
+    ensureColumns_(sheet, ['Sumber Kas', 'Pengeluaran ID', 'Updated By', 'Updated At']);
+
+    var realisasi = Number(data.realisasi) || 0;
+    var sumberKas = data.sumberKas === 'Bank' ? 'Bank' : 'Tunai';
+
+    // Cari nama pos + pengeluaran ref untuk mencatat pengeluaran kas
+    var posNama = '', pengeluaranRef = '';
+    var sheetPos = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
+    if (sheetPos && sheetPos.getLastRow() > 1) {
+      var posRows = sheetPos.getDataRange().getValues();
+      var posH = headerMap_(posRows[0]);
+      for (var p = 1; p < posRows.length; p++) {
+        if (String(posRows[p][0]) === String(data.posId)) {
+          posNama = String(hGet_(posRows[p], posH, 'nama', 1) || '');
+          pengeluaranRef = String(hGet_(posRows[p], posH, 'pengeluaranref', 6) || '');
+          break;
+        }
+      }
+    }
+
     var rows = sheet.getDataRange().getValues();
     var hdr = headerMap_(rows[0]);
     var c_posid = hdr['posid'] !== undefined ? hdr['posid'] : 1;
     var c_perid = hdr['periodeid'] !== undefined ? hdr['periodeid'] : 2;
-    var found = false;
+    var c_real = hdr['realisasi'] !== undefined ? hdr['realisasi'] : 3;
+    var c_cat = hdr['catatan'] !== undefined ? hdr['catatan'] : 4;
+    var c_kas = hdr['sumberkas'] !== undefined ? hdr['sumberkas'] : 5;
+    var c_pkid = hdr['pengeluaranid'] !== undefined ? hdr['pengeluaranid'] : 6;
+    var c_uby = hdr['updatedby'] !== undefined ? hdr['updatedby'] : 7;
+    var c_uat = hdr['updatedat'] !== undefined ? hdr['updatedat'] : 8;
+
+    var found = false, existingPkId = '', rowNum = -1;
     for (var i = 1; i < rows.length; i++) {
-      // Match per posId DAN periodeId agar tiap periode independen
       if (String(rows[i][c_posid]) === String(data.posId) && String(rows[i][c_perid]) === String(periode.id)) {
-        var realisasiCol = hdr['realisasi'] !== undefined ? hdr['realisasi'] : 3;
-        var catatanCol = hdr['catatan'] !== undefined ? hdr['catatan'] : 4;
-        sheet.getRange(i + 1, realisasiCol + 1).setValue(Number(data.realisasi) || 0);
-        sheet.getRange(i + 1, catatanCol + 1).setValue(data.catatan || '');
-        sheet.getRange(i + 1, (hdr['updatedby'] !== undefined ? hdr['updatedby'] : 5) + 1).setValue(auth.user.email);
-        sheet.getRange(i + 1, (hdr['updatedat'] !== undefined ? hdr['updatedat'] : 6) + 1).setValue(toDateStr_(new Date()));
+        existingPkId = String(rows[i][c_pkid] || '');
+        rowNum = i + 1;
         found = true;
         break;
       }
     }
-    if (!found) {
+
+    // Catat realisasi sebagai pengeluaran kas (single source of truth untuk saldo).
+    // Hanya jika pos punya Pengeluaran Ref (FK) dan realisasi > 0.
+    var pkId = existingPkId;
+    if (pengeluaranRef) {
+      pkId = upsertSetoranPengeluaran_(existingPkId, {
+        jenisId: pengeluaranRef, periodeId: periode.id, nominal: realisasi,
+        sumberKas: sumberKas, catatan: 'Setoran Desa: ' + (posNama || data.posId) + (data.catatan ? ' — ' + data.catatan : ''),
+        email: auth.user.email
+      });
+    }
+
+    if (found) {
+      sheet.getRange(rowNum, c_real + 1).setValue(realisasi);
+      sheet.getRange(rowNum, c_cat + 1).setValue(data.catatan || '');
+      sheet.getRange(rowNum, c_kas + 1).setValue(sumberKas);
+      sheet.getRange(rowNum, c_pkid + 1).setValue(pkId || '');
+      sheet.getRange(rowNum, c_uby + 1).setValue(auth.user.email);
+      sheet.getRange(rowNum, c_uat + 1).setValue(toDateStr_(new Date()));
+    } else {
       var id = generateID('STR');
-      sheet.appendRow([id, data.posId, periode.id, Number(data.realisasi) || 0, data.catatan || '', auth.user.email, toDateStr_(new Date())]);
+      sheet.appendRow([id, data.posId, periode.id, realisasi, data.catatan || '', sumberKas, pkId || '', auth.user.email, toDateStr_(new Date())]);
     }
     try {
       var cache2 = CacheService.getScriptCache();
       cache2.remove('master_trx_data');
       cache2.remove('laporan_setoran_' + periode.id);
+      cache2.remove('dashboard_saldo');
     } catch(e) {}
+    logActivity(auth.user.email, 'SETORAN_DESA', (posNama || data.posId) + ': ' + realisasi);
     return { success: true };
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+// Buat atau perbarui satu baris Input Pengeluaran yang mewakili realisasi setoran desa.
+// Mengembalikan ID pengeluaran. Jika nominal 0, baris dikosongkan nominalnya (tetap ada untuk audit).
+function upsertSetoranPengeluaran_(existingId, info) {
+  var ss = getSS_();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.SHEETS.INPUT_PENGELUARAN);
+    sheet.appendRow(['ID', 'Periode ID', 'Jenis ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At']);
+  }
+  var rows = sheet.getDataRange().getValues();
+  var h = headerMap_(rows[0]);
+  var c_id = h['id'] !== undefined ? h['id'] : 0;
+  var c_jid = h['jenisid'] !== undefined ? h['jenisid'] : 2;
+  var c_tgl = h['tanggal'] !== undefined ? h['tanggal'] : 3;
+  var c_nom = h['nominal'] !== undefined ? h['nominal'] : 4;
+  var c_kas = h['sumberkas'] !== undefined ? h['sumberkas'] : 5;
+  var c_cat = h['catatan'] !== undefined ? h['catatan'] : 6;
+
+  if (existingId) {
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][c_id]) === String(existingId)) {
+        sheet.getRange(i + 1, c_jid + 1).setValue(info.jenisId);
+        sheet.getRange(i + 1, c_nom + 1).setValue(info.nominal);
+        sheet.getRange(i + 1, c_kas + 1).setValue(info.sumberKas);
+        sheet.getRange(i + 1, c_cat + 1).setValue(info.catatan);
+        sheet.getRange(i + 1, c_tgl + 1).setValue(toDateStr_(new Date()));
+        return existingId;
+      }
+    }
+  }
+  // Tidak ditemukan / belum ada → buat baru
+  var newId = generateID('PNK');
+  sheet.appendRow([newId, info.periodeId, info.jenisId, toDateStr_(new Date()),
+    info.nominal, info.sumberKas, info.catatan, info.email, toDateStr_(new Date())]);
+  return newId;
 }
 
 // ──────────────────────────────────────────────────────
