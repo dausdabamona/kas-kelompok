@@ -1550,23 +1550,41 @@ function hitungJumlahBulan(tglMulai) {
 
 // Kembalikan nama kolom header BUKU_IR yang sesuai dengan pos setoran.
 // Menggunakan nama kolom (bukan index numerik hardcoded) agar tidak rapuh.
+// PENTING: nama pos seperti "infak jumatan" TIDAK boleh dipetakan ke infakdaerah —
+// hanya nama yang secara eksplisit merujuk kolom Buku IR yang diizinkan.
 function mapPosNamaToIRColName(formula, nama) {
-  var hint = String(formula || nama || '').toLowerCase().trim();
-  if (hint === 'ir' || hint === 'col5' || hint === '5') return 'ir';
-  if (hint.indexOf('1/10') !== -1 || hint === 'ir10' || hint === 'ir 10' || hint === 'col6' || hint === '6') return 'ir10';
-  if (hint.indexOf('cicilan') !== -1 || hint === 'col7' || hint === '7') return 'cicilan';
-  if (hint.indexOf('infak') !== -1 || hint === 'col8' || hint === '8') return 'infakdaerah';
-  if (hint.indexOf('index') !== -1 || hint === 'col9' || hint === '9') return 'index';
-  // fallback: coba match nama pos ke header yang ada
-  if (hint.indexOf('ir') !== -1 && hint.indexOf('1/10') === -1) return 'ir';
+  var src = String(formula || nama || '').toLowerCase().trim();
+  var clean = src.replace(/[\s\/]/g, ''); // normalisasi sama seperti headerMap_
+
+  // IR — harus exact, hindari false-positive pada "cicilan" dsb
+  if (src === 'ir' || clean === 'ir' || src === 'col5' || src === '5') return 'ir';
+
+  // 1/10 IR — berbagai penulisan; clean '1/10ir' → '110ir', 'ir10', '110 ir'
+  if (src.indexOf('1/10') !== -1 || clean === 'ir10' || clean === '110ir' || src === 'col6' || src === '6') return 'ir10';
+
+  // Cicilan
+  if (src.indexOf('cicilan') !== -1 || src === 'col7' || src === '7') return 'cicilan';
+
+  // Infak Daerah — HARUS spesifik; "infak jumatan", "infak romadhon" TIDAK termasuk
+  if (clean === 'infakdaerah' || src === 'infak daerah' || src === 'col8' || src === '8') return 'infakdaerah';
+
+  // Index
+  if (src.indexOf('index') !== -1 || src === 'col9' || src === '9') return 'index';
+
   return '';
 }
 
-// Wrapper lama — masih dipakai oleh getJamaahBelumBayar; return index numerik via irColMap
+// Wrapper: return index numerik via irColMap.
+// Menangani dua kemungkinan header: 'IR10' (→ key 'ir10') atau '1/10 IR' (→ key '110ir').
 function mapPosNamaToBukuIRCol(formula, nama, irColMap) {
   var colName = mapPosNamaToIRColName(formula, nama);
   if (!colName || !irColMap) return -1;
-  return irColMap[colName] !== undefined ? irColMap[colName] : -1;
+  if (irColMap[colName] !== undefined) return irColMap[colName];
+  // Fallback alias: headerMap_ pada '1/10 IR' → '110ir', sedangkan kita return 'ir10' (dan sebaliknya)
+  var alias = { 'ir10': '110ir', '110ir': 'ir10' };
+  var alt = alias[colName];
+  if (alt && irColMap[alt] !== undefined) return irColMap[alt];
+  return -1;
 }
 
 function getLaporanSetoran() {
