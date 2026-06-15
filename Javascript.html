@@ -244,7 +244,7 @@ var App = {
       formHtml =
         '<div class="form-group"><label>Jenis Pemasukan</label>' +
         '<select id="trxJenis" onchange="App.onJenisMasukChange()">' + opts + '</select></div>' +
-        '<div id="jamaahGroup" style="display:none;" class="form-group"><label>Jamaah</label>' +
+        '<div id="jamaahGroup" style="display:none;" class="form-group"><label id="jamaahLabel">Jamaah</label>' +
         '<select id="trxAnggota">' + angOpts + '</select></div>' +
         '<div class="form-group"><label>Nominal (Rp)</label>' +
         '<input type="number" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
@@ -300,8 +300,22 @@ var App = {
     if (!sel) return;
     var opt = sel.options[sel.selectedIndex];
     var kategori = opt ? (opt.getAttribute('data-kategori') || '') : '';
+    var isBukuIR = kategori.toLowerCase().indexOf('buku ir') !== -1;
     var grp = document.getElementById('jamaahGroup');
-    if (grp) grp.style.display = kategori === 'Buku IR' ? 'block' : 'none';
+    var lbl = document.getElementById('jamaahLabel');
+    if (grp) {
+      grp.style.display = isBukuIR ? 'block' : 'none';
+      // Reset value saat field disembunyikan
+      if (!isBukuIR) {
+        var sel2 = document.getElementById('trxAnggota');
+        if (sel2) sel2.value = '';
+      }
+    }
+    if (lbl) {
+      lbl.innerHTML = isBukuIR
+        ? 'Jamaah <span style="color:var(--danger);font-weight:700;">* WAJIB</span>'
+        : 'Jamaah';
+    }
   },
 
   onNominalInput: function() {
@@ -328,6 +342,15 @@ var App = {
       data.sumberKas = document.getElementById('trxSumber').value;
       data.anggotaId = (document.getElementById('trxAnggota') || {}).value || '';
       data.catatan = document.getElementById('trxCatatan').value;
+      // Validasi: Buku IR wajib pilih jamaah
+      var jenisOpt = document.getElementById('trxJenis');
+      var opt = jenisOpt ? jenisOpt.options[jenisOpt.selectedIndex] : null;
+      var kategori = opt ? (opt.getAttribute('data-kategori') || '') : '';
+      if (kategori.toLowerCase().indexOf('buku ir') !== -1 && !data.anggotaId) {
+        document.getElementById('trxError').innerHTML = '<div class="error-box">⚠️ Pilih Jamaah terlebih dahulu untuk jenis Buku IR.</div>';
+        document.getElementById('jamaahGroup').scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
     } else if (tipe === 'keluar') {
       data.jenisId = document.getElementById('trxJenis').value;
       data.sumberKas = document.getElementById('trxSumber').value;
