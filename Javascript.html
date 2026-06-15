@@ -410,6 +410,11 @@ var App = {
     this._bukuIRData = data;
     var belum = data.belumDirincikan || [];
     var sudah = data.sudahDirincikan || [];
+
+    // Simpan map id→item agar onclick tidak passing JSON ke HTML
+    this._bukuIRMap = {};
+    belum.concat(sudah).forEach(function(it) { App._bukuIRMap[it.id] = it; });
+
     var qLen = this.getQueue().length;
     var queueBanner = qLen > 0
       ? '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">' +
@@ -421,7 +426,7 @@ var App = {
     var listBelum = belum.length === 0
       ? '<div class="text-center text-muted" style="padding:32px;">Semua sudah dirincikan 👍</div>'
       : belum.map(function(item) {
-          return '<div class="card" style="cursor:pointer;" onclick="App.pageRincianIR(' + JSON.stringify(item).replace(/'/g, '&#39;') + ')">' +
+          return '<div class="card" style="cursor:pointer;" onclick="App.pageRincianIR(\'' + item.id + '\')">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
               '<div>' +
                 '<div class="font-bold">' + (item.anggota ? item.anggota.nama : item.anggotaId || 'Umum') + '</div>' +
@@ -463,8 +468,11 @@ var App = {
     document.getElementById('app').innerHTML = html;
   },
 
-  pageRincianIR: function(item) {
+  pageRincianIR: function(itemOrId) {
     this.history.push('bukuIR');
+    // Terima ID string (dari onclick) atau objek langsung
+    var item = (typeof itemOrId === 'string') ? (this._bukuIRMap && this._bukuIRMap[itemOrId]) : itemOrId;
+    if (!item) { this.showError('Data tidak ditemukan. Silakan buka ulang Buku IR.'); return; }
     this._rincianItem = item;
     var anggota = item.anggota || {};
     var total = item.nominal;
