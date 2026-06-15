@@ -17,6 +17,7 @@ const CONFIG = {
     BANK_DAILY: 'Bank Daily',
     BANK_PENDING: 'Bank Pending',
     SALDO_TUTUP_BUKU: 'Saldo Tutup Buku',
+    PEMBELAAN: 'Pembelaan',
     LOG: 'Activity Log',
   },
   ROLES: {

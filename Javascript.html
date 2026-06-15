@@ -1731,64 +1731,214 @@ var App = {
   },
 
   // ─────────────────────────────────────────────────
-  // PENEROBOS — Dashboard Tagihan Infak
+  // PENEROBOS — Dashboard (3 tab: Buku IR, Infak, Pembelaan)
   // ─────────────────────────────────────────────────
-  pagePenerobos: function() {
+  pagePenerobos: function(activeTab) {
     this.history.push('dashboard');
-    this.showLoading('Memuat data tagihan...');
+    activeTab = activeTab || 'bukuir';
+    this._penerobosTab = activeTab;
+    this.showLoading('Memuat data...');
+    var self = this;
+    if (activeTab === 'bukuir') {
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (!res.success) { self.showError(res.message); return; }
+          self._bukuIRBelumSerah = res;
+          self.renderPenerobosHome();
+        })
+        .withFailureHandler(function(err) { self.showError(err.message); })
+        .getBukuIRBelumSerah();
+    } else if (activeTab === 'infak') {
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (!res.success) { self.showError(res.message); return; }
+          self._penerobosData = res;
+          self.renderPenerobosHome();
+        })
+        .withFailureHandler(function(err) { self.showError(err.message); })
+        .getTagihanPenerobos();
+    } else {
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (!res.success) { self.showError(res.message); return; }
+          self._pembelaanData = res;
+          self.renderPenerobosHome();
+        })
+        .withFailureHandler(function(err) { self.showError(err.message); })
+        .getPembelaanData();
+    }
+  },
+
+  renderPenerobosHome: function() {
+    var tab = this._penerobosTab || 'bukuir';
+    var content = '';
+
+    if (tab === 'bukuir') {
+      var d = this._bukuIRBelumSerah || {};
+      var belum = d.belumSerah || [], sudah = d.sudahSerah || [];
+      var listB = belum.length === 0
+        ? '<div class="text-center text-muted" style="padding:32px;">Semua buku IR sudah diserahkan 👍</div>'
+        : belum.map(function(a) {
+            var wa = (a.noTelp || '').replace(/[^0-9]/g, '');
+            var waBtn = wa ? '<a href="https://wa.me/62' + wa.replace(/^0/,'') + '?text=' + encodeURIComponent('Assalamu\'alaikum ' + a.nama + ', mohon segera menyerahkan Buku IR. Jazakallah khair') + '" target="_blank" style="background:#25D366;color:#fff;border-radius:6px;padding:4px 10px;font-size:12px;text-decoration:none;white-space:nowrap;">WA</a>' : '';
+            return '<div class="jamaah-card">' +
+              '<div class="jamaah-avatar" style="background:linear-gradient(135deg,#F59E0B,#B45309);">' + (a.nama||'J').charAt(0).toUpperCase() + '</div>' +
+              '<div class="jamaah-info">' +
+                '<div class="jamaah-nama">' + a.nama + '</div>' +
+                '<div class="jamaah-detail">' + App.formatNumber(a.nominal) + ' · ' + App.formatDate(a.tanggal) + '</div>' +
+              '</div>' + waBtn +
+            '</div>';
+          }).join('');
+      content =
+        '<div style="display:flex;gap:10px;margin-bottom:12px;">' +
+          '<div style="flex:1;text-align:center;background:#FEF3C7;border-radius:10px;padding:12px 0;">' +
+            '<div style="font-size:22px;font-weight:700;color:#B45309;">' + belum.length + '</div>' +
+            '<div style="font-size:11px;color:#6B7280;">Belum Serah</div>' +
+          '</div>' +
+          '<div style="flex:1;text-align:center;background:#F0FDF4;border-radius:10px;padding:12px 0;">' +
+            '<div style="font-size:22px;font-weight:700;color:var(--success);">' + sudah.length + '</div>' +
+            '<div style="font-size:11px;color:#6B7280;">Sudah Serah</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="section-title mb-8">Belum Menyerahkan Buku IR</div>' +
+        listB;
+
+    } else if (tab === 'infak') {
+      var summary = (this._penerobosData || {}).summary || [];
+      content = summary.map(function(pos, idx) {
+        var pct = pos.totalAnggota > 0 ? Math.round((pos.sudah / pos.totalAnggota) * 100) : 0;
+        var fillClass = pct >= 100 ? '' : pct >= 60 ? 'warning' : 'danger';
+        return '<div class="pos-card" style="cursor:pointer;" onclick="App.pagePenerobosDetail(' + idx + ')">' +
+          '<div class="pos-card-header">' +
+            '<div style="flex:1;">' +
+              '<div class="pos-card-nama">' + pos.nama + '</div>' +
+              '<div class="progress-bar" style="margin-top:6px;"><div class="progress-fill ' + fillClass + '" style="width:' + pct + '%;"></div></div>' +
+            '</div>' +
+            '<div style="text-align:right;padding-left:12px;">' +
+              '<div style="font-size:18px;font-weight:700;color:' + (pct>=100?'var(--success)':'var(--danger)') + ';">' + pct + '%</div>' +
+              '<div class="text-small text-muted">' + pos.sudah + '/' + pos.totalAnggota + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;margin-top:8px;">' +
+            '<div style="flex:1;text-align:center;background:#FEF2F2;border-radius:8px;padding:6px 0;"><div style="font-weight:700;color:var(--danger);">' + pos.belum + '</div><div style="font-size:11px;color:#6B7280;">Belum</div></div>' +
+            '<div style="flex:1;text-align:center;background:#F0FDF4;border-radius:8px;padding:6px 0;"><div style="font-weight:700;color:var(--success);">' + pos.sudah + '</div><div style="font-size:11px;color:#6B7280;">Sudah</div></div>' +
+          '</div>' +
+        '</div>';
+      }).join('') || '<div class="info-box">Belum ada pos pemasukan aktif.</div>';
+
+    } else {
+      // Tab pembelaan
+      var pd = this._pembelaanData || {};
+      content = this._buildPembelaanContent(pd);
+    }
+
+    var html = this.pageWrapper('Dashboard Penerobos',
+      '<div class="tabs">' +
+        '<button class="tab-btn' + (tab==='bukuir'?' active':'') + '" onclick="App.pagePenerobos(\'bukuir\')">📖 Buku IR</button>' +
+        '<button class="tab-btn' + (tab==='infak'?' active':'') + '" onclick="App.pagePenerobos(\'infak\')">💰 Infak</button>' +
+        '<button class="tab-btn' + (tab==='pembelaan'?' active':'') + '" onclick="App.pagePenerobos(\'pembelaan\')">📝 Pembelaan</button>' +
+      '</div>' +
+      content
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  _buildPembelaanContent: function(pd) {
+    var belum = pd.belum || [], lunas = pd.lunas || [];
+    var today = new Date().toISOString().split('T')[0];
+
+    var listBelum = belum.length === 0
+      ? '<div class="text-center text-muted" style="padding:20px;">Belum ada kesanggupan tercatat.</div>'
+      : belum.map(function(r) {
+          var lewat = r.tanggalJanji && r.tanggalJanji < today;
+          var borderColor = lewat ? '#EF4444' : '#F59E0B';
+          var tag = lewat ? '<span style="font-size:10px;background:#FEE2E2;color:#B91C1C;border-radius:4px;padding:1px 6px;">Terlambat</span>' : '<span style="font-size:10px;background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 6px;">Menunggu</span>';
+          return '<div style="border:1.5px solid ' + borderColor + ';border-radius:12px;padding:12px;margin-bottom:10px;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+              '<div>' +
+                '<div style="font-weight:700;">' + r.anggotaNama + '</div>' +
+                '<div class="text-small text-muted">Sanggup: ' + App.formatNumber(r.nominal) + '</div>' +
+                '<div class="text-small text-muted">Janji bayar: ' + App.formatDate(r.tanggalJanji) + '</div>' +
+                (r.catatan ? '<div class="text-small text-muted">' + r.catatan + '</div>' : '') +
+              '</div>' + tag +
+            '</div>' +
+            '<div style="display:flex;gap:8px;margin-top:8px;">' +
+              '<button class="btn btn-success btn-sm" style="flex:1;" onclick="App.markLunasPembelaan(\'' + r.id + '\')">✓ Lunas</button>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+
+    var listLunas = lunas.length === 0
+      ? '<div class="text-center text-muted" style="padding:20px;">Belum ada yang lunas.</div>'
+      : lunas.map(function(r) {
+          return '<div class="jamaah-card">' +
+            '<div class="jamaah-avatar" style="background:linear-gradient(135deg,var(--success),#047857);">' + (r.anggotaNama||'J').charAt(0).toUpperCase() + '</div>' +
+            '<div class="jamaah-info">' +
+              '<div class="jamaah-nama">' + r.anggotaNama + '</div>' +
+              '<div class="jamaah-detail">' + App.formatNumber(r.nominal) + ' · Lunas ' + App.formatDate(r.lunasAt) + '</div>' +
+            '</div>' +
+            '<span class="status-badge lunas">Lunas</span>' +
+          '</div>';
+        }).join('');
+
+    var angOpts = '<option value="">-- Pilih Jamaah --</option>' + (pd.anggotaList || []).map(function(a){
+      return '<option value="' + a.id + '">' + a.nama + '</option>';
+    }).join('');
+
+    return '<div class="card" style="margin-bottom:12px;">' +
+        '<div class="section-title mb-8">+ Input Kesanggupan Baru</div>' +
+        '<div class="form-group"><label>Jamaah</label><select id="pbAnggota">' + angOpts + '</select></div>' +
+        '<div class="form-group"><label>Nominal Sanggup (Rp)</label><input type="number" id="pbNominal" placeholder="0" min="0"/></div>' +
+        '<div class="form-group"><label>Janji Bayar</label><input type="date" id="pbTanggal" value="' + today + '"/></div>' +
+        '<div class="form-group"><label>Catatan</label><input type="text" id="pbCatatan" placeholder="Opsional..."/></div>' +
+        '<div id="pbError"></div>' +
+        '<button class="btn btn-primary" onclick="App.submitPembelaan()">Simpan Kesanggupan</button>' +
+      '</div>' +
+      '<div class="section-title mb-8">Menunggu Pembayaran <span class="badge">' + belum.length + '</span></div>' +
+      listBelum +
+      '<div class="section-title mb-8" style="margin-top:16px;">Sudah Lunas <span class="badge" style="background:var(--success);">' + lunas.length + '</span></div>' +
+      listLunas;
+  },
+
+  submitPembelaan: function() {
+    var anggotaId = (document.getElementById('pbAnggota') || {}).value || '';
+    var nominal = parseInt((document.getElementById('pbNominal') || {}).value) || 0;
+    var tanggalJanji = (document.getElementById('pbTanggal') || {}).value || '';
+    var catatan = (document.getElementById('pbCatatan') || {}).value || '';
+    var errEl = document.getElementById('pbError');
+    if (!anggotaId) { if(errEl) errEl.innerHTML = '<div class="error-box">Pilih jamaah terlebih dahulu.</div>'; return; }
+    if (nominal <= 0) { if(errEl) errEl.innerHTML = '<div class="error-box">Nominal harus lebih dari 0.</div>'; return; }
+    if (errEl) errEl.innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
     google.script.run
       .withSuccessHandler(function(res) {
-        if (!res.success) { self.showError(res.message); return; }
-        self.renderPenerobos(res);
+        if (res.success) {
+          self.toast('Kesanggupan berhasil disimpan ✓');
+          self.pagePenerobos('pembelaan');
+        } else {
+          if (errEl) errEl.innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
       })
-      .withFailureHandler(function(err) { self.showError(err.message); })
-      .getTagihanPenerobos();
+      .withFailureHandler(function(err) {
+        if (errEl) errEl.innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .submitKesanggupanPembelaan({ anggotaId: anggotaId, nominal: nominal, tanggalJanji: tanggalJanji, catatan: catatan });
   },
 
-  renderPenerobos: function(res) {
-    this._penerobosData = res;
-    var summary = res.summary || [];
-
-    var cards = summary.map(function(pos, idx) {
-      var pct = pos.totalAnggota > 0 ? Math.round((pos.sudah / pos.totalAnggota) * 100) : 0;
-      var fillClass = pct >= 100 ? '' : pct >= 60 ? 'warning' : 'danger';
-      return '<div class="pos-card" style="cursor:pointer;" onclick="App.pagePenerobosDetail(' + idx + ')">' +
-        '<div class="pos-card-header">' +
-          '<div>' +
-            '<div class="pos-card-nama">' + pos.nama + '</div>' +
-            '<div class="text-small text-muted" style="margin-top:2px;">' + (pos.kategori || '') + '</div>' +
-            '<div class="progress-bar" style="width:100%;margin-top:6px;"><div class="progress-fill ' + fillClass + '" style="width:' + pct + '%;"></div></div>' +
-          '</div>' +
-          '<div style="text-align:right;min-width:60px;">' +
-            '<div style="font-size:18px;font-weight:700;color:' + (pct >= 100 ? 'var(--success)' : 'var(--danger)') + ';">' + pct + '%</div>' +
-            '<div class="text-small text-muted">' + pos.sudah + '/' + pos.totalAnggota + '</div>' +
-          '</div>' +
-        '</div>' +
-        '<div style="display:flex;gap:10px;margin-top:8px;">' +
-          '<div style="flex:1;text-align:center;background:#FEF2F2;border-radius:8px;padding:8px 0;">' +
-            '<div style="font-size:16px;font-weight:700;color:var(--danger);">' + pos.belum + '</div>' +
-            '<div style="font-size:11px;color:#6B7280;">Belum</div>' +
-          '</div>' +
-          '<div style="flex:1;text-align:center;background:#F0FDF4;border-radius:8px;padding:8px 0;">' +
-            '<div style="font-size:16px;font-weight:700;color:var(--success);">' + pos.sudah + '</div>' +
-            '<div style="font-size:11px;color:#6B7280;">Sudah</div>' +
-          '</div>' +
-        '</div>' +
-        '<div class="text-small text-muted" style="margin-top:6px;text-align:right;">Tap untuk detail →</div>' +
-      '</div>';
-    }).join('') || '<div class="info-box">Belum ada pos pemasukan aktif.</div>';
-
-    var periode = res.periode || {};
-    var html = this.pageWrapper('Dashboard Penerobos',
-      '<div class="card" style="margin-bottom:12px;">' +
-        '<div class="stat-row"><span class="stat-label">📅 Periode</span><span class="stat-value">' + (periode.nama || '-') + '</span></div>' +
-        '<div class="stat-row"><span class="stat-label">👥 Total Jamaah</span><span class="stat-value">' + ((summary[0] || {}).totalAnggota || 0) + '</span></div>' +
-      '</div>' +
-      '<div class="section-title mb-8">Status Infak per Pos</div>' +
-      cards
-    );
-    document.getElementById('app').innerHTML = html;
+  markLunasPembelaan: function(id) {
+    var self = this;
+    if (!confirm('Tandai sebagai lunas?')) return;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Ditandai lunas ✓');
+          self.pagePenerobos('pembelaan');
+        } else {
+          self.toast('Gagal: ' + res.message);
+        }
+      })
+      .withFailureHandler(function(err) { self.toast('Error: ' + err.message); })
+      .updateStatusPembelaan(id, 'Lunas');
   },
 
   pagePenerobosDetail: function(idx) {
@@ -1804,18 +1954,15 @@ var App = {
     var sudah = pos.sudahBayar || [];
 
     var listBelum = belum.length === 0
-      ? '<div class="text-center text-muted" style="padding:32px;">🎉 Semua jamaah sudah infak!</div>'
+      ? '<div class="text-center text-muted" style="padding:32px;">Semua jamaah sudah infak!</div>'
       : belum.map(function(a) {
-          var wa = a.noTelp ? a.noTelp.replace(/[^0-9]/g, '') : '';
+          var wa = (a.noTelp || '').replace(/[^0-9]/g, '');
           var waBtn = wa
-            ? '<a href="https://wa.me/62' + wa.replace(/^0/, '') + '?text=' + encodeURIComponent('Assalamu\'alaikum ' + a.nama + ', mohon segera melunasi ' + pos.nama + '. Jazakallah khair 🙏') + '" target="_blank" style="display:inline-block;background:#25D366;color:#fff;border-radius:6px;padding:4px 10px;font-size:12px;text-decoration:none;">WA</a>'
+            ? '<a href="https://wa.me/62' + wa.replace(/^0/,'') + '?text=' + encodeURIComponent('Assalamu\'alaikum ' + a.nama + ', mohon segera melunasi ' + pos.nama + '. Jazakallah khair') + '" target="_blank" style="background:#25D366;color:#fff;border-radius:6px;padding:4px 10px;font-size:12px;text-decoration:none;">WA</a>'
             : '';
           return '<div class="jamaah-card">' +
-            '<div class="jamaah-avatar" style="background:linear-gradient(135deg,#EF4444,#B91C1C);">' + (a.nama || 'J').charAt(0).toUpperCase() + '</div>' +
-            '<div class="jamaah-info">' +
-              '<div class="jamaah-nama">' + a.nama + '</div>' +
-              '<div class="jamaah-detail">' + (a.noTelp || 'No. HP tidak ada') + '</div>' +
-            '</div>' +
+            '<div class="jamaah-avatar" style="background:linear-gradient(135deg,#EF4444,#B91C1C);">' + (a.nama||'J').charAt(0).toUpperCase() + '</div>' +
+            '<div class="jamaah-info"><div class="jamaah-nama">' + a.nama + '</div><div class="jamaah-detail">' + (a.noTelp||'No. HP tidak ada') + '</div></div>' +
             waBtn +
           '</div>';
         }).join('');
@@ -1824,12 +1971,8 @@ var App = {
       ? '<div class="text-center text-muted" style="padding:32px;">Belum ada yang membayar.</div>'
       : sudah.map(function(a) {
           return '<div class="jamaah-card">' +
-            '<div class="jamaah-avatar" style="background:linear-gradient(135deg,var(--success),#047857);">' + (a.nama || 'J').charAt(0).toUpperCase() + '</div>' +
-            '<div class="jamaah-info">' +
-              '<div class="jamaah-nama">' + a.nama + '</div>' +
-              '<div class="jamaah-detail">' + (a.noTelp || '-') + '</div>' +
-              '<div class="jamaah-detail" style="color:var(--success);font-weight:600;">' + App.formatNumber(a.jumlah) + '</div>' +
-            '</div>' +
+            '<div class="jamaah-avatar" style="background:linear-gradient(135deg,var(--success),#047857);">' + (a.nama||'J').charAt(0).toUpperCase() + '</div>' +
+            '<div class="jamaah-info"><div class="jamaah-nama">' + a.nama + '</div><div class="jamaah-detail">' + App.formatNumber(a.jumlah) + '</div></div>' +
             '<span class="status-badge lunas">✓</span>' +
           '</div>';
         }).join('');
@@ -1843,8 +1986,8 @@ var App = {
         '<div class="stat-row"><span class="stat-label">Progress</span><span class="stat-value">' + pct + '%</span></div>' +
       '</div>' +
       '<div class="tabs">' +
-        '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderPenerobosDetail(App._penerobosDetail, \'belum\')">Belum Infak <span class="badge">' + belum.length + '</span></button>' +
-        '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderPenerobosDetail(App._penerobosDetail, \'sudah\')">Sudah Infak <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
+        '<button class="tab-btn' + (activeTab==='belum'?' active':'') + '" onclick="App.renderPenerobosDetail(App._penerobosDetail,\'belum\')">Belum Infak <span class="badge">' + belum.length + '</span></button>' +
+        '<button class="tab-btn' + (activeTab==='sudah'?' active':'') + '" onclick="App.renderPenerobosDetail(App._penerobosDetail,\'sudah\')">Sudah Infak <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
       '</div>' +
       (activeTab === 'belum' ? listBelum : listSudah)
     );

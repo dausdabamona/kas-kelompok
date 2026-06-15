@@ -1876,6 +1876,199 @@ function getTagihanPenerobos() {
   }
 }
 
+// Rekap Buku IR yang belum diserahkan untuk periode aktif
+// Dipakai tab "Buku IR" di dashboard Penerobos
+function getBukuIRBelumSerah() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+    var periodeId = periode.id;
+
+    // ID jenis yang kategorinya Buku IR
+    var bukuIRIds = [];
+    var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetMaster) {
+      var mRows = sheetMaster.getDataRange().getValues();
+      for (var i = 1; i < mRows.length; i++) {
+        if (String(mRows[i][2]).toLowerCase() === 'buku ir') bukuIRIds.push(String(mRows[i][0]));
+      }
+    }
+
+    // Siapa yang sudah punya rincian di BUKU_IR
+    var sudahRincianSet = {};
+    var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+    if (sheetIR && sheetIR.getLastRow() > 1) {
+      var irRows = sheetIR.getDataRange().getValues();
+      var irH = headerMap_(irRows[0]);
+      for (var i = 1; i < irRows.length; i++) {
+        if (!irRows[i][0]) continue;
+        if (periodeId && String(hGet_(irRows[i], irH, 'periodeid', 2)) !== periodeId) continue;
+        var tId = String(hGet_(irRows[i], irH, 'transaksiid', 1) || '');
+        if (tId) sudahRincianSet[tId] = true;
+      }
+    }
+
+    // Penerimaan jenis Buku IR periode ini — pisah belum/sudah rincian
+    var belumSerah = [], sudahSerah = [];
+    var sheetPmsk = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    var anggotaMap = {};
+    var sheetAng = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (sheetAng) {
+      var aRows = sheetAng.getDataRange().getValues();
+      for (var i = 1; i < aRows.length; i++) {
+        if (aRows[i][0]) anggotaMap[String(aRows[i][0])] = { nama: String(aRows[i][1] || ''), noTelp: String(aRows[i][2] || '') };
+      }
+    }
+    if (sheetPmsk && sheetPmsk.getLastRow() > 1) {
+      var pRows = sheetPmsk.getDataRange().getValues();
+      var pH = headerMap_(pRows[0]);
+      for (var i = 1; i < pRows.length; i++) {
+        if (!hGet_(pRows[i], pH, 'id', 0)) continue;
+        if (String(hGet_(pRows[i], pH, 'periodeid', 1)) !== periodeId) continue;
+        if (bukuIRIds.indexOf(String(hGet_(pRows[i], pH, 'jenisid', 2))) === -1) continue;
+        var trxId = String(hGet_(pRows[i], pH, 'id', 0));
+        var aId = String(hGet_(pRows[i], pH, 'anggotaid', 3) || '');
+        var ang = anggotaMap[aId] || { nama: aId, noTelp: '' };
+        var entry = {
+          trxId: trxId, anggotaId: aId, nama: ang.nama, noTelp: ang.noTelp,
+          nominal: Number(hGet_(pRows[i], pH, 'nominal', 5)) || 0,
+          tanggal: toDateStr_(hGet_(pRows[i], pH, 'tanggal', 4))
+        };
+        if (sudahRincianSet[trxId]) sudahSerah.push(entry);
+        else belumSerah.push(entry);
+      }
+    }
+    belumSerah.sort(function(a,b){ return a.nama.localeCompare(b.nama); });
+    sudahSerah.sort(function(a,b){ return a.nama.localeCompare(b.nama); });
+    return { success: true, belumSerah: belumSerah, sudahSerah: sudahSerah };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ──────────────────────────────────────────────────────
+// PEMBELAAN — Kesanggupan bayar dari jamaah
+// ──────────────────────────────────────────────────────
+function getPembelaanData() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+
+    // Daftar anggota aktif untuk dropdown
+    var anggotaList = [];
+    var sheetAng = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (sheetAng && sheetAng.getLastRow() > 1) {
+      var aRows = sheetAng.getDataRange().getValues();
+      var aH = headerMap_(aRows[0]);
+      for (var i = 1; i < aRows.length; i++) {
+        var aid = String(hGet_(aRows[i], aH, 'id', 0) || '');
+        if (!aid) continue;
+        var st = String(hGet_(aRows[i], aH, 'status', 4) || '').toLowerCase();
+        if (st === 'nonaktif') continue;
+        anggotaList.push({ id: aid, nama: String(hGet_(aRows[i], aH, 'nama', 1) || ''), noTelp: String(hGet_(aRows[i], aH, 'notelp', 2) || '') });
+      }
+    }
+
+    // Data pembelaan periode ini
+    var records = [];
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMBELAAN);
+    if (sheet && sheet.getLastRow() > 1) {
+      var rows = sheet.getDataRange().getValues();
+      var h = headerMap_(rows[0]);
+      for (var i = 1; i < rows.length; i++) {
+        if (!hGet_(rows[i], h, 'id', 0)) continue;
+        if (String(hGet_(rows[i], h, 'periodeid', 2)) !== String(periode.id)) continue;
+        records.push({
+          id: String(hGet_(rows[i], h, 'id', 0)),
+          anggotaId: String(hGet_(rows[i], h, 'anggotaid', 1) || ''),
+          anggotaNama: String(hGet_(rows[i], h, 'anggotnama', 3) || hGet_(rows[i], h, 'anggotnama', 3) || ''),
+          nominal: Number(hGet_(rows[i], h, 'nominalsanggup', 4)) || 0,
+          tanggalSanggup: toDateStr_(hGet_(rows[i], h, 'tanggalsanggup', 5)),
+          tanggalJanji: toDateStr_(hGet_(rows[i], h, 'tanggaljanji', 6)),
+          catatan: String(hGet_(rows[i], h, 'catatan', 7) || ''),
+          status: String(hGet_(rows[i], h, 'status', 8) || 'Belum'),
+          lunasAt: toDateStr_(hGet_(rows[i], h, 'lunasat', 9))
+        });
+      }
+    }
+
+    // Pisah belum/lunas, urutkan berdasar tanggal janji terdekat
+    var belum = records.filter(function(r){ return r.status !== 'Lunas'; });
+    var lunas = records.filter(function(r){ return r.status === 'Lunas'; });
+    belum.sort(function(a,b){ return (a.tanggalJanji||'').localeCompare(b.tanggalJanji||''); });
+
+    return { success: true, periode: periode, anggotaList: anggotaList, belum: belum, lunas: lunas };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function submitKesanggupanPembelaan(data) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+
+    // Cari nama anggota
+    var angNama = data.anggotaId;
+    var sheetAng = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (sheetAng) {
+      var aRows = sheetAng.getDataRange().getValues();
+      for (var i = 1; i < aRows.length; i++) {
+        if (String(aRows[i][0]) === String(data.anggotaId)) { angNama = String(aRows[i][1] || data.anggotaId); break; }
+      }
+    }
+
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMBELAAN);
+    if (!sheet) {
+      sheet = ss.insertSheet(CONFIG.SHEETS.PEMBELAAN);
+      sheet.appendRow(['ID','AnggotaID','PeriodeID','AnggotaNama','NominalSanggup','TanggalSanggup','TanggalJanji','Catatan','Status','LunasAt','CreatedBy','CreatedAt']);
+    }
+    var id = generateID('PBL');
+    sheet.appendRow([id, data.anggotaId, periode.id, angNama,
+      Number(data.nominal) || 0,
+      toDateStr_(new Date()), toDateStr_(data.tanggalJanji),
+      data.catatan || '', 'Belum', '', auth.user.email, toDateStr_(new Date())]);
+    logActivity(auth.user.email, 'PEMBELAAN_INPUT', angNama + ' sanggup ' + data.nominal);
+    return { success: true, id: id };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function updateStatusPembelaan(id, status) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMBELAAN);
+    if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var colStatus = (h['status'] !== undefined ? h['status'] : 8) + 1;
+    var colLunas = (h['lunasat'] !== undefined ? h['lunasat'] : 9) + 1;
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) === String(id)) {
+        sheet.getRange(i + 1, colStatus).setValue(status);
+        if (status === 'Lunas') sheet.getRange(i + 1, colLunas).setValue(toDateStr_(new Date()));
+        logActivity(auth.user.email, 'PEMBELAAN_UPDATE', 'ID: ' + id + ' → ' + status);
+        return { success: true };
+      }
+    }
+    return { success: false, message: 'Data tidak ditemukan' };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 function getJamaahBelumBayar(jenisId) {
   try {
     var auth = checkAuth();
