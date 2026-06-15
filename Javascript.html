@@ -12,7 +12,8 @@ var App = {
         if (user) {
           self.currentUser = user;
           self.loadDashboard();
-          // Coba kirim antrian offline yang tertunda
+          // Tampilkan FAB jika ada antrian, coba kirim setelah 3 detik
+          self.updateSyncFab();
           setTimeout(function() { self.checkAndFlushQueue(); }, 3000);
         } else {
           self.renderLogin();
@@ -523,6 +524,7 @@ var App = {
 
     // Simpan ke antrian lokal dulu (offline-first)
     App.queueRincian(data);
+    App.updateSyncFab();
     document.getElementById('rincianError').innerHTML = '<div class="valid-indicator ok">✓ Tersimpan lokal. Mengirim ke server...</div>';
     var self = this;
 
@@ -589,16 +591,47 @@ var App = {
 
   checkAndFlushQueue: function() {
     var q = this.getQueue();
-    if (q.length === 0) return;
+    if (q.length === 0) { this.updateSyncFab(); return; }
+    var total = q.length;
     var self = this;
+    this.updateSyncFab('sending');
     this.flushRincianQueue(function(ok) {
       var remaining = self.getQueue().length;
       if (ok && remaining === 0) {
-        self.toast('✅ ' + q.length + ' rincian antrian berhasil dikirim');
+        self.toast('✅ ' + total + ' rincian berhasil dikirim ke server');
       } else if (remaining > 0) {
         self.toast('⏳ ' + remaining + ' rincian masih dalam antrian (offline)', 3000);
       }
+      self.updateSyncFab();
     });
+  },
+
+  // Floating Action Button untuk sync antrian
+  updateSyncFab: function(state) {
+    var fab = document.getElementById('sync-fab');
+    var q = this.getQueue();
+    var count = q.length;
+
+    if (count === 0 && state !== 'sending') {
+      if (fab) fab.style.display = 'none';
+      return;
+    }
+
+    if (!fab) {
+      fab = document.createElement('div');
+      fab.id = 'sync-fab';
+      fab.onclick = function() { App.checkAndFlushQueue(); };
+      document.body.appendChild(fab);
+    }
+
+    fab.style.display = 'flex';
+    if (state === 'sending') {
+      fab.innerHTML = '<span style="font-size:18px;animation:spin 1s linear infinite;display:inline-block;">↻</span><span style="font-size:12px;margin-left:4px;">Mengirim...</span>';
+      fab.style.background = '#F59E0B';
+    } else {
+      fab.innerHTML = '<span style="font-size:16px;">📤</span><span style="font-size:12px;margin-left:4px;">' + count + ' belum terkirim</span>';
+      fab.style.background = '#EF4444';
+    }
   },
 
   // ─────────────────────────────────────────────────
