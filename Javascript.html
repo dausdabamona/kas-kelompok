@@ -201,17 +201,21 @@ var App = {
   // ─────────────────────────────────────────────────
   pageTransaksi: function() {
     this.history.push('dashboard');
-    this.showLoading('Memuat...');
+    this.showLoading('Memuat data transaksi...');
     var self = this;
-    var masterP, masterPK, anggota;
-    var loaded = 0;
-    function checkDone() {
-      loaded++;
-      if (loaded === 3) self.renderTransaksiForm('masuk', masterP, masterPK, anggota);
-    }
-    google.script.run.withSuccessHandler(function(r) { masterP = r.data || []; checkDone(); }).withFailureHandler(function() { masterP = []; checkDone(); }).getMasterPemasukan();
-    google.script.run.withSuccessHandler(function(r) { masterPK = r.data || []; checkDone(); }).withFailureHandler(function() { masterPK = []; checkDone(); }).getMasterPengeluaran();
-    google.script.run.withSuccessHandler(function(r) { anggota = r.data || []; checkDone(); }).withFailureHandler(function() { anggota = []; checkDone(); }).getAnggota();
+    google.script.run
+      .withSuccessHandler(function(r) {
+        if (r && r.success) {
+          self.renderTransaksiForm('masuk', r.pemasukan || [], r.pengeluaran || [], r.anggota || []);
+        } else {
+          self.showError((r && r.message) || 'Gagal memuat data');
+        }
+      })
+      .withFailureHandler(function(err) {
+        // Fallback: render form kosong agar tetap bisa dipakai
+        self.renderTransaksiForm('masuk', [], [], []);
+      })
+      .getTransaksiMasterData();
     this._masterP = null; this._masterPK = null; this._anggota = null;
   },
 

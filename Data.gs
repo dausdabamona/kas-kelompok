@@ -188,6 +188,64 @@ function submitTransaksi(data) {
 // ──────────────────────────────────────────────────────
 // MASTER DATA
 // ──────────────────────────────────────────────────────
+// MASTER DATA — satu fungsi untuk semua, dengan cache
+// ──────────────────────────────────────────────────────
+function getTransaksiMasterData() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var cache = CacheService.getScriptCache();
+    var cacheKey = 'master_trx_data';
+    var cached = cache.get(cacheKey);
+    if (cached) {
+      try {
+        var parsed = JSON.parse(cached);
+        parsed.success = true;
+        return parsed;
+      } catch(e) {}
+    }
+    var ss = getSS_();
+    // Pemasukan
+    var pemasukan = [];
+    var sheetP = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetP) {
+      var rp = sheetP.getDataRange().getValues();
+      for (var i = 1; i < rp.length; i++) {
+        if (rp[i][0]) pemasukan.push({ id: String(rp[i][0]), nama: String(rp[i][1]), kategori: String(rp[i][2] || ''), status: String(rp[i][3] || '') });
+      }
+    }
+    // Pengeluaran
+    var pengeluaran = [];
+    var sheetPK = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
+    if (sheetPK) {
+      var rpk = sheetPK.getDataRange().getValues();
+      for (var i = 1; i < rpk.length; i++) {
+        if (rpk[i][0]) pengeluaran.push({ id: String(rpk[i][0]), nama: String(rpk[i][1]), kategori: String(rpk[i][2] || ''), status: String(rpk[i][3] || '') });
+      }
+    }
+    // Anggota
+    var anggota = [];
+    var sheetA = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (sheetA) {
+      var ra = sheetA.getDataRange().getValues();
+      for (var i = 1; i < ra.length; i++) {
+        if (ra[i][0]) anggota.push({
+          id: String(ra[i][0]), nama: String(ra[i][1]), noTelp: String(ra[i][2] || ''),
+          alamat: String(ra[i][3] || ''), status: String(ra[i][4] || ''),
+          ir: Number(ra[i][5]) || 0, ir10: Number(ra[i][6]) || 0,
+          index: Number(ra[i][7]) || 0, infakDaerah: Number(ra[i][8]) || 0
+        });
+      }
+    }
+    var result = { pemasukan: pemasukan, pengeluaran: pengeluaran, anggota: anggota };
+    try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
+    result.success = true;
+    return result;
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 function getMasterPemasukan() {
   try {
     var ss = getSS_();
@@ -256,6 +314,7 @@ function addAnggota(data) {
     var id = generateID('ANG');
     sheet.appendRow([id, data.nama, data.noTelp || '', data.alamat || '', data.status || 'Aktif',
       Number(data.ir) || 0, Number(data.ir10) || 0, Number(data.index) || 0, Number(data.infakDaerah) || 0]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -274,6 +333,7 @@ function updateAnggota(data) {
       if (rows[i][0] === data.id) {
         sheet.getRange(i + 1, 2, 1, 8).setValues([[data.nama, data.noTelp || '', data.alamat || '',
           data.status || 'Aktif', Number(data.ir) || 0, Number(data.ir10) || 0, Number(data.index) || 0, Number(data.infakDaerah) || 0]]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
     }
@@ -364,6 +424,7 @@ function getBukuIRData() {
       }
     }
 
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: { belumDirincikan: belum, sudahDirincikan: sudah } };
   } catch(e) {
     return { success: false, message: e.message };
@@ -386,6 +447,7 @@ function submitRincianIR(data) {
       Number(data.ir) || 0, Number(data.ir10) || 0, Number(data.cicilan) || 0,
       Number(data.infakDaerah) || 0, Number(data.index) || 0, Number(data.total) || 0,
       auth.user.email, now]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -481,6 +543,7 @@ function addPosPemasukan(data) {
     }
     var id = generateID('PMS');
     sheet.appendRow([id, data.nama, data.kategori || 'Umum', data.status || 'Aktif']);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -498,6 +561,7 @@ function updatePosPemasukan(data) {
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0] === data.id) {
         sheet.getRange(i + 1, 2, 1, 3).setValues([[data.nama, data.kategori, data.status]]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
     }
@@ -539,6 +603,7 @@ function addPosPengeluaran(data) {
     }
     var id = generateID('PNK');
     sheet.appendRow([id, data.nama, data.kategori || 'Umum', data.status || 'Aktif']);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -556,6 +621,7 @@ function updatePosPengeluaran(data) {
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0] === data.id) {
         sheet.getRange(i + 1, 2, 1, 3).setValues([[data.nama, data.kategori, data.status]]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
     }
@@ -595,6 +661,7 @@ function getPosSetoranAll() {
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0]) result.push({ id: rows[i][0], nama: rows[i][1], tipe: rows[i][2], formula: rows[i][3], status: rows[i][4] });
     }
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: result };
   } catch(e) {
     return { success: false, message: e.message };
@@ -613,6 +680,7 @@ function addPosSetoran(data) {
     }
     var id = generateID('PST');
     sheet.appendRow([id, data.nama, data.tipe || 'manual', data.formula || '', data.status || 'Aktif', Number(data.target) || 0]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -630,6 +698,7 @@ function updatePosSetoran(data) {
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0] === data.id) {
         sheet.getRange(i + 1, 2, 1, 5).setValues([[data.nama, data.tipe, data.formula || '', data.status, Number(data.target) || 0]]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
     }
@@ -669,6 +738,7 @@ function getMusyawaroh() {
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0]) result.push({ id: rows[i][0], nama: rows[i][1], nilai: Number(rows[i][2]) || 0, keterangan: rows[i][3] });
     }
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: result };
   } catch(e) {
     return { success: false, message: e.message };
@@ -687,6 +757,7 @@ function addMusyawaroh(data) {
     }
     var id = generateID('MSY');
     sheet.appendRow([id, data.nama, Number(data.nilai) || 0, data.keterangan || '']);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -704,6 +775,7 @@ function updateMusyawaroh(data) {
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0] === data.id) {
         sheet.getRange(i + 1, 2, 1, 3).setValues([[data.nama, Number(data.nilai) || 0, data.keterangan || '']]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
     }
@@ -768,6 +840,7 @@ function getRekapSetoran() {
         catatan: setoranMap[posId] ? setoranMap[posId].catatan : ''
       });
     }
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: result };
   } catch(e) {
     return { success: false, message: e.message };
@@ -797,6 +870,7 @@ function submitRealisasiSetoran(data) {
       var id = generateID('STR');
       sheet.appendRow([id, data.posId, Number(data.target) || 0, Number(data.realisasi) || 0, data.catatan || '', auth.user.email, new Date()]);
     }
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true };
   } catch(e) {
     return { success: false, message: e.message };
@@ -817,6 +891,7 @@ function generatePDF(periodeId) {
     var folder = DriveApp.getRootFolder();
     var file = folder.createFile(blob);
     file.setName('Laporan Kas ' + (rekap.periode ? rekap.periode.nama : '') + '.html');
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, url: file.getUrl(), id: file.getId() };
   } catch(e) {
     return { success: false, message: e.message };
@@ -883,6 +958,7 @@ function getBankDaily(periodeId) {
         status: rows[i][9], catatan: rows[i][10]
       });
     }
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: result };
   } catch(e) {
     return { success: false, message: e.message };
@@ -906,6 +982,7 @@ function addBankTransaction(data) {
       Number(data.saldoAwal) || 0, Number(data.pemasukan) || 0, Number(data.pengeluaran) || 0,
       saldoAkhirTeoritis, Number(data.saldoAkhirActual) || 0, selisih,
       selisih === 0 ? 'Balance' : 'Selisih', data.catatan || '', new Date()]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -929,6 +1006,7 @@ function updateBankDaily(data) {
           saldoAkhirTeoritis, Number(data.saldoAkhirActual) || 0, selisih,
           selisih === 0 ? 'Balance' : 'Selisih', data.catatan || '', new Date()
         ]]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
     }
@@ -957,6 +1035,7 @@ function getBankPending(periodeId) {
         tanggalFound: rows[i][7], catatan: rows[i][8]
       });
     }
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: result };
   } catch(e) {
     return { success: false, message: e.message };
@@ -992,6 +1071,7 @@ function addPendingTransaction(data) {
     var id = generateID('PND');
     sheet.appendRow([id, periode.id, data.tanggal, data.keterangan, Number(data.nominal) || 0,
       data.sumber || 'Manual', 'Pending', '', data.catatan || '', new Date()]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -1043,6 +1123,7 @@ function submitRekonsiliasiBank(data) {
     var result = addBankTransaction(data);
     if (!result.success) return result;
     logActivity(auth.user.email, 'REKONSILIASI', 'Saldo actual: ' + data.saldoAkhirActual);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true };
   } catch(e) {
     return { success: false, message: e.message };
@@ -1059,6 +1140,7 @@ function findPendingTransactions(keyword) {
     var results = (bankPending.data || []).filter(function(p) {
       return p.status === 'Pending' && (!keyword || p.keterangan.toLowerCase().indexOf(keyword.toLowerCase()) !== -1);
     });
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: results };
   } catch(e) {
     return { success: false, message: e.message };
@@ -1081,6 +1163,7 @@ function updatePendingStatus(id, status, catatan) {
           catatan || rows[i][8],
           new Date()
         ]]);
+    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
     }
