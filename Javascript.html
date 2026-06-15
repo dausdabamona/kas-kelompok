@@ -299,8 +299,10 @@ var App = {
     var sel = document.getElementById('trxJenis');
     if (!sel) return;
     var opt = sel.options[sel.selectedIndex];
-    var kategori = opt ? (opt.getAttribute('data-kategori') || '') : '';
-    var isBukuIR = kategori.toLowerCase().indexOf('buku ir') !== -1;
+    // Cek dari nama option ATAU kategori — lebih toleran
+    var optText = opt ? (opt.textContent || opt.text || '').toLowerCase() : '';
+    var kategori = opt ? (opt.getAttribute('data-kategori') || '').toLowerCase() : '';
+    var isBukuIR = optText.indexOf('buku ir') !== -1 || kategori.indexOf('buku ir') !== -1;
     var grp = document.getElementById('jamaahGroup');
     var lbl = document.getElementById('jamaahLabel');
     if (grp) {
@@ -344,9 +346,11 @@ var App = {
       data.catatan = document.getElementById('trxCatatan').value;
       // Validasi: Buku IR wajib pilih jamaah
       var jenisOpt = document.getElementById('trxJenis');
-      var opt = jenisOpt ? jenisOpt.options[jenisOpt.selectedIndex] : null;
-      var kategori = opt ? (opt.getAttribute('data-kategori') || '') : '';
-      if (kategori.toLowerCase().indexOf('buku ir') !== -1 && !data.anggotaId) {
+      var opt2 = jenisOpt ? jenisOpt.options[jenisOpt.selectedIndex] : null;
+      var optText2 = opt2 ? (opt2.textContent || opt2.text || '').toLowerCase() : '';
+      var kat2 = opt2 ? (opt2.getAttribute('data-kategori') || '').toLowerCase() : '';
+      var isBukuIRValidasi = optText2.indexOf('buku ir') !== -1 || kat2.indexOf('buku ir') !== -1;
+      if (isBukuIRValidasi && !data.anggotaId) {
         document.getElementById('trxError').innerHTML = '<div class="error-box">⚠️ Pilih Jamaah terlebih dahulu untuk jenis Buku IR.</div>';
         document.getElementById('jamaahGroup').scrollIntoView({ behavior: 'smooth' });
         return;
