@@ -192,6 +192,7 @@ var App = {
         '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' +
         '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' +
         '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' +
+        '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' +
         (isAdmin ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
         '<div class="menu-item" onclick="App.loadDashboard()"><span class="icon">🔄</span><span>Refresh</span></div>' +
       '</div>' +
@@ -836,6 +837,123 @@ var App = {
         document.getElementById('setoranError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
       })
       .submitRealisasiSetoran(data);
+  },
+
+  // ─────────────────────────────────────────────────
+  // PEMERIKSAAN SALDO (sebelum tutup buku)
+  // ─────────────────────────────────────────────────
+  pagePemeriksaanSaldo: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat saldo sistem...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.renderPemeriksaanSaldo(res);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getPemeriksaanSaldo();
+  },
+
+  renderPemeriksaanSaldo: function(res) {
+    var self = this;
+    self._pemeriksaanData = res;
+    var sis = res.saldoSistem || { tunai: 0, bank: 0, total: 0 };
+    var t = res.terakhir;
+
+    var sysCard =
+      '<div class="card">' +
+        '<div class="section-title mb-8">Saldo Menurut Sistem</div>' +
+        '<div class="stat-row"><span class="stat-label">🪙 Kas Tunai</span><span class="stat-value">' + App.formatNumber(sis.tunai) + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">🏦 Kas Bank</span><span class="stat-value">' + App.formatNumber(sis.bank) + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Total</span><span class="stat-value text-success">' + App.formatNumber(sis.total) + '</span></div>' +
+      '</div>';
+
+    var lastInfo = t
+      ? '<div class="info-box" style="margin-bottom:12px;">Pemeriksaan terakhir (' + App.formatDate(t.tanggal) + '): Tunai ' + App.formatNumber(t.saldoTunaiAktual) + ', Bank ' + App.formatNumber(t.saldoBankAktual) + (t.status === 'Tutup' ? ' — <b>SUDAH TUTUP BUKU</b>' : '') + '</div>'
+      : '';
+
+    var defTunai = t ? t.saldoTunaiAktual : sis.tunai;
+    var defBank = t ? t.saldoBankAktual : sis.bank;
+
+    var form =
+      '<div class="card">' +
+        '<div class="section-title mb-8">Saldo Aktual (Hasil Hitung Fisik)</div>' +
+        '<div class="form-group"><label>🪙 Kas Tunai Aktual (Rp)</label>' +
+          '<input type="number" id="psTunai" value="' + defTunai + '" oninput="App.cekSelisihSaldo()"/></div>' +
+        '<div class="form-group"><label>🏦 Kas Bank Aktual (Rp)</label>' +
+          '<input type="number" id="psBank" value="' + defBank + '" oninput="App.cekSelisihSaldo()"/></div>' +
+        '<div id="selisihBox" class="mb-16"></div>' +
+        '<div class="form-group"><label>Catatan</label><textarea id="psCatatan" placeholder="Opsional — alasan selisih, dll"></textarea></div>' +
+        '<div id="psError"></div>' +
+        '<button class="btn btn-primary" onclick="App.submitPemeriksaanSaldo(false)">💾 Simpan Pemeriksaan</button>' +
+        '<button class="btn btn-outline mt-8" onclick="App.konfirmasiTutupBuku()">🔒 Tutup Buku Periode Ini</button>' +
+      '</div>';
+
+    var html = self.pageWrapper('Pemeriksaan Saldo',
+      lastInfo + sysCard + form
+    );
+    document.getElementById('app').innerHTML = html;
+    setTimeout(function() { App.cekSelisihSaldo(); }, 100);
+  },
+
+  cekSelisihSaldo: function() {
+    var res = this._pemeriksaanData;
+    if (!res) return;
+    var sis = res.saldoSistem || { tunai: 0, bank: 0 };
+    var aktTunai = parseInt(document.getElementById('psTunai').value) || 0;
+    var aktBank = parseInt(document.getElementById('psBank').value) || 0;
+    var selTunai = aktTunai - sis.tunai;
+    var selBank = aktBank - sis.bank;
+    var selTotal = selTunai + selBank;
+
+    function baris(label, sel) {
+      var warna = sel === 0 ? 'var(--success)' : 'var(--danger)';
+      var tanda = sel > 0 ? '+' : '';
+      var ket = sel === 0 ? '✓ cocok' : (sel > 0 ? 'lebih' : 'kurang');
+      return '<div class="stat-row"><span class="stat-label">' + label + '</span>' +
+        '<span class="stat-value" style="color:' + warna + ';">' + tanda + App.formatNumber(sel) + ' <span style="font-size:10px;">(' + ket + ')</span></span></div>';
+    }
+
+    var el = document.getElementById('selisihBox');
+    var allOk = (selTunai === 0 && selBank === 0);
+    el.innerHTML =
+      '<div class="card" style="margin:0;background:' + (allOk ? '#F0FDF4' : '#FEF2F2') + ';border:1px solid ' + (allOk ? '#86EFAC' : '#FECACA') + ';">' +
+        '<div class="section-title mb-8">Selisih (Aktual − Sistem)</div>' +
+        baris('Selisih Tunai', selTunai) +
+        baris('Selisih Bank', selBank) +
+        baris('Selisih Total', selTotal) +
+      '</div>';
+  },
+
+  submitPemeriksaanSaldo: function(tutup) {
+    var data = {
+      saldoTunaiAktual: parseInt(document.getElementById('psTunai').value) || 0,
+      saldoBankAktual: parseInt(document.getElementById('psBank').value) || 0,
+      catatan: document.getElementById('psCatatan').value,
+      tutup: !!tutup
+    };
+    document.getElementById('psError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast(tutup ? 'Buku berhasil ditutup ✓' : 'Pemeriksaan tersimpan ✓');
+          self.loadDashboard();
+        } else {
+          document.getElementById('psError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('psError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .submitPemeriksaanSaldo(data);
+  },
+
+  konfirmasiTutupBuku: function() {
+    if (confirm('Tutup buku akan mencatat saldo akhir periode ini sebagai final. Pastikan saldo aktual sudah benar. Lanjutkan?')) {
+      this.submitPemeriksaanSaldo(true);
+    }
   },
 
   // ─────────────────────────────────────────────────

@@ -204,6 +204,84 @@ function calculateSaldo(periodeId, periode) {
 }
 
 // ──────────────────────────────────────────────────────
+// PEMERIKSAAN SALDO (sebelum tutup buku)
+// Bandingkan saldo sistem dengan saldo fisik/aktual yang diinput
+// ──────────────────────────────────────────────────────
+function getPemeriksaanSaldo() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+
+    var saldo = calculateSaldo(periode.id, periode);
+
+    // Ambil pemeriksaan terakhir untuk periode ini (jika ada)
+    var ss = getSS_();
+    var terakhir = null;
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+    if (sheet && sheet.getLastRow() > 1) {
+      var rows = sheet.getDataRange().getValues();
+      var h = headerMap_(rows[0]);
+      for (var i = rows.length - 1; i >= 1; i--) {
+        if (String(hGet_(rows[i], h, 'periodeid', 1)) === String(periode.id)) {
+          terakhir = {
+            tanggal: toDateStr_(hGet_(rows[i], h, 'tanggaltutup', 2)),
+            saldoTunaiAktual: Number(hGet_(rows[i], h, 'saldotunaiakhir', 3)) || 0,
+            saldoBankAktual: Number(hGet_(rows[i], h, 'saldobankakhir', 4)) || 0,
+            status: String(hGet_(rows[i], h, 'status', 6) || ''),
+            catatan: String(hGet_(rows[i], h, 'catatan', 7) || '')
+          };
+          break;
+        }
+      }
+    }
+
+    return {
+      success: true,
+      periode: periode,
+      saldoSistem: { tunai: saldo.tunai, bank: saldo.bank, total: saldo.tunai + saldo.bank },
+      terakhir: terakhir
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function submitPemeriksaanSaldo(data) {
+  try {
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
+    if (!auth.success) return { success: false, message: auth.message };
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+    if (!sheet) {
+      sheet = ss.insertSheet(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+      sheet.appendRow(['ID', 'PeriodeID', 'Tanggal Tutup', 'Saldo Tunai Akhir', 'Saldo Bank Akhir', 'Total Kas', 'Status', 'Catatan', 'Created By', 'Created At']);
+    }
+
+    var saldoTunai = Number(data.saldoTunaiAktual) || 0;
+    var saldoBank = Number(data.saldoBankAktual) || 0;
+    var total = saldoTunai + saldoBank;
+    // Status: 'Pemeriksaan' = cek saja, 'Tutup' = tutup buku final
+    var status = data.tutup ? 'Tutup' : 'Pemeriksaan';
+
+    var id = generateID('SLD');
+    sheet.appendRow([id, periode.id, toDateStr_(new Date()), saldoTunai, saldoBank, total,
+      status, data.catatan || '', auth.user.email, toDateStr_(new Date())]);
+
+    logActivity(auth.user.email, status === 'Tutup' ? 'TUTUP_BUKU' : 'PEMERIKSAAN_SALDO',
+      'Tunai: ' + saldoTunai + ', Bank: ' + saldoBank);
+
+    return { success: true, id: id };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ──────────────────────────────────────────────────────
 // TRANSAKSI
 // ──────────────────────────────────────────────────────
 function submitTransaksi(data) {
