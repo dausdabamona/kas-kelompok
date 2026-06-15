@@ -927,14 +927,32 @@ function getPosSetoranAll() {
   try {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
-    if (!sheet) return { success: true, data: [] };
+    if (!sheet) return { success: true, data: [], pemasukanList: [] };
     var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
     var result = [];
     for (var i = 1; i < rows.length; i++) {
-      if (rows[i][0]) result.push({ id: rows[i][0], nama: rows[i][1], tipe: rows[i][2], formula: rows[i][3], status: rows[i][4] });
+      if (!rows[i][0]) continue;
+      result.push({
+        id: rows[i][0],
+        nama: String(hGet_(rows[i], h, 'nama', 1) || ''),
+        sumberTipe: String(hGet_(rows[i], h, 'sumbertipe', 2) || 'manual'),
+        sumberRef: String(hGet_(rows[i], h, 'sumberref', 3) || ''),
+        status: String(hGet_(rows[i], h, 'status', 4) || 'Aktif'),
+        target: Number(hGet_(rows[i], h, 'target', 5)) || 0
+      });
     }
-    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
-    return { success: true, data: result };
+    // Daftar jenis pemasukan (untuk dropdown Sumber Ref tipe 'pemasukan')
+    var pemasukanList = [];
+    var sheetP = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetP && sheetP.getLastRow() > 1) {
+      var pRows = sheetP.getDataRange().getValues();
+      for (var j = 1; j < pRows.length; j++) {
+        if (!pRows[j][0]) continue;
+        pemasukanList.push({ kode: String(pRows[j][0]), nama: String(pRows[j][1] || '') });
+      }
+    }
+    return { success: true, data: result, pemasukanList: pemasukanList };
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -948,10 +966,13 @@ function addPosSetoran(data) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.POS_SETORAN);
-      sheet.appendRow(['ID', 'Nama', 'Tipe', 'Formula', 'Status', 'Target']);
+      sheet.appendRow(['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target']);
     }
     var id = generateID('PST');
-    sheet.appendRow([id, data.nama, data.tipe || 'manual', data.formula || '', data.status || 'Aktif', Number(data.target) || 0]);
+    // Sumber Ref hanya relevan untuk tipe bukuir/pemasukan
+    var sumberTipe = data.sumberTipe || 'manual';
+    var sumberRef = (sumberTipe === 'manual') ? '' : (data.sumberRef || '');
+    sheet.appendRow([id, data.nama, sumberTipe, sumberRef, data.status || 'Aktif', Number(data.target) || 0]);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
@@ -967,9 +988,11 @@ function updatePosSetoran(data) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
+    var sumberTipe = data.sumberTipe || 'manual';
+    var sumberRef = (sumberTipe === 'manual') ? '' : (data.sumberRef || '');
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0] === data.id) {
-        sheet.getRange(i + 1, 2, 1, 5).setValues([[data.nama, data.tipe, data.formula || '', data.status, Number(data.target) || 0]]);
+        sheet.getRange(i + 1, 2, 1, 5).setValues([[data.nama, sumberTipe, sumberRef, data.status, Number(data.target) || 0]]);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
         return { success: true };
       }
@@ -1107,7 +1130,7 @@ function getRekapSetoran() {
       }
     }
 
-    // Baca BUKU_IR untuk hitung auto-terkumpul per pos setoran tipe 'auto'
+    // Baca BUKU_IR untuk pos setoran sumber 'bukuir' (jumlah per kolom)
     var irData = [], irColMap = {};
     var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
     if (sheetIR && sheetIR.getLastRow() > 1) {
@@ -1121,6 +1144,32 @@ function getRekapSetoran() {
       }
     }
 
+    // Untuk sumber 'pemasukan': total penerimaan per jenisId + % Desa dari Master Pemasukan
+    var masukPerJenis = {}; // jenisId → total nominal periode aktif
+    var sheetPmsk = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (sheetPmsk && sheetPmsk.getLastRow() > 1) {
+      var pmRows = sheetPmsk.getDataRange().getValues();
+      var pmH = headerMap_(pmRows[0]);
+      for (var k = 1; k < pmRows.length; k++) {
+        if (!hGet_(pmRows[k], pmH, 'id', 0)) continue;
+        if (periodeId && String(hGet_(pmRows[k], pmH, 'periodeid', 1)) !== periodeId) continue;
+        var jid = String(hGet_(pmRows[k], pmH, 'jenisid', 2) || '');
+        if (!jid) continue;
+        masukPerJenis[jid] = (masukPerJenis[jid] || 0) + (Number(hGet_(pmRows[k], pmH, 'nominal', 5)) || 0);
+      }
+    }
+    var pctDesaMap = {}; // jenisKode → % Desa
+    var sheetMP = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetMP && sheetMP.getLastRow() > 1) {
+      var mpRows = sheetMP.getDataRange().getValues();
+      var mpH = headerMap_(mpRows[0]);
+      for (var m = 1; m < mpRows.length; m++) {
+        var kode = String(hGet_(mpRows[m], mpH, 'kode', 0) || hGet_(mpRows[m], mpH, 'id', 0) || '');
+        if (!kode) continue;
+        pctDesaMap[kode] = Number(hGet_(mpRows[m], mpH, '%desa', 4)) || 0;
+      }
+    }
+
     var result = [];
     var posH = headerMap_(posRows[0]);
     for (var i = 1; i < posRows.length; i++) {
@@ -1129,31 +1178,39 @@ function getRekapSetoran() {
       if (String(posStatus) !== 'Aktif') continue;
       var posId = posRows[i][0];
       var posNama = posRows[i][posH['nama'] !== undefined ? posH['nama'] : 1];
-      var posTipe = String(posRows[i][posH['tipe'] !== undefined ? posH['tipe'] : 2] || '').toLowerCase();
-      var posFormula = String(posRows[i][posH['formula'] !== undefined ? posH['formula'] : 3] || '');
+      var sumberTipe = String(posRows[i][posH['sumbertipe'] !== undefined ? posH['sumbertipe'] : 2] || 'manual').toLowerCase();
+      var sumberRef = String(posRows[i][posH['sumberref'] !== undefined ? posH['sumberref'] : 3] || '');
 
-      // Untuk pos tipe 'auto': target = jumlah terkumpul dari kolom BUKU_IR
+      // Hitung target sesuai sumber data (FK eksplisit — tidak ada tebak nama)
       var target = 0;
-      if (posTipe === 'auto') {
-        var colIdx = mapPosNamaToBukuIRCol(posFormula, posNama, irColMap);
+      var sumberKet = '';
+      if (sumberTipe === 'bukuir') {
+        var colIdx = mapPosNamaToBukuIRCol(sumberRef, sumberRef, irColMap);
         if (colIdx >= 0) {
-          for (var r = 0; r < irData.length; r++) {
-            target += Number(irData[r][colIdx]) || 0;
-          }
+          for (var r = 0; r < irData.length; r++) target += Number(irData[r][colIdx]) || 0;
         }
+        sumberKet = 'Buku IR: ' + sumberRef;
+      } else if (sumberTipe === 'pemasukan') {
+        var totalMasuk = masukPerJenis[sumberRef] || 0;
+        var pct = pctDesaMap[sumberRef];
+        // Jika % Desa diset, ambil porsinya; jika tidak, ambil total penuh
+        target = (pct && pct > 0) ? Math.round(totalMasuk * pct / 100) : totalMasuk;
+        sumberKet = 'Pemasukan' + (pct ? ' (' + pct + '% Desa)' : '');
       } else {
         target = Number(posRows[i][posH['target'] !== undefined ? posH['target'] : 5]) || 0;
+        sumberKet = 'Manual';
       }
 
       var realisasi = setoranMap[posId] ? setoranMap[posId].realisasi : 0;
       var sisa = target - realisasi;
-      var pct = target > 0 ? Math.round((realisasi / target) * 100) : (realisasi > 0 ? 100 : 0);
+      var pctReal = target > 0 ? Math.round((realisasi / target) * 100) : (realisasi > 0 ? 100 : 0);
       result.push({
-        id: posId, nama: posNama, tipe: posTipe,
-        target: target, realisasi: realisasi, sisa: sisa, persen: pct,
-        status: pct >= 100 ? 'Lunas' : 'Belum Lunas',
+        id: posId, nama: posNama,
+        sumberTipe: sumberTipe, sumberRef: sumberRef, sumberKet: sumberKet,
+        target: target, realisasi: realisasi, sisa: sisa, persen: pctReal,
+        status: pctReal >= 100 ? 'Lunas' : 'Belum Lunas',
         catatan: setoranMap[posId] ? setoranMap[posId].catatan : '',
-        isAuto: posTipe === 'auto'
+        isAuto: sumberTipe !== 'manual'
       });
     }
     return { success: true, data: result };

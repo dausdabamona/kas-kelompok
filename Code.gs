@@ -151,8 +151,8 @@ function setupSheets() {
     },
     {
       name: CONFIG.SHEETS.POS_SETORAN,
-      headers: ['ID', 'Nama', 'Tipe', 'Formula', 'Status', 'Target'],
-      note: 'Tipe: manual / auto | Status: Aktif / Nonaktif'
+      headers: ['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target'],
+      note: 'Sumber Tipe: bukuir / pemasukan / manual | Sumber Ref: kolom Buku IR (ir/ir10/cicilan/infakdaerah/index) atau Kode Pemasukan | Status: Aktif / Nonaktif'
     },
     {
       name: CONFIG.SHEETS.SETORAN_DESA,
@@ -290,5 +290,64 @@ function setupSheets() {
     ui.alert('Setup Selesai ✅', log.join('\n'), ui.ButtonSet.OK);
   } catch(e) {}
 
+  return { success: true, log: log };
+}
+
+// ══════════════════════════════════════════════════════
+// MIGRASI POS SETORAN → skema FK eksplisit
+// Jalankan SEKALI dari editor: Run → migratePosSetoran
+// Mengubah kolom lama (Tipe=manual/auto, Formula=teks bebas)
+// menjadi (Sumber Tipe=bukuir/pemasukan/manual, Sumber Ref=key).
+// ══════════════════════════════════════════════════════
+function migratePosSetoran() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
+  if (!sheet || sheet.getLastRow() < 1) {
+    Logger.log('Pos Setoran kosong / tidak ada.');
+    return { success: true, log: ['Tidak ada data'] };
+  }
+  var rows = sheet.getDataRange().getValues();
+  var log = [];
+
+  // Tulis header baru (kolom 3 & 4 berubah nama)
+  var newHeader = ['ID', 'Nama', 'Sumber Tipe', 'Sumber Ref', 'Status', 'Target'];
+  sheet.getRange(1, 1, 1, newHeader.length).setValues([newHeader]);
+
+  for (var i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    var nama = String(rows[i][1] || '');
+    var oldTipe = String(rows[i][2] || '').toLowerCase().trim();
+    var oldFormula = String(rows[i][3] || '');
+
+    var sumberTipe = 'manual';
+    var sumberRef = '';
+
+    if (oldTipe === 'bukuir' || oldTipe === 'pemasukan' || oldTipe === 'manual') {
+      // Sudah skema baru — biarkan
+      sumberTipe = oldTipe;
+      sumberRef = oldFormula;
+    } else if (oldTipe === 'auto') {
+      // Coba petakan ke kolom Buku IR berdasar nama/formula lama
+      var key = mapPosNamaToIRColName(oldFormula, nama);
+      if (key) {
+        sumberTipe = 'bukuir';
+        sumberRef = key;
+      } else {
+        sumberTipe = 'manual';
+        sumberRef = '';
+      }
+    }
+
+    sheet.getRange(i + 1, 3).setValue(sumberTipe);
+    sheet.getRange(i + 1, 4).setValue(sumberRef);
+    log.push(nama + ': ' + oldTipe + '/' + oldFormula + ' → ' + sumberTipe + '/' + (sumberRef || '-'));
+  }
+
+  try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
+  Logger.log('=== MIGRASI POS SETORAN ===\n' + log.join('\n'));
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.alert('Migrasi Selesai ✅', log.join('\n'), ui.ButtonSet.OK);
+  } catch(e) {}
   return { success: true, log: log };
 }

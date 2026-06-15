@@ -758,11 +758,13 @@ var App = {
           totalRealisasi += item.realisasi;
           var fill = Math.min(item.persen, 100);
           var fillClass = fill >= 100 ? '' : fill >= 60 ? 'warning' : 'danger';
-          var targetLabel = item.isAuto ? 'Terkumpul dari IR' : 'Target';
+          var targetLabel = item.sumberTipe === 'bukuir' ? 'Terkumpul dari Buku IR'
+            : item.sumberTipe === 'pemasukan' ? 'Jatah dari Pemasukan'
+            : 'Target';
           return '<div class="pos-card">' +
             '<div class="pos-card-header">' +
               '<div>' +
-                '<div class="pos-card-nama">' + item.nama + (item.isAuto ? ' <span style="font-size:10px;color:#6B7280;font-weight:400;">(otomatis)</span>' : '') + '</div>' +
+                '<div class="pos-card-nama">' + item.nama + (item.isAuto ? ' <span style="font-size:10px;color:#6B7280;font-weight:400;">(' + (item.sumberKet || 'otomatis') + ')</span>' : '') + '</div>' +
                 '<div class="progress-bar" style="width:120px;margin-top:6px;"><div class="progress-fill ' + fillClass + '" style="width:' + fill + '%;"></div></div>' +
               '</div>' +
               '<div style="text-align:right;">' +
@@ -1137,7 +1139,10 @@ var App = {
     this.showLoading('Memuat...');
     var self = this;
     google.script.run
-      .withSuccessHandler(function(res) { self.renderSettingList('Pos Setoran', res.data || [], 'posSetoran'); })
+      .withSuccessHandler(function(res) {
+        self._pemasukanListForSetoran = res.pemasukanList || [];
+        self.renderSettingList('Pos Setoran', res.data || [], 'posSetoran');
+      })
       .withFailureHandler(function(err) { self.showError(err.message); })
       .getPosSetoranAll();
   },
@@ -1158,7 +1163,12 @@ var App = {
     var list = data.map(function(item) {
       var detail = '';
       if (mode === 'pemasukan' || mode === 'pengeluaran') detail = (item.kategori || '') + ' · ' + (item.status || '');
-      else if (mode === 'posSetoran') detail = (item.tipe || '') + ' · ' + (item.status || '');
+      else if (mode === 'posSetoran') {
+        var sumberTxt = item.sumberTipe === 'bukuir' ? ('Buku IR: ' + item.sumberRef)
+          : item.sumberTipe === 'pemasukan' ? ('Pemasukan: ' + item.sumberRef)
+          : 'Manual';
+        detail = sumberTxt + ' · ' + (item.status || '');
+      }
       else if (mode === 'musyawaroh') detail = App.formatNumber(item.nilai || 0);
       return '<div class="setting-item">' +
         '<div class="setting-item-info"><div class="setting-item-nama">' + item.nama + '</div><div class="setting-item-detail">' + detail + '</div></div>' +
@@ -1188,9 +1198,22 @@ var App = {
         '<div class="form-group"><label>Kategori</label><input type="text" id="sKategori" value="' + (v.kategori || '') + '" placeholder="misal: Buku IR, Umum"/></div>' +
         '<div class="form-group"><label>Status</label><select id="sStatus"><option value="Aktif"' + (v.status !== 'Nonaktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>';
     } else if (mode === 'posSetoran') {
+      var st = v.sumberTipe || 'manual';
+      // Opsi kolom Buku IR (fixed, tidak ketik bebas)
+      var irKeys = [['ir','IR'],['ir10','1/10 IR'],['cicilan','Cicilan'],['infakdaerah','Infak Daerah'],['index','Index']];
+      var irOpts = irKeys.map(function(k){ return '<option value="' + k[0] + '"' + (v.sumberRef === k[0] ? ' selected' : '') + '>' + k[1] + '</option>'; }).join('');
+      // Opsi jenis pemasukan (FK ke Master Pemasukan)
+      var pmList = this._pemasukanListForSetoran || [];
+      var pmOpts = pmList.map(function(p){ return '<option value="' + p.kode + '"' + (v.sumberRef === p.kode ? ' selected' : '') + '>' + p.nama + '</option>'; }).join('');
       fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
-        '<div class="form-group"><label>Tipe</label><select id="sTipe"><option value="manual"' + (v.tipe !== 'auto' ? ' selected' : '') + '>Manual</option><option value="auto"' + (v.tipe === 'auto' ? ' selected' : '') + '>Auto</option></select></div>' +
-        '<div class="form-group"><label>Target (Rp)</label><input type="number" id="sTarget" value="' + (v.target || 0) + '"/></div>' +
+        '<div class="form-group"><label>Sumber Data</label><select id="sSumberTipe" onchange="App.onSumberTipeChange()">' +
+          '<option value="manual"' + (st === 'manual' ? ' selected' : '') + '>Manual (isi target sendiri)</option>' +
+          '<option value="bukuir"' + (st === 'bukuir' ? ' selected' : '') + '>Dari kolom Buku IR</option>' +
+          '<option value="pemasukan"' + (st === 'pemasukan' ? ' selected' : '') + '>Dari jenis Pemasukan (% Desa)</option>' +
+        '</select></div>' +
+        '<div class="form-group" id="grpRefBukuIR" style="display:' + (st === 'bukuir' ? 'block' : 'none') + ';"><label>Kolom Buku IR</label><select id="sRefBukuIR">' + irOpts + '</select></div>' +
+        '<div class="form-group" id="grpRefPemasukan" style="display:' + (st === 'pemasukan' ? 'block' : 'none') + ';"><label>Jenis Pemasukan</label><select id="sRefPemasukan"><option value="">-- Pilih --</option>' + pmOpts + '</select></div>' +
+        '<div class="form-group" id="grpTarget" style="display:' + (st === 'manual' ? 'block' : 'none') + ';"><label>Target (Rp)</label><input type="number" id="sTarget" value="' + (v.target || 0) + '"/></div>' +
         '<div class="form-group"><label>Status</label><select id="sStatus"><option value="Aktif"' + (v.status !== 'Nonaktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>';
     } else if (mode === 'musyawaroh') {
       fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
@@ -1208,6 +1231,16 @@ var App = {
           '<button class="btn btn-outline mt-8" onclick="App.closeModalSettingDirect()">Batal</button>' +
         '</div>' +
       '</div>';
+  },
+
+  onSumberTipeChange: function() {
+    var st = document.getElementById('sSumberTipe').value;
+    var grpIR = document.getElementById('grpRefBukuIR');
+    var grpPm = document.getElementById('grpRefPemasukan');
+    var grpTg = document.getElementById('grpTarget');
+    if (grpIR) grpIR.style.display = (st === 'bukuir') ? 'block' : 'none';
+    if (grpPm) grpPm.style.display = (st === 'pemasukan') ? 'block' : 'none';
+    if (grpTg) grpTg.style.display = (st === 'manual') ? 'block' : 'none';
   },
 
   closeModalSetting: function(e) {
@@ -1234,9 +1267,17 @@ var App = {
       data.kategori = document.getElementById('sKategori').value;
       data.status = document.getElementById('sStatus').value;
     } else if (mode === 'posSetoran') {
-      data.tipe = document.getElementById('sTipe').value;
-      data.target = parseInt(document.getElementById('sTarget').value) || 0;
+      var st = document.getElementById('sSumberTipe').value;
+      data.sumberTipe = st;
+      if (st === 'bukuir') data.sumberRef = document.getElementById('sRefBukuIR').value;
+      else if (st === 'pemasukan') data.sumberRef = document.getElementById('sRefPemasukan').value;
+      else data.sumberRef = '';
+      data.target = st === 'manual' ? (parseInt(document.getElementById('sTarget').value) || 0) : 0;
       data.status = document.getElementById('sStatus').value;
+      if (st === 'pemasukan' && !data.sumberRef) {
+        document.getElementById('settingFormError').innerHTML = '<div class="error-box">Pilih jenis pemasukan terlebih dahulu.</div>';
+        return;
+      }
     } else if (mode === 'musyawaroh') {
       data.nilai = parseInt(document.getElementById('sNilai').value) || 0;
       data.keterangan = document.getElementById('sKet').value;
