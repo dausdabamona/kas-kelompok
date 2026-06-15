@@ -551,12 +551,26 @@ var App = {
     google.script.run
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        var rowsP = (res.pemasukan || []).map(function(p) {
-          return '<tr><td>' + (p.jenis || '-') + '</td><td>' + App.formatDate(p.tanggal) + '</td><td style="text-align:right;">' + App.formatNumber(p.nominal) + '</td><td>' + (p.sumber || '-') + '</td></tr>';
-        }).join('') || '<tr><td colspan="4" class="text-center text-muted" style="padding:16px;">Belum ada data</td></tr>';
-        var rowsPK = (res.pengeluaran || []).map(function(p) {
-          return '<tr><td>' + (p.jenis || '-') + '</td><td>' + App.formatDate(p.tanggal) + '</td><td style="text-align:right;">' + App.formatNumber(p.nominal) + '</td><td>' + (p.sumber || '-') + '</td></tr>';
-        }).join('') || '<tr><td colspan="4" class="text-center text-muted" style="padding:16px;">Belum ada data</td></tr>';
+        // Card list — tidak perlu horizontal scroll
+        var cardsP = (res.pemasukan || []).map(function(p) {
+          return '<div class="trx-item">' +
+            '<div class="trx-item-top">' +
+              '<span class="trx-item-nama">' + (p.jenis || '-') + '</span>' +
+              '<span class="trx-item-nominal text-success">' + App.formatNumber(p.nominal) + '</span>' +
+            '</div>' +
+            '<div class="trx-item-meta">' + App.formatDate(p.tanggal) + ' · ' + (p.sumber || '-') + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
+          '</div>';
+        }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
+
+        var cardsPK = (res.pengeluaran || []).map(function(p) {
+          return '<div class="trx-item">' +
+            '<div class="trx-item-top">' +
+              '<span class="trx-item-nama">' + (p.jenis || '-') + '</span>' +
+              '<span class="trx-item-nominal text-danger">' + App.formatNumber(p.nominal) + '</span>' +
+            '</div>' +
+            '<div class="trx-item-meta">' + App.formatDate(p.tanggal) + ' · ' + (p.sumber || '-') + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
+          '</div>';
+        }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
 
         var html = self.pageWrapper('Rekapitulasi',
           '<div class="card">' +
@@ -564,12 +578,16 @@ var App = {
             '<div class="stat-row"><span class="stat-label">Saldo Tunai</span><span class="stat-value text-warning">' + App.formatNumber(res.saldoTunai || 0) + '</span></div>' +
             '<div class="stat-row"><span class="stat-label">Saldo Bank</span><span class="stat-value" style="color:var(--bank);">' + App.formatNumber(res.saldoBank || 0) + '</span></div>' +
           '</div>' +
-          '<div class="section-header"><span class="section-title">Pemasukan</span></div>' +
-          '<div style="overflow-x:auto;"><table class="tabel-rekap"><thead><tr><th>Jenis</th><th>Tanggal</th><th>Nominal</th><th>Kas</th></tr></thead><tbody>' + rowsP + '</tbody>' +
-          '<tfoot><tr class="total-row"><td colspan="2">TOTAL</td><td style="text-align:right;">' + App.formatNumber((res.totalPemasukanTunai || 0) + (res.totalPemasukanBank || 0)) + '</td><td></td></tr></tfoot></table></div>' +
-          '<div class="section-header"><span class="section-title">Pengeluaran</span></div>' +
-          '<div style="overflow-x:auto;"><table class="tabel-rekap"><thead><tr><th>Jenis</th><th>Tanggal</th><th>Nominal</th><th>Kas</th></tr></thead><tbody>' + rowsPK + '</tbody>' +
-          '<tfoot><tr class="total-row"><td colspan="2">TOTAL</td><td style="text-align:right;">' + App.formatNumber((res.totalPengeluaranTunai || 0) + (res.totalPengeluaranBank || 0)) + '</td><td></td></tr></tfoot></table></div>'
+          '<div class="section-header">' +
+            '<span class="section-title">Pemasukan</span>' +
+            '<span class="font-bold text-success">' + App.formatNumber((res.totalPemasukanTunai||0)+(res.totalPemasukanBank||0)) + '</span>' +
+          '</div>' +
+          '<div class="card" style="padding:0 16px;">' + cardsP + '</div>' +
+          '<div class="section-header">' +
+            '<span class="section-title">Pengeluaran</span>' +
+            '<span class="font-bold text-danger">' + App.formatNumber((res.totalPengeluaranTunai||0)+(res.totalPengeluaranBank||0)) + '</span>' +
+          '</div>' +
+          '<div class="card" style="padding:0 16px;">' + cardsPK + '</div>'
         );
         document.getElementById('app').innerHTML = html;
       })
@@ -597,28 +615,38 @@ var App = {
         if (!res.success) { self.showError(res.message); return; }
         var data = res.data || [];
         var totalTarget = 0, totalRealisasi = 0;
-        var rows = data.map(function(item) {
+        var cards = data.map(function(item) {
           totalTarget += item.target;
           totalRealisasi += item.realisasi;
           var fill = Math.min(item.persen, 100);
           var fillClass = fill >= 100 ? '' : fill >= 60 ? 'warning' : 'danger';
-          return '<tr>' +
-            '<td>' + item.nama + '<div class="progress-bar"><div class="progress-fill ' + fillClass + '" style="width:' + fill + '%;"></div></div></td>' +
-            '<td style="text-align:right;">' + App.formatNumber(item.target) + '</td>' +
-            '<td style="text-align:right;">' + App.formatNumber(item.realisasi) + '</td>' +
-            '<td style="text-align:right;">' + App.formatNumber(item.sisa) + '</td>' +
-            '<td>' + item.persen + '%</td>' +
-            '<td><span class="status-badge ' + (item.status === 'Lunas' ? 'lunas' : 'belum') + '">' + item.status + '</span></td>' +
-            '<td><button class="action-btn-sm edit" onclick="App.showEditSetoran(' + JSON.stringify(item).replace(/'/g, '&#39;') + ')">Edit</button></td>' +
-          '</tr>';
-        }).join('') || '<tr><td colspan="7" class="text-center text-muted" style="padding:16px;">Belum ada data pos setoran aktif.</td></tr>';
+          var itemJson = JSON.stringify(item).replace(/'/g, '&#39;');
+          return '<div class="pos-card">' +
+            '<div class="pos-card-header">' +
+              '<div>' +
+                '<div class="pos-card-nama">' + item.nama + '</div>' +
+                '<div class="progress-bar" style="width:120px;margin-top:6px;"><div class="progress-fill ' + fillClass + '" style="width:' + fill + '%;"></div></div>' +
+              '</div>' +
+              '<div style="text-align:right;">' +
+                '<span class="status-badge ' + (item.status === 'Lunas' ? 'lunas' : 'belum') + '">' + item.status + '</span>' +
+                '<div class="text-muted text-small" style="margin-top:4px;">' + item.persen + '%</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="pos-card-row"><span class="pos-card-label">Target</span><span class="pos-card-value">' + App.formatNumber(item.target) + '</span></div>' +
+            '<div class="pos-card-row"><span class="pos-card-label">Realisasi</span><span class="pos-card-value text-success">' + App.formatNumber(item.realisasi) + '</span></div>' +
+            '<div class="pos-card-row"><span class="pos-card-label">Sisa</span><span class="pos-card-value ' + (item.sisa > 0 ? 'text-danger' : 'text-success') + '">' + App.formatNumber(item.sisa) + '</span></div>' +
+            '<button class="btn btn-outline btn-sm" style="margin-top:10px;width:100%;" onclick="App.showEditSetoran(' + itemJson + ')">✏️ Update Realisasi</button>' +
+          '</div>';
+        }).join('') || '<div class="info-box">Belum ada pos setoran aktif. Tambah di Setting → Kelola Pos Setoran.</div>';
 
+        var totalSisa = totalTarget - totalRealisasi;
         var html = self.pageWrapper('Setoran Desa',
-          '<div style="overflow-x:auto;">' +
-          '<table class="tabel-rekap"><thead><tr><th>Pos</th><th>Target</th><th>Realisasi</th><th>Sisa</th><th>%</th><th>Status</th><th>Aksi</th></tr></thead>' +
-          '<tbody>' + rows + '</tbody>' +
-          '<tfoot><tr class="total-row"><td>TOTAL</td><td style="text-align:right;">' + App.formatNumber(totalTarget) + '</td><td style="text-align:right;">' + App.formatNumber(totalRealisasi) + '</td><td style="text-align:right;">' + App.formatNumber(totalTarget - totalRealisasi) + '</td><td colspan="3"></td></tr></tfoot>' +
-          '</table></div>' +
+          '<div class="card">' +
+            '<div class="stat-row"><span class="stat-label">Total Target</span><span class="stat-value">' + App.formatNumber(totalTarget) + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Total Realisasi</span><span class="stat-value text-success">' + App.formatNumber(totalRealisasi) + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Sisa</span><span class="stat-value ' + (totalSisa > 0 ? 'text-danger' : 'text-success') + '">' + App.formatNumber(totalSisa) + '</span></div>' +
+          '</div>' +
+          cards +
           '<div id="setoranModal"></div>'
         );
         document.getElementById('app').innerHTML = html;
@@ -1286,32 +1314,24 @@ var App = {
         '</div>' +
       '</div>';
 
-    var rows = data.map(function(item) {
+    var cards = data.map(function(item) {
       var badgeClass = item.status === 'Tercapai' || item.status === 'Lebih' ? 'lunas' : (item.status === 'Kurang' ? 'belum' : 'pending');
-      return '<tr>' +
-        '<td>' +
-          '<div style="font-weight:600;font-size:13px;">' + item.nama + '</div>' +
-          '<button class="action-btn-sm edit" style="margin-top:4px;font-size:11px;" onclick="App.pageJamaahBelumBayar(\'' + item.nama.replace(/'/g, "\\'") + '\')">👥 Cek Jamaah</button>' +
-        '</td>' +
-        '<td style="text-align:right;font-size:12px;">' + App.formatNumber(item.target) + '</td>' +
-        '<td style="text-align:right;font-size:12px;">' + App.formatNumber(item.terkumpul) + '</td>' +
-        '<td style="text-align:right;font-size:12px;">' + App.formatNumber(item.sudahSetor) + '</td>' +
-        '<td style="text-align:right;font-size:12px;">' + App.formatNumber(item.sisa) + '</td>' +
-        '<td>' +
+      return '<div class="pos-card">' +
+        '<div class="pos-card-header">' +
+          '<div class="pos-card-nama">' + item.nama + '</div>' +
           '<span class="status-badge ' + badgeClass + '">' + item.status + '</span>' +
-          '<div style="font-size:10px;color:var(--text-muted);margin-top:3px;line-height:1.3;">' + item.tindakLanjut + '</div>' +
-        '</td>' +
-      '</tr>';
-    }).join('') || '<tr><td colspan="6" class="text-center text-muted" style="padding:16px;">Belum ada pos setoran aktif.</td></tr>';
+        '</div>' +
+        '<div class="pos-card-row"><span class="pos-card-label">Target</span><span class="pos-card-value">' + App.formatNumber(item.target) + '</span></div>' +
+        '<div class="pos-card-row"><span class="pos-card-label">Terkumpul</span><span class="pos-card-value">' + App.formatNumber(item.terkumpul) + '</span></div>' +
+        '<div class="pos-card-row"><span class="pos-card-label">Sudah Setor</span><span class="pos-card-value">' + App.formatNumber(item.sudahSetor) + '</span></div>' +
+        '<div class="pos-card-row"><span class="pos-card-label">Sisa</span><span class="pos-card-value" style="color:var(--danger);font-weight:700;">' + App.formatNumber(item.sisa) + '</span></div>' +
+        (item.tindakLanjut ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">' + item.tindakLanjut + '</div>' : '') +
+        '<button class="action-btn-sm edit" style="margin-top:8px;width:100%;justify-content:center;font-size:12px;" onclick="App.pageJamaahBelumBayar(\'' + item.nama.replace(/'/g, "\\'") + '\')">👥 Cek Jamaah</button>' +
+      '</div>';
+    }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada pos setoran aktif.</div>';
 
     var html = self.pageWrapper('Laporan Setoran',
-      summaryCards +
-      '<div style="overflow-x:auto;">' +
-        '<table class="tabel-rekap">' +
-          '<thead><tr><th>Pos</th><th>Target</th><th>Terkumpul</th><th>Setor</th><th>Sisa</th><th>Status</th></tr></thead>' +
-          '<tbody>' + rows + '</tbody>' +
-        '</table>' +
-      '</div>'
+      summaryCards + cards
     );
     document.getElementById('app').innerHTML = html;
   },
@@ -1336,7 +1356,7 @@ var App = {
     var sudah = res.sudahBayar || [];
 
     var listBelum = belum.length === 0
-      ? '<div class="text-center text-muted" style="padding:32px;">Semua jamaah sudah bayar 👍</div>'
+      ? '<div class="text-center text-muted" style="padding:32px;">Semua jamaah sudah infak 👍</div>'
       : belum.map(function(a) {
           return '<div class="jamaah-card">' +
             '<div class="jamaah-avatar">' + (a.nama || 'J').charAt(0).toUpperCase() + '</div>' +
@@ -1367,15 +1387,15 @@ var App = {
       '<div class="card" style="margin-bottom:12px;">' +
         '<div class="stat-row"><span class="stat-label">Pos</span><span class="stat-value">' + res.posNama + '</span></div>' +
         '<div class="stat-row"><span class="stat-label">Total Jamaah</span><span class="stat-value">' + (total.totalAnggota || 0) + '</span></div>' +
-        '<div class="stat-row"><span class="stat-label">Belum Bayar</span><span class="stat-value text-danger">' + (total.belum || 0) + '</span></div>' +
-        '<div class="stat-row"><span class="stat-label">Sudah Bayar</span><span class="stat-value text-success">' + (total.sudah || 0) + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Belum Infak</span><span class="stat-value text-danger">' + (total.belum || 0) + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Sudah Infak</span><span class="stat-value text-success">' + (total.sudah || 0) + '</span></div>' +
       '</div>';
 
     var html = self.pageWrapper('Jamaah per Pos',
       summary +
       '<div class="tabs">' +
-        '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderJamaahBelumBayar(App._jamaahBayarData, \'belum\')">Belum Bayar <span class="badge">' + belum.length + '</span></button>' +
-        '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderJamaahBelumBayar(App._jamaahBayarData, \'sudah\')">Sudah Bayar <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
+        '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderJamaahBelumBayar(App._jamaahBayarData, \'belum\')">Belum Infak <span class="badge">' + belum.length + '</span></button>' +
+        '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderJamaahBelumBayar(App._jamaahBayarData, \'sudah\')">Sudah Infak <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
       '</div>' +
       (activeTab === 'belum' ? listBelum : listSudah)
     );

@@ -36,6 +36,7 @@
     min-height: 100vh;
     background: white;
     position: relative;
+    overflow-x: hidden;
   }
 
   @media (min-width: 481px) {
@@ -516,6 +517,7 @@
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
   }
 
   .tabel-rekap td {
@@ -526,6 +528,53 @@
 
   .tabel-rekap tr:last-child td { border-bottom: none; }
   .tabel-rekap .total-row td { font-weight: 700; background: #F8FAFC; }
+
+  /* Card list — pengganti tabel di mobile */
+  .pos-card {
+    background: white;
+    border-radius: var(--radius);
+    border: 1.5px solid var(--border);
+    padding: 14px;
+    margin-bottom: 10px;
+    box-shadow: var(--shadow);
+  }
+
+  .pos-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+
+  .pos-card-nama {
+    font-weight: 700;
+    font-size: 15px;
+    flex: 1;
+  }
+
+  .pos-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pos-card-row:last-of-type { border-bottom: none; }
+  .pos-card-label { color: var(--text-muted); }
+  .pos-card-value { font-weight: 600; text-align: right; }
+
+  .trx-item {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .trx-item:last-child { border-bottom: none; }
+  .trx-item-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 3px; }
+  .trx-item-nama { font-weight: 600; font-size: 14px; flex: 1; padding-right: 8px; }
+  .trx-item-nominal { font-weight: 700; font-size: 14px; text-align: right; white-space: nowrap; }
+  .trx-item-meta { font-size: 12px; color: var(--text-muted); }
 
   /* Avatar & User info */
   .avatar {
