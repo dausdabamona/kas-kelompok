@@ -7,6 +7,24 @@ function getSS_() {
   return _ss;
 }
 
+// Konversi nilai tanggal ke string YYYY-MM-DD secara konsisten.
+// Diperlukan karena Date object dari spreadsheet tidak bisa di-JSON.stringify.
+function toDateStr_(val) {
+  if (!val) return '';
+  if (val instanceof Date) return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return String(val);
+}
+
+// Buat header-to-index map dari baris header sheet (case-insensitive, trim).
+function headerMap_(headerRow) {
+  var map = {};
+  for (var i = 0; i < headerRow.length; i++) {
+    var key = String(headerRow[i] || '').toLowerCase().trim();
+    if (key) map[key] = i;
+  }
+  return map;
+}
+
 // ──────────────────────────────────────────────────────
 // PERIODE
 // ──────────────────────────────────────────────────────
@@ -189,17 +207,30 @@ function submitTransaksi(data) {
 
     var id = generateID('TRX');
     var now = new Date();
-    var tgl = data.tanggal ? new Date(data.tanggal) : now;
+    var tgl = toDateStr_(data.tanggal ? new Date(data.tanggal) : now);
+
+    // Validasi FK: jenisId harus ada di master
+    if (data.tipe === 'masuk' || data.tipe === 'keluar') {
+      var masterSheet = ss.getSheetByName(data.tipe === 'masuk' ? CONFIG.SHEETS.PEMASUKAN : CONFIG.SHEETS.PENGELUARAN);
+      if (masterSheet) {
+        var masterRows = masterSheet.getDataRange().getValues();
+        var validJenis = false;
+        for (var mi = 1; mi < masterRows.length; mi++) {
+          if (String(masterRows[mi][0]) === String(data.jenisId)) { validJenis = true; break; }
+        }
+        if (!validJenis) return { success: false, message: 'Jenis tidak ditemukan di master data.' };
+      }
+    }
 
     if (data.tipe === 'masuk') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
       if (!sheet) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
-      sheet.appendRow([id, periode.id, data.jenisId, data.anggotaId || '', tgl, Number(data.nominal), data.sumberKas, data.catatan || '', auth.user.email, now]);
+      sheet.appendRow([id, periode.id, data.jenisId, data.anggotaId || '', tgl, Number(data.nominal), data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now)]);
       logActivity(auth.user.email, 'PEMASUKAN', 'Nominal: ' + data.nominal);
     } else if (data.tipe === 'keluar') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
       if (!sheet) return { success: false, message: 'Sheet pengeluaran tidak ditemukan' };
-      sheet.appendRow([id, periode.id, data.jenisId, tgl, Number(data.nominal), data.sumberKas, data.catatan || '', auth.user.email, now]);
+      sheet.appendRow([id, periode.id, data.jenisId, tgl, Number(data.nominal), data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now)]);
       logActivity(auth.user.email, 'PENGELUARAN', 'Nominal: ' + data.nominal);
     } else if (data.tipe === 'mutasi') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
@@ -207,7 +238,7 @@ function submitTransaksi(data) {
         sheet = ss.insertSheet(CONFIG.SHEETS.INPUT_SETORAN);
         sheet.appendRow(['ID', 'PeriodeID', 'Tanggal', 'Nominal', 'Arah', 'CreatedBy', 'CreatedAt']);
       }
-      sheet.appendRow([id, periode.id, tgl, Number(data.nominal), data.arah, auth.user.email, now]);
+      sheet.appendRow([id, periode.id, tgl, Number(data.nominal), data.arah, auth.user.email, toDateStr_(now)]);
       logActivity(auth.user.email, 'MUTASI', 'Arah: ' + data.arah + ' Nominal: ' + data.nominal);
     }
 
@@ -482,17 +513,30 @@ function getBukuIRData() {
     var belum = [], sudah = [];
     if (sheetP.getLastRow() > 1) {
       var pRows = sheetP.getDataRange().getValues();
+      var pHdr = headerMap_(pRows[0]);
+      var c_id = pHdr['id'] !== undefined ? pHdr['id'] : 0;
+      var c_pid = pHdr['periode id'] !== undefined ? pHdr['periode id'] : 1;
+      var c_jid = pHdr['jenis id'] !== undefined ? pHdr['jenis id'] : 2;
+      var c_aid = pHdr['anggota id'] !== undefined ? pHdr['anggota id'] : 3;
+      var c_tgl = pHdr['tanggal'] !== undefined ? pHdr['tanggal'] : 4;
+      var c_nom = pHdr['nominal'] !== undefined ? pHdr['nominal'] : 5;
+      var c_kas = pHdr['sumber kas'] !== undefined ? pHdr['sumber kas'] : 6;
+      var c_cat = pHdr['catatan'] !== undefined ? pHdr['catatan'] : 7;
       for (var i = 1; i < pRows.length; i++) {
         var row = pRows[i];
-        if (!row[0]) continue;
-        if (periodeId && row[1] !== periodeId) continue;
-        if (bukuIRIds.indexOf(row[2]) === -1) continue;
+        if (!row[c_id]) continue;
+        if (periodeId && row[c_pid] !== periodeId) continue;
+        if (bukuIRIds.indexOf(row[c_jid]) === -1) continue;
         var item = {
-          id: row[0], periodeId: row[1], jenisId: row[2], anggotaId: row[3],
-          tanggal: row[4], nominal: Number(row[5]) || 0, sumberKas: row[6], catatan: row[7],
-          anggota: anggotaMap[row[3]] || null
+          id: String(row[c_id]), periodeId: String(row[c_pid]), jenisId: String(row[c_jid]),
+          anggotaId: String(row[c_aid] || ''),
+          tanggal: toDateStr_(row[c_tgl]),
+          nominal: Number(row[c_nom]) || 0,
+          sumberKas: String(row[c_kas] || ''),
+          catatan: String(row[c_cat] || ''),
+          anggota: anggotaMap[String(row[c_aid])] || null
         };
-        if (dirincikanIds[row[0]]) sudah.push(item);
+        if (dirincikanIds[String(row[c_id])]) sudah.push(item);
         else belum.push(item);
       }
     }
@@ -513,14 +557,27 @@ function submitRincianIR(data) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.BUKU_IR);
-      sheet.appendRow(['ID', 'TransaksiID', 'PeriodeID', 'AnggotaID', 'Tanggal', 'IR', 'IR10', 'Cicilan', 'InfakDaerah', 'Index', 'Total', 'CreatedBy', 'CreatedAt']);
+      // Kolom Total dihapus — nilai derived, dihitung saat read (IR+IR10+Cicilan+InfakDaerah+Index)
+      sheet.appendRow(['ID', 'TransaksiID', 'PeriodeID', 'AnggotaID', 'Tanggal', 'IR', 'IR10', 'Cicilan', 'InfakDaerah', 'Index', 'CreatedBy', 'CreatedAt']);
     }
+    // Validasi: transaksiId harus ada di Input Penerimaan
+    var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (sheetP) {
+      var pRows = sheetP.getDataRange().getValues();
+      var validTrx = false;
+      for (var vi = 1; vi < pRows.length; vi++) {
+        if (String(pRows[vi][0]) === String(data.transaksiId)) { validTrx = true; break; }
+      }
+      if (!validTrx) return { success: false, message: 'Transaksi tidak ditemukan.' };
+    }
+    var ir = Number(data.ir) || 0;
+    var ir10 = Number(data.ir10) || 0;
+    var cicilan = Number(data.cicilan) || 0;
+    var infakDaerah = Number(data.infakDaerah) || 0;
+    var index = Number(data.index) || 0;
     var id = generateID('IR');
-    var now = new Date();
-    sheet.appendRow([id, data.transaksiId, data.periodeId, data.anggotaId, data.tanggal,
-      Number(data.ir) || 0, Number(data.ir10) || 0, Number(data.cicilan) || 0,
-      Number(data.infakDaerah) || 0, Number(data.index) || 0, Number(data.total) || 0,
-      auth.user.email, now]);
+    sheet.appendRow([id, data.transaksiId, data.periodeId, data.anggotaId, toDateStr_(data.tanggal),
+      ir, ir10, cicilan, infakDaerah, index, auth.user.email, toDateStr_(new Date())]);
     try { var c = CacheService.getScriptCache(); c.remove('master_trx_data'); c.remove('buku_ir_data'); c.remove('dashboard_saldo'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
@@ -889,12 +946,22 @@ function getRekapSetoran() {
     if (!sheetPos) return { success: true, data: [] };
 
     var posRows = sheetPos.getDataRange().getValues();
+    var periode = getPeriodeAktif();
+    var periodeId = periode ? periode.id : null;
     var setoranMap = {};
     if (sheetSetoran && sheetSetoran.getLastRow() > 1) {
       var sRows = sheetSetoran.getDataRange().getValues();
+      var sHdr = headerMap_(sRows[0]);
+      var s_posid = sHdr['posid'] !== undefined ? sHdr['posid'] : 1;
+      var s_perid = sHdr['periodeid'] !== undefined ? sHdr['periodeid'] : 2;
+      var s_real = sHdr['realisasi'] !== undefined ? sHdr['realisasi'] : 3;
+      var s_cat = sHdr['catatan'] !== undefined ? sHdr['catatan'] : 4;
       for (var i = 1; i < sRows.length; i++) {
-        if (sRows[i][0]) setoranMap[sRows[i][1]] = {
-          id: sRows[i][0], realisasi: Number(sRows[i][3]) || 0, catatan: sRows[i][4]
+        if (!sRows[i][0]) continue;
+        // Filter per periode aktif jika ada PeriodeID
+        if (periodeId && sRows[i][s_perid] && String(sRows[i][s_perid]) !== periodeId) continue;
+        setoranMap[String(sRows[i][s_posid])] = {
+          id: sRows[i][0], realisasi: Number(sRows[i][s_real]) || 0, catatan: String(sRows[i][s_cat] || '')
         };
       }
     }
@@ -926,29 +993,40 @@ function submitRealisasiSetoran(data) {
     var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
     var sheet = ss.getSheetByName(CONFIG.SHEETS.SETORAN_DESA);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.SETORAN_DESA);
-      sheet.appendRow(['ID', 'PosID', 'Target', 'Realisasi', 'Catatan', 'UpdatedBy', 'UpdatedAt']);
+      // PeriodeID ditambah agar data bisa dipisah per periode
+      sheet.appendRow(['ID', 'PosID', 'PeriodeID', 'Realisasi', 'Catatan', 'UpdatedBy', 'UpdatedAt']);
     }
     var rows = sheet.getDataRange().getValues();
+    var hdr = headerMap_(rows[0]);
+    var c_posid = hdr['posid'] !== undefined ? hdr['posid'] : 1;
+    var c_perid = hdr['periodeid'] !== undefined ? hdr['periodeid'] : 2;
     var found = false;
     for (var i = 1; i < rows.length; i++) {
-      if (rows[i][1] === data.posId) {
-        sheet.getRange(i + 1, 3, 1, 5).setValues([[Number(data.target) || 0, Number(data.realisasi) || 0, data.catatan || '', auth.user.email, new Date()]]);
+      // Match per posId DAN periodeId agar tiap periode independen
+      if (String(rows[i][c_posid]) === String(data.posId) && String(rows[i][c_perid]) === String(periode.id)) {
+        var realisasiCol = hdr['realisasi'] !== undefined ? hdr['realisasi'] : 3;
+        var catatanCol = hdr['catatan'] !== undefined ? hdr['catatan'] : 4;
+        sheet.getRange(i + 1, realisasiCol + 1).setValue(Number(data.realisasi) || 0);
+        sheet.getRange(i + 1, catatanCol + 1).setValue(data.catatan || '');
+        sheet.getRange(i + 1, (hdr['updatedby'] !== undefined ? hdr['updatedby'] : 5) + 1).setValue(auth.user.email);
+        sheet.getRange(i + 1, (hdr['updatedat'] !== undefined ? hdr['updatedat'] : 6) + 1).setValue(toDateStr_(new Date()));
         found = true;
         break;
       }
     }
     if (!found) {
       var id = generateID('STR');
-      sheet.appendRow([id, data.posId, Number(data.target) || 0, Number(data.realisasi) || 0, data.catatan || '', auth.user.email, new Date()]);
+      sheet.appendRow([id, data.posId, periode.id, Number(data.realisasi) || 0, data.catatan || '', auth.user.email, toDateStr_(new Date())]);
     }
     try {
       var cache2 = CacheService.getScriptCache();
       cache2.remove('master_trx_data');
-      var periode2 = getPeriodeAktif();
-      if (periode2) cache2.remove('laporan_setoran_' + periode2.id);
+      cache2.remove('laporan_setoran_' + periode.id);
     } catch(e) {}
     return { success: true };
   } catch(e) {
@@ -1285,27 +1363,25 @@ function hitungJumlahBulan(tglMulai) {
   }
 }
 
-function mapPosNamaToBukuIRCol(formula, nama) {
-  // Kolom Detail Buku IR (0-indexed): [5]=IR, [6]=IR 1/10, [7]=Cicilan, [8]=InfakDaerah, [9]=Index
-  if (formula) {
-    var f = String(formula).toLowerCase().trim();
-    if (f === 'ir' || f === 'col5' || f === '5') return 5;
-    if (f.indexOf('1/10') !== -1 || f === 'ir10' || f === 'col6' || f === '6') return 6;
-    if (f === 'cicilan' || f === 'col7' || f === '7') return 7;
-    if (f.indexOf('infak') !== -1 || f === 'col8' || f === '8') return 8;
-    if (f === 'index' || f === 'col9' || f === '9') return 9;
-  }
-  if (nama) {
-    var n = String(nama).toLowerCase().trim();
-    if (n === 'ir' && n.indexOf('1/10') === -1 && n.indexOf('10') === -1) return 5;
-    if (n.indexOf('1/10') !== -1 || n === 'ir10' || n === 'ir 10') return 6;
-    if (n.indexOf('cicilan') !== -1) return 7;
-    if (n.indexOf('infak') !== -1) return 8;
-    if (n.indexOf('index') !== -1) return 9;
-    // fallback: if contains 'ir' without '1/10'
-    if (n.indexOf('ir') !== -1 && n.indexOf('1/10') === -1) return 5;
-  }
-  return -1;
+// Kembalikan nama kolom header BUKU_IR yang sesuai dengan pos setoran.
+// Menggunakan nama kolom (bukan index numerik hardcoded) agar tidak rapuh.
+function mapPosNamaToIRColName(formula, nama) {
+  var hint = String(formula || nama || '').toLowerCase().trim();
+  if (hint === 'ir' || hint === 'col5' || hint === '5') return 'ir';
+  if (hint.indexOf('1/10') !== -1 || hint === 'ir10' || hint === 'ir 10' || hint === 'col6' || hint === '6') return 'ir10';
+  if (hint.indexOf('cicilan') !== -1 || hint === 'col7' || hint === '7') return 'cicilan';
+  if (hint.indexOf('infak') !== -1 || hint === 'col8' || hint === '8') return 'infakdaerah';
+  if (hint.indexOf('index') !== -1 || hint === 'col9' || hint === '9') return 'index';
+  // fallback: coba match nama pos ke header yang ada
+  if (hint.indexOf('ir') !== -1 && hint.indexOf('1/10') === -1) return 'ir';
+  return '';
+}
+
+// Wrapper lama — masih dipakai oleh getJamaahBelumBayar; return index numerik via irColMap
+function mapPosNamaToBukuIRCol(formula, nama, irColMap) {
+  var colName = mapPosNamaToIRColName(formula, nama);
+  if (!colName || !irColMap) return -1;
+  return irColMap[colName] !== undefined ? irColMap[colName] : -1;
 }
 
 function getLaporanSetoran() {
@@ -1389,29 +1465,35 @@ function getLaporanSetoran() {
       }
     }
 
-    // Ambil Detail Buku IR untuk periode ini
+    // Ambil Detail Buku IR untuk periode ini — gunakan headerMap_ agar tidak fragile
     var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
-    // Kolom: [0]=ID, [1]=TransaksiID, [2]=PeriodeID, [3]=AnggotaID, [4]=Tanggal, [5]=IR, [6]=IR10, [7]=Cicilan, [8]=InfakDaerah, [9]=Index, [10]=Total
     var irData = [];
+    var irColMap = {}; // nama kolom → index
     if (sheetIR && sheetIR.getLastRow() > 1) {
       var irRows = sheetIR.getDataRange().getValues();
+      irColMap = headerMap_(irRows[0]);
       for (var i = 1; i < irRows.length; i++) {
         if (!irRows[i][0]) continue;
-        if (irRows[i][2] === periodeId) {
+        var irPerid = irColMap['periodeid'] !== undefined ? irRows[i][irColMap['periodeid']] : irRows[i][2];
+        if (String(irPerid) === periodeId) {
           irData.push(irRows[i]);
         }
       }
     }
 
-    // Ambil Setoran Desa (sudahSetor) per pos
+    // Ambil Setoran Desa per pos DAN per periode
     var sheetSetoran = ss.getSheetByName(CONFIG.SHEETS.SETORAN_DESA);
     var setoranMap = {};
     if (sheetSetoran && sheetSetoran.getLastRow() > 1) {
       var sRows = sheetSetoran.getDataRange().getValues();
+      var sHdrL = headerMap_(sRows[0]);
+      var sp_posid = sHdrL['posid'] !== undefined ? sHdrL['posid'] : 1;
+      var sp_perid = sHdrL['periodeid'] !== undefined ? sHdrL['periodeid'] : 2;
+      var sp_real  = sHdrL['realisasi'] !== undefined ? sHdrL['realisasi'] : 3;
       for (var i = 1; i < sRows.length; i++) {
-        if (sRows[i][0]) {
-          setoranMap[String(sRows[i][1])] = Number(sRows[i][3]) || 0;
-        }
+        if (!sRows[i][0]) continue;
+        if (sRows[i][sp_perid] && String(sRows[i][sp_perid]) !== periodeId) continue;
+        setoranMap[String(sRows[i][sp_posid])] = Number(sRows[i][sp_real]) || 0;
       }
     }
 
@@ -1421,7 +1503,7 @@ function getLaporanSetoran() {
 
     for (var p = 0; p < posAktif.length; p++) {
       var pos = posAktif[p];
-      var colIdx = mapPosNamaToBukuIRCol(pos.formula, pos.nama);
+      var colIdx = mapPosNamaToBukuIRCol(pos.formula, pos.nama, irColMap);
 
       // Tarif dari musyawaroh — cari berdasarkan nama pos
       var tarif = 0;
@@ -1528,13 +1610,12 @@ function getJamaahBelumBayar(posNama) {
         }
       }
     }
-    var colIdx = mapPosNamaToBukuIRCol(posFormula, posNama);
-
     // Ambil semua anggota aktif
     var sheetAnggota = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
     var anggotaMap = {};
     if (sheetAnggota && sheetAnggota.getLastRow() > 1) {
       var angRows = sheetAnggota.getDataRange().getValues();
+      var angHdr = headerMap_(angRows[0]);
       for (var i = 1; i < angRows.length; i++) {
         if (!angRows[i][0]) continue;
         var statusAng = String(angRows[i][4] || '').trim().toLowerCase();
@@ -1553,15 +1634,20 @@ function getJamaahBelumBayar(posNama) {
       }
     }
 
-    // Ambil Detail Buku IR untuk periode ini
+    // Ambil Detail Buku IR — gunakan headerMap_ agar kolom bebas urutan
     var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
-    var sudahBayarMap = {}; // anggotaId -> jumlah
-    if (sheetIR && sheetIR.getLastRow() > 1 && colIdx >= 0) {
+    var sudahBayarMap = {};
+    var colIdx = -1;
+    if (sheetIR && sheetIR.getLastRow() > 1) {
       var irRows = sheetIR.getDataRange().getValues();
-      for (var i = 1; i < irRows.length; i++) {
+      var irHdr = headerMap_(irRows[0]);
+      colIdx = mapPosNamaToBukuIRCol(posFormula, posNama, irHdr);
+      var ir_perid = irHdr['periodeid'] !== undefined ? irHdr['periodeid'] : 2;
+      var ir_angid = irHdr['anggotaid'] !== undefined ? irHdr['anggotaid'] : 3;
+      for (var i = 1; i < irRows.length && colIdx >= 0; i++) {
         if (!irRows[i][0]) continue;
-        if (irRows[i][2] !== periodeId) continue;
-        var angId = String(irRows[i][3]);
+        if (String(irRows[i][ir_perid]) !== periodeId) continue;
+        var angId = String(irRows[i][ir_angid]);
         var jumlah = Number(irRows[i][colIdx]) || 0;
         if (jumlah > 0) {
           sudahBayarMap[angId] = (sudahBayarMap[angId] || 0) + jumlah;
