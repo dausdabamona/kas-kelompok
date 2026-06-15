@@ -1418,55 +1418,123 @@ var App = {
 
   renderLaporanSetoran: function(res) {
     var self = this;
+    self._laporanSetoran = res;
     var s = res.summary || {};
     var data = res.data || [];
 
-    var persen = s.totalTarget > 0 ? Math.round(s.totalTerkumpul / s.totalTarget * 100) : 0;
+    var kewajiban = s.totalTarget || 0;
+    var persen = kewajiban > 0 ? Math.round((s.totalSudahSetor || 0) / kewajiban * 100) : 0;
 
     var summaryCards =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">' +
         '<div style="background:linear-gradient(135deg,#2563EB,#1E40AF);border-radius:12px;padding:14px;color:white;">' +
-          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Target Total</div>' +
-          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(s.totalTarget || 0) + '</div>' +
+          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Kewajiban ke Desa</div>' +
+          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(kewajiban) + '</div>' +
           '<div style="font-size:10px;opacity:0.75;margin-top:3px;">' + (s.jumlahBulan || 1) + ' bln × ' + (s.jumlahJamaahAktif || 0) + ' jamaah</div>' +
         '</div>' +
         '<div style="background:linear-gradient(135deg,#059669,#047857);border-radius:12px;padding:14px;color:white;">' +
-          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Terkumpul</div>' +
-          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(s.totalTerkumpul || 0) + '</div>' +
-          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">dari Detail Buku IR</div>' +
+          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Jatah dari Pemasukan</div>' +
+          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(s.totalJatahDesa || 0) + '</div>' +
+          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">otomatis dari % Desa</div>' +
         '</div>' +
         '<div style="background:linear-gradient(135deg,#7C3AED,#6D28D9);border-radius:12px;padding:14px;color:white;">' +
-          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Sudah Setor ke Desa</div>' +
+          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Sudah Disetor</div>' +
           '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(s.totalSudahSetor || 0) + '</div>' +
-          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">realisasi setoran</div>' +
+          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">realisasi (' + persen + '%)</div>' +
         '</div>' +
         '<div style="background:linear-gradient(135deg,#F59E0B,#D97706);border-radius:12px;padding:14px;color:white;">' +
-          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Pencapaian</div>' +
-          '<div style="font-size:16px;font-weight:800;">' + persen + '%</div>' +
-          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">' + (res.periode ? res.periode.nama : '-') + '</div>' +
+          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Tambahan dari Kas</div>' +
+          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(s.totalTopUpKas || 0) + '</div>' +
+          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">kekurangan pemasukan</div>' +
         '</div>' +
       '</div>';
 
-    var cards = data.map(function(item) {
-      var badgeClass = item.status === 'Tercapai' || item.status === 'Lebih' ? 'lunas' : (item.status === 'Kurang' ? 'belum' : 'pending');
+    var cards = data.map(function(item, idx) {
+      var badgeClass = item.status === 'Lunas' ? 'lunas' : (item.status === 'Sebagian' ? 'pending' : 'belum');
+      var topUpRow = item.topUpKas > 0
+        ? '<div class="pos-card-row"><span class="pos-card-label">+ dari Kas</span><span class="pos-card-value" style="color:#D97706;">' + App.formatNumber(item.topUpKas) + '</span></div>'
+        : '';
+      var targetRow = item.targetMusyawaroh > 0
+        ? '<div class="pos-card-row"><span class="pos-card-label">Target Musyawaroh</span><span class="pos-card-value">' + App.formatNumber(item.targetMusyawaroh) + '</span></div>'
+        : '';
       return '<div class="pos-card">' +
         '<div class="pos-card-header">' +
-          '<div class="pos-card-nama">' + item.nama + '</div>' +
+          '<div class="pos-card-nama">' + item.nama + ' <span style="font-size:10px;color:var(--text-muted);font-weight:500;">(' + item.pctDesa + '% desa)</span></div>' +
           '<span class="status-badge ' + badgeClass + '">' + item.status + '</span>' +
         '</div>' +
-        '<div class="pos-card-row"><span class="pos-card-label">Target</span><span class="pos-card-value">' + App.formatNumber(item.target) + '</span></div>' +
-        '<div class="pos-card-row"><span class="pos-card-label">Terkumpul</span><span class="pos-card-value">' + App.formatNumber(item.terkumpul) + '</span></div>' +
-        '<div class="pos-card-row"><span class="pos-card-label">Sudah Setor</span><span class="pos-card-value">' + App.formatNumber(item.sudahSetor) + '</span></div>' +
-        '<div class="pos-card-row"><span class="pos-card-label">Sisa</span><span class="pos-card-value" style="color:var(--danger);font-weight:700;">' + App.formatNumber(item.sisa) + '</span></div>' +
+        '<div class="pos-card-row"><span class="pos-card-label">Pemasukan</span><span class="pos-card-value">' + App.formatNumber(item.totalMasuk) + '</span></div>' +
+        '<div class="pos-card-row"><span class="pos-card-label">Jatah Desa (otomatis)</span><span class="pos-card-value text-success">' + App.formatNumber(item.jatahDesa) + '</span></div>' +
+        targetRow +
+        topUpRow +
+        '<div class="pos-card-row"><span class="pos-card-label">Sudah Disetor</span><span class="pos-card-value">' + App.formatNumber(item.sudahSetor) + (item.sudahDiinput ? '' : ' <span style="font-size:9px;color:var(--text-muted);">(belum diinput)</span>') + '</span></div>' +
+        '<div class="pos-card-row"><span class="pos-card-label">Sisa</span><span class="pos-card-value" style="color:' + (item.sisa > 0 ? 'var(--danger)' : 'var(--success)') + ';font-weight:700;">' + App.formatNumber(item.sisa) + '</span></div>' +
         (item.tindakLanjut ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">' + item.tindakLanjut + '</div>' : '') +
-        '<button class="action-btn-sm edit" style="margin-top:8px;width:100%;justify-content:center;font-size:12px;" onclick="App.pageJamaahBelumBayar(\'' + item.nama.replace(/'/g, "\\'") + '\')">👥 Cek Jamaah</button>' +
+        '<div style="display:flex;gap:6px;margin-top:8px;">' +
+          '<button class="btn btn-outline btn-sm" style="flex:1;font-size:12px;" onclick="App.showEditSetoranDesa(' + idx + ')">✏️ Input Setoran</button>' +
+          '<button class="action-btn-sm edit" style="flex:1;justify-content:center;font-size:12px;" onclick="App.pageJamaahBelumBayar(\'' + String(item.id).replace(/'/g, "\\'") + '\')">👥 Cek Jamaah</button>' +
+        '</div>' +
       '</div>';
-    }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada pos setoran aktif.</div>';
+    }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada jenis pemasukan dengan jatah desa. Atur % Desa di Master Pemasukan.</div>';
 
-    var html = self.pageWrapper('Laporan Setoran',
-      summaryCards + cards
+    var html = self.pageWrapper('Laporan Setoran Desa',
+      summaryCards + cards + '<div id="setoranDesaModal"></div>'
     );
     document.getElementById('app').innerHTML = html;
+  },
+
+  showEditSetoranDesa: function(idx) {
+    var item = (this._laporanSetoran && this._laporanSetoran.data) ? this._laporanSetoran.data[idx] : null;
+    if (!item) return;
+    this._editSetoranDesaItem = item;
+    // Saran nilai setoran = kewajiban (target musyawaroh atau jatah desa)
+    var saran = item.sudahDiinput ? item.sudahSetor : item.kewajiban;
+    document.getElementById('setoranDesaModal').innerHTML =
+      '<div class="modal-overlay" onclick="App.closeModalSetoranDesa(event)">' +
+        '<div class="modal">' +
+          '<div class="modal-title">Setoran Desa: ' + item.nama + '</div>' +
+          '<div class="info-box" style="margin-bottom:10px;font-size:12px;">Jatah dari pemasukan: <b>' + App.formatNumber(item.jatahDesa) + '</b>' +
+            (item.topUpKas > 0 ? '<br>Perlu tambahan dari kas: <b>' + App.formatNumber(item.topUpKas) + '</b>' : '') +
+            '<br>Kewajiban setor: <b>' + App.formatNumber(item.kewajiban) + '</b></div>' +
+          '<div class="form-group"><label>Jumlah Disetor (Rp)</label><input type="number" id="sdRealisasi" value="' + saran + '"/></div>' +
+          '<div class="form-group"><label>Catatan</label><input type="text" id="sdCatatan" placeholder="opsional"/></div>' +
+          '<div id="setoranDesaError"></div>' +
+          '<button class="btn btn-primary" onclick="App.submitSetoranDesa()">Simpan Setoran</button>' +
+          '<button class="btn btn-outline mt-8" onclick="App.closeModalSetoranDesaDirect()">Batal</button>' +
+        '</div>' +
+      '</div>';
+  },
+
+  closeModalSetoranDesa: function(e) {
+    if (e.target.classList.contains('modal-overlay')) this.closeModalSetoranDesaDirect();
+  },
+
+  closeModalSetoranDesaDirect: function() {
+    var el = document.getElementById('setoranDesaModal');
+    if (el) el.innerHTML = '';
+  },
+
+  submitSetoranDesa: function() {
+    var item = this._editSetoranDesaItem;
+    var data = {
+      posId: item.id, // disimpan sebagai referensi jenis pemasukan
+      realisasi: parseInt(document.getElementById('sdRealisasi').value) || 0,
+      catatan: document.getElementById('sdCatatan').value
+    };
+    document.getElementById('setoranDesaError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Setoran berhasil disimpan ✓');
+          self.pageLaporanSetoran();
+        } else {
+          document.getElementById('setoranDesaError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('setoranDesaError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .submitRealisasiSetoran(data);
   },
 
   pageJamaahBelumBayar: function(posNama) {

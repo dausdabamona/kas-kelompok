@@ -1480,84 +1480,49 @@ function getLaporanSetoran() {
 
     var ss = getSS_();
 
-    // Hitung jumlah bulan sejak periode mulai
-    var jumlahBulan = hitungJumlahBulan(periode.tanggalMulai);
-
-    // Ambil anggota aktif
-    var sheetAnggota = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
-    var anggotaAktif = [];
-    var anggotaMap = {};
-    if (sheetAnggota && sheetAnggota.getLastRow() > 1) {
-      var angRows = sheetAnggota.getDataRange().getValues();
-      for (var i = 1; i < angRows.length; i++) {
-        if (!angRows[i][0]) continue;
-        var statusAng = String(angRows[i][4] || '').trim().toLowerCase();
-        if (statusAng !== 'nonaktif') {
-          anggotaAktif.push({
-            id: String(angRows[i][0]),
-            nama: String(angRows[i][1] || ''),
-            noTelp: String(angRows[i][2] || ''),
-            ir: Number(angRows[i][5]) || 0,
-            ir10: Number(angRows[i][6]) || 0,
-            index: Number(angRows[i][7]) || 0,
-            infakDaerah: Number(angRows[i][8]) || 0
-          });
-          anggotaMap[String(angRows[i][0])] = anggotaAktif[anggotaAktif.length - 1];
-        }
-      }
-    }
-    var jumlahJamaahAktif = anggotaAktif.length;
-
-    // Ambil pos setoran aktif
-    var sheetPos = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
-    var posAktif = [];
-    if (sheetPos && sheetPos.getLastRow() > 1) {
-      var posRows = sheetPos.getDataRange().getValues();
-      for (var i = 1; i < posRows.length; i++) {
-        if (!posRows[i][0]) continue;
-        if (String(posRows[i][4] || '').trim() === 'Aktif') {
-          posAktif.push({
-            id: String(posRows[i][0]),
-            nama: String(posRows[i][1] || ''),
-            tipe: String(posRows[i][2] || ''),
-            formula: String(posRows[i][3] || ''),
-            status: String(posRows[i][4] || '')
-          });
-        }
+    // ── 1. Master Pemasukan: ambil %Desa & %Daerah per jenis ──
+    var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    var jenisList = [];          // {kode, nama, kategori, pctDesa, pctDaerah}
+    var jenisMap = {};           // kode → jenis
+    if (sheetMaster && sheetMaster.getLastRow() > 1) {
+      var mRows = sheetMaster.getDataRange().getValues();
+      var mH = headerMap_(mRows[0]);
+      for (var i = 1; i < mRows.length; i++) {
+        var kode = String(hGet_(mRows[i], mH, 'kode', 0) || '');
+        if (!kode) continue;
+        var statusJ = String(hGet_(mRows[i], mH, 'status', 7) || '').trim().toLowerCase();
+        if (statusJ === 'nonaktif') continue;
+        var jenis = {
+          kode: kode,
+          nama: String(hGet_(mRows[i], mH, 'namapemasukan', 1) || hGet_(mRows[i], mH, 'nama', 1) || ''),
+          kategori: String(hGet_(mRows[i], mH, 'kategori', 2) || ''),
+          pctDesa: Number(hGet_(mRows[i], mH, '%desa', 4)) || 0,
+          pctDaerah: Number(hGet_(mRows[i], mH, '%daerah', 5)) || 0
+        };
+        jenisList.push(jenis);
+        jenisMap[kode] = jenis;
       }
     }
 
-    // Ambil tarif dari Master Musyawaroh — map by nama
-    var sheetMsy = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
-    var musyawarahMap = {};
-    if (sheetMsy && sheetMsy.getLastRow() > 1) {
-      var msyRows = sheetMsy.getDataRange().getValues();
-      for (var i = 1; i < msyRows.length; i++) {
-        if (msyRows[i][0]) {
-          musyawarahMap[String(msyRows[i][1] || '').toLowerCase().trim()] = Number(msyRows[i][2]) || 0;
-        }
+    // ── 2. Input Penerimaan: jumlahkan nominal per jenis untuk periode aktif ──
+    var totalMasukPerJenis = {}; // kode → total nominal
+    var sheetPmsk = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (sheetPmsk && sheetPmsk.getLastRow() > 1) {
+      var pRows = sheetPmsk.getDataRange().getValues();
+      var pH = headerMap_(pRows[0]);
+      for (var i = 1; i < pRows.length; i++) {
+        if (!hGet_(pRows[i], pH, 'id', 0)) continue;
+        if (String(hGet_(pRows[i], pH, 'periodeid', 1)) !== periodeId) continue;
+        var jid = String(hGet_(pRows[i], pH, 'jenisid', 2) || '');
+        var nom = Number(hGet_(pRows[i], pH, 'nominal', 5)) || 0;
+        totalMasukPerJenis[jid] = (totalMasukPerJenis[jid] || 0) + nom;
       }
     }
 
-    // Ambil Detail Buku IR untuk periode ini — gunakan headerMap_ agar tidak fragile
-    var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
-    var irData = [];
-    var irColMap = {}; // nama kolom → index
-    if (sheetIR && sheetIR.getLastRow() > 1) {
-      var irRows = sheetIR.getDataRange().getValues();
-      irColMap = headerMap_(irRows[0]);
-      for (var i = 1; i < irRows.length; i++) {
-        if (!irRows[i][0]) continue;
-        var irPerid = irColMap['periodeid'] !== undefined ? irRows[i][irColMap['periodeid']] : irRows[i][2];
-        if (String(irPerid) === periodeId) {
-          irData.push(irRows[i]);
-        }
-      }
-    }
-
-    // Ambil Setoran Desa per pos DAN per periode
+    // ── 3. Setoran Desa: realisasi per jenis (disimpan di kolom PosID) per periode ──
     var sheetSetoran = ss.getSheetByName(CONFIG.SHEETS.SETORAN_DESA);
-    var setoranMap = {};
+    var setoranMap = {};        // kode → realisasi
+    var setoranTerisi = {};     // kode → true jika sudah pernah diinput manual
     if (sheetSetoran && sheetSetoran.getLastRow() > 1) {
       var sRows = sheetSetoran.getDataRange().getValues();
       var sHdrL = headerMap_(sRows[0]);
@@ -1568,74 +1533,108 @@ function getLaporanSetoran() {
         if (!sRows[i][0]) continue;
         if (sRows[i][sp_perid] && String(sRows[i][sp_perid]) !== periodeId) continue;
         setoranMap[String(sRows[i][sp_posid])] = Number(sRows[i][sp_real]) || 0;
+        setoranTerisi[String(sRows[i][sp_posid])] = true;
       }
     }
 
-    // Hitung per pos
-    var totalTarget = 0, totalTerkumpul = 0, totalSudahSetor = 0;
+    // ── 3b. Target musyawaroh (tarif × jamaah aktif × bulan) — kewajiban setor ──
+    var jumlahBulan = hitungJumlahBulan(periode.tanggalMulai);
+    var sheetAnggota = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    var jumlahJamaahAktif = 0;
+    if (sheetAnggota && sheetAnggota.getLastRow() > 1) {
+      var angRows = sheetAnggota.getDataRange().getValues();
+      var angH = headerMap_(angRows[0]);
+      for (var i = 1; i < angRows.length; i++) {
+        if (!hGet_(angRows[i], angH, 'id', 0)) continue;
+        var statusAng = String(hGet_(angRows[i], angH, 'status', 4) || '').trim().toLowerCase();
+        if (statusAng !== 'nonaktif') jumlahJamaahAktif++;
+      }
+    }
+    var sheetMsy = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
+    var musyawarahMap = {};
+    if (sheetMsy && sheetMsy.getLastRow() > 1) {
+      var msyRows = sheetMsy.getDataRange().getValues();
+      var msyH = headerMap_(msyRows[0]);
+      for (var i = 1; i < msyRows.length; i++) {
+        if (!hGet_(msyRows[i], msyH, 'id', 0)) continue;
+        var msyNama = String(hGet_(msyRows[i], msyH, 'nama', 1) || '').toLowerCase().trim();
+        if (msyNama) musyawarahMap[msyNama] = Number(hGet_(msyRows[i], msyH, 'nilai', 2)) || 0;
+      }
+    }
+
+    // ── 4. Hitung jatah Desa per jenis ──
+    var totalJatahDesa = 0, totalJatahDaerah = 0, totalSudahSetor = 0, totalTargetMsy = 0, totalTopUp = 0;
     var dataPos = [];
+    for (var j = 0; j < jenisList.length; j++) {
+      var jn = jenisList[j];
+      if (jn.pctDesa <= 0 && jn.pctDaerah <= 0) continue;
 
-    for (var p = 0; p < posAktif.length; p++) {
-      var pos = posAktif[p];
-      var colIdx = mapPosNamaToBukuIRCol(pos.formula, pos.nama, irColMap);
+      var totalMasuk = totalMasukPerJenis[jn.kode] || 0;
+      var jatahDesa = Math.round(totalMasuk * jn.pctDesa / 100);
+      var jatahDaerah = Math.round(totalMasuk * jn.pctDaerah / 100);
 
-      // Tarif dari musyawaroh — cari berdasarkan nama pos
+      // Target musyawaroh (kewajiban) — cocokkan nama jenis ke master musyawaroh
       var tarif = 0;
-      var posNamaLower = pos.nama.toLowerCase().trim();
-      if (musyawarahMap[posNamaLower] !== undefined) {
-        tarif = musyawarahMap[posNamaLower];
+      var namaLower = jn.nama.toLowerCase().trim();
+      if (musyawarahMap[namaLower] !== undefined) {
+        tarif = musyawarahMap[namaLower];
       } else {
-        // Coba fuzzy match
         for (var mk in musyawarahMap) {
-          if (posNamaLower.indexOf(mk) !== -1 || mk.indexOf(posNamaLower) !== -1) {
-            tarif = musyawarahMap[mk];
-            break;
-          }
+          if (namaLower.indexOf(mk) !== -1 || mk.indexOf(namaLower) !== -1) { tarif = musyawarahMap[mk]; break; }
         }
       }
+      var targetMusyawaroh = tarif * jumlahJamaahAktif * jumlahBulan;
 
-      var target = tarif * jumlahJamaahAktif * jumlahBulan;
+      // Kewajiban setor ke desa = target musyawaroh jika ada, jika tidak pakai jatah desa
+      var kewajiban = targetMusyawaroh > 0 ? targetMusyawaroh : jatahDesa;
+      // Kekurangan dari pemasukan yang harus ditambah dari kas
+      var topUpKas = Math.max(0, kewajiban - jatahDesa);
 
-      // Hitung terkumpul dari Detail Buku IR
-      var terkumpul = 0;
-      if (colIdx >= 0) {
-        for (var r = 0; r < irData.length; r++) {
-          terkumpul += Number(irData[r][colIdx]) || 0;
-        }
-      }
-
-      var sudahSetor = setoranMap[pos.id] || 0;
-      var sisa = terkumpul - sudahSetor;
-      var kekurangan = target - terkumpul;
-      var persen = target > 0 ? Math.round((terkumpul / target) * 100 * 10) / 10 : 0;
+      // Realisasi: jika belum pernah diinput manual, sarankan = kewajiban (bisa diubah)
+      var sudahSetor = setoranTerisi[jn.kode] ? setoranMap[jn.kode] : 0;
+      var sisa = kewajiban - sudahSetor;
+      var persen = kewajiban > 0 ? Math.round((sudahSetor / kewajiban) * 100 * 10) / 10 : 0;
 
       var status, tindakLanjut;
-      if (target === 0) {
-        status = 'Belum Ada Target';
-        tindakLanjut = 'Belum ada target yang ditetapkan dari musyawarah untuk pos ini.';
-      } else if (terkumpul > target) {
-        status = 'Lebih';
-        tindakLanjut = 'Terkumpul melebihi target sebesar ' + fmtRp(terkumpul - target) + '. Kelebihan dapat digunakan untuk keperluan lain atau disimpan.';
-      } else if (terkumpul >= target) {
-        status = 'Tercapai';
-        tindakLanjut = 'Target tercapai. Segera setor ke desa sebesar ' + fmtRp(terkumpul - sudahSetor) + ' jika belum dilakukan.';
+      if (kewajiban === 0) {
+        status = 'Belum Ada';
+        tindakLanjut = 'Belum ada pemasukan / target untuk jenis ini.';
+      } else if (sudahSetor >= kewajiban) {
+        status = 'Lunas';
+        tindakLanjut = 'Setoran ke desa sudah lunas.';
+      } else if (sudahSetor > 0) {
+        status = 'Sebagian';
+        tindakLanjut = 'Sudah disetor ' + fmtRp(sudahSetor) + '. Sisa ' + fmtRp(sisa) +
+          (topUpKas > 0 ? ' (termasuk ' + fmtRp(topUpKas) + ' tambahan dari kas)' : '') + '.';
       } else {
-        status = 'Kurang';
-        tindakLanjut = 'Masih kurang ' + fmtRp(kekurangan) + ' dari target. Lakukan penagihan kepada jamaah yang belum membayar.';
+        status = 'Belum Setor';
+        tindakLanjut = 'Wajib setor ' + fmtRp(kewajiban) +
+          (topUpKas > 0 ? '. Pemasukan ' + fmtRp(jatahDesa) + ', kurang ' + fmtRp(topUpKas) + ' ditambah dari kas.' : '.');
       }
 
-      totalTarget += target;
-      totalTerkumpul += terkumpul;
+      totalJatahDesa += jatahDesa;
+      totalJatahDaerah += jatahDaerah;
       totalSudahSetor += sudahSetor;
+      totalTargetMsy += targetMusyawaroh;
+      totalTopUp += topUpKas;
 
       dataPos.push({
-        id: pos.id,
-        nama: pos.nama,
-        target: target,
-        terkumpul: terkumpul,
+        id: jn.kode,
+        nama: jn.nama,
+        kategori: jn.kategori,
+        pctDesa: jn.pctDesa,
+        pctDaerah: jn.pctDaerah,
+        totalMasuk: totalMasuk,
+        jatahDesa: jatahDesa,
+        jatahDaerah: jatahDaerah,
+        targetMusyawaroh: targetMusyawaroh,
+        kewajiban: kewajiban,
+        topUpKas: topUpKas,
+        target: kewajiban,        // kompat frontend lama
+        terkumpul: jatahDesa,
         sudahSetor: sudahSetor,
+        sudahDiinput: !!setoranTerisi[jn.kode],
         sisa: sisa,
-        kekurangan: kekurangan,
         persen: persen,
         status: status,
         tindakLanjut: tindakLanjut
@@ -1645,9 +1644,14 @@ function getLaporanSetoran() {
     var result = {
       periode: periode,
       summary: {
-        totalTarget: totalTarget,
-        totalTerkumpul: totalTerkumpul,
+        totalTarget: totalTargetMsy > 0 ? totalTargetMsy : totalJatahDesa,
+        totalTerkumpul: totalJatahDesa,
+        totalJatahDesa: totalJatahDesa,
+        totalJatahDaerah: totalJatahDaerah,
+        totalTargetMusyawaroh: totalTargetMsy,
         totalSudahSetor: totalSudahSetor,
+        totalTopUpKas: totalTopUp,
+        totalSisa: (totalTargetMsy > 0 ? totalTargetMsy : totalJatahDesa) - totalSudahSetor,
         jumlahJamaahAktif: jumlahJamaahAktif,
         jumlahBulan: jumlahBulan
       },
@@ -1662,7 +1666,7 @@ function getLaporanSetoran() {
   }
 }
 
-function getJamaahBelumBayar(posNama) {
+function getJamaahBelumBayar(jenisId) {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
@@ -1672,18 +1676,20 @@ function getJamaahBelumBayar(posNama) {
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
     var periodeId = periode.id;
 
-    // Ambil pos setoran untuk cari formula
-    var sheetPos = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
-    var posFormula = '';
-    if (sheetPos && sheetPos.getLastRow() > 1) {
-      var posRows = sheetPos.getDataRange().getValues();
-      for (var i = 1; i < posRows.length; i++) {
-        if (String(posRows[i][1] || '') === posNama) {
-          posFormula = String(posRows[i][3] || '');
+    // Cari nama jenis dari Master Pemasukan (untuk judul)
+    var jenisNama = String(jenisId);
+    var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetMaster && sheetMaster.getLastRow() > 1) {
+      var mRows = sheetMaster.getDataRange().getValues();
+      var mH = headerMap_(mRows[0]);
+      for (var i = 1; i < mRows.length; i++) {
+        if (String(hGet_(mRows[i], mH, 'kode', 0)) === String(jenisId)) {
+          jenisNama = String(hGet_(mRows[i], mH, 'namapemasukan', 1) || hGet_(mRows[i], mH, 'nama', 1) || jenisId);
           break;
         }
       }
     }
+
     // Ambil semua anggota aktif
     var sheetAnggota = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
     var anggotaMap = {};
@@ -1691,69 +1697,52 @@ function getJamaahBelumBayar(posNama) {
       var angRows = sheetAnggota.getDataRange().getValues();
       var angHdr = headerMap_(angRows[0]);
       for (var i = 1; i < angRows.length; i++) {
-        if (!angRows[i][0]) continue;
-        var statusAng = String(angRows[i][4] || '').trim().toLowerCase();
+        if (!hGet_(angRows[i], angHdr, 'id', 0)) continue;
+        var statusAng = String(hGet_(angRows[i], angHdr, 'status', 4) || '').trim().toLowerCase();
         if (statusAng !== 'nonaktif') {
-          var angId = String(angRows[i][0]);
+          var angId = String(hGet_(angRows[i], angHdr, 'id', 0));
           anggotaMap[angId] = {
             id: angId,
-            nama: String(angRows[i][1] || ''),
-            noTelp: String(angRows[i][2] || ''),
-            ir: Number(angRows[i][5]) || 0,
-            ir10: Number(angRows[i][6]) || 0,
-            index: Number(angRows[i][7]) || 0,
-            infakDaerah: Number(angRows[i][8]) || 0
+            nama: String(hGet_(angRows[i], angHdr, 'nama', 1) || ''),
+            noTelp: String(hGet_(angRows[i], angHdr, 'notelp', 2) || '')
           };
         }
       }
     }
 
-    // Ambil Detail Buku IR — gunakan headerMap_ agar kolom bebas urutan
-    var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
-    var sudahBayarMap = {};
-    var colIdx = -1;
-    if (sheetIR && sheetIR.getLastRow() > 1) {
-      var irRows = sheetIR.getDataRange().getValues();
-      var irHdr = headerMap_(irRows[0]);
-      colIdx = mapPosNamaToBukuIRCol(posFormula, posNama, irHdr);
-      var ir_perid = irHdr['periodeid'] !== undefined ? irHdr['periodeid'] : 2;
-      var ir_angid = irHdr['anggotaid'] !== undefined ? irHdr['anggotaid'] : 3;
-      for (var i = 1; i < irRows.length && colIdx >= 0; i++) {
-        if (!irRows[i][0]) continue;
-        if (String(irRows[i][ir_perid]) !== periodeId) continue;
-        var angId = String(irRows[i][ir_angid]);
-        var jumlah = Number(irRows[i][colIdx]) || 0;
-        if (jumlah > 0) {
-          sudahBayarMap[angId] = (sudahBayarMap[angId] || 0) + jumlah;
-        }
+    // Cek siapa yang sudah membayar jenis ini di Input Penerimaan periode aktif
+    var sudahBayarMap = {}; // anggotaId → total nominal
+    var sheetPmsk = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (sheetPmsk && sheetPmsk.getLastRow() > 1) {
+      var pRows = sheetPmsk.getDataRange().getValues();
+      var pH = headerMap_(pRows[0]);
+      for (var i = 1; i < pRows.length; i++) {
+        if (!hGet_(pRows[i], pH, 'id', 0)) continue;
+        if (String(hGet_(pRows[i], pH, 'periodeid', 1)) !== periodeId) continue;
+        if (String(hGet_(pRows[i], pH, 'jenisid', 2)) !== String(jenisId)) continue;
+        var aId = String(hGet_(pRows[i], pH, 'anggotaid', 3) || '');
+        if (!aId) continue;
+        var nom = Number(hGet_(pRows[i], pH, 'nominal', 5)) || 0;
+        sudahBayarMap[aId] = (sudahBayarMap[aId] || 0) + nom;
       }
     }
 
-    // Tentukan nama kolom yang dimaksud untuk lookup targetBayar dari anggota
-    var colName = mapPosNamaToIRColName(posFormula, posNama);
     var belumBayar = [], sudahBayar = [];
     for (var aid in anggotaMap) {
       var ang = anggotaMap[aid];
-      var targetBayar = 0;
-      if (colName === 'ir') targetBayar = ang.ir;
-      else if (colName === 'ir10') targetBayar = ang.ir10;
-      else if (colName === 'infakdaerah') targetBayar = ang.infakDaerah;
-      else if (colName === 'index') targetBayar = ang.index;
-
       if (sudahBayarMap[aid]) {
         sudahBayar.push({ id: aid, nama: ang.nama, noTelp: ang.noTelp, jumlahBayar: sudahBayarMap[aid] });
       } else {
-        belumBayar.push({ id: aid, nama: ang.nama, noTelp: ang.noTelp, targetBayar: targetBayar });
+        belumBayar.push({ id: aid, nama: ang.nama, noTelp: ang.noTelp, targetBayar: 0 });
       }
     }
 
-    // Urutkan berdasarkan nama
     belumBayar.sort(function(a, b) { return a.nama.localeCompare(b.nama); });
     sudahBayar.sort(function(a, b) { return a.nama.localeCompare(b.nama); });
 
     return {
       success: true,
-      posNama: posNama,
+      posNama: jenisNama,
       periode: periode,
       belumBayar: belumBayar,
       sudahBayar: sudahBayar,
