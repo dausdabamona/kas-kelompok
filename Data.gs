@@ -924,7 +924,12 @@ function submitRealisasiSetoran(data) {
       var id = generateID('STR');
       sheet.appendRow([id, data.posId, Number(data.target) || 0, Number(data.realisasi) || 0, data.catatan || '', auth.user.email, new Date()]);
     }
-    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
+    try {
+      var cache2 = CacheService.getScriptCache();
+      cache2.remove('master_trx_data');
+      var periode2 = getPeriodeAktif();
+      if (periode2) cache2.remove('laporan_setoran_' + periode2.id);
+    } catch(e) {}
     return { success: true };
   } catch(e) {
     return { success: false, message: e.message };
@@ -1222,6 +1227,361 @@ function updatePendingStatus(id, status, catatan) {
       }
     }
     return { success: false, message: 'Data tidak ditemukan' };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ──────────────────────────────────────────────────────
+// LAPORAN SETORAN
+// ──────────────────────────────────────────────────────
+
+function hitungJumlahBulan(tglMulai) {
+  try {
+    if (!tglMulai) return 1;
+    var mulai;
+    if (tglMulai instanceof Date) {
+      mulai = tglMulai;
+    } else {
+      // Coba parse dd/MM/yyyy atau ISO
+      var s = String(tglMulai).trim();
+      if (s.indexOf('/') !== -1) {
+        var parts = s.split('/');
+        if (parts.length === 3) {
+          mulai = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+        }
+      } else {
+        mulai = new Date(s);
+      }
+    }
+    if (!mulai || isNaN(mulai.getTime())) return 1;
+    var now = new Date();
+    var bulan = (now.getFullYear() - mulai.getFullYear()) * 12 + (now.getMonth() - mulai.getMonth());
+    // Jika hari sekarang >= hari mulai, hitung bulan ini juga
+    if (now.getDate() >= mulai.getDate()) bulan += 1;
+    return bulan < 1 ? 1 : bulan;
+  } catch(e) {
+    return 1;
+  }
+}
+
+function mapPosNamaToBukuIRCol(formula, nama) {
+  // Kolom Detail Buku IR (0-indexed): [5]=IR, [6]=IR 1/10, [7]=Cicilan, [8]=InfakDaerah, [9]=Index
+  if (formula) {
+    var f = String(formula).toLowerCase().trim();
+    if (f === 'ir' || f === 'col5' || f === '5') return 5;
+    if (f.indexOf('1/10') !== -1 || f === 'ir10' || f === 'col6' || f === '6') return 6;
+    if (f === 'cicilan' || f === 'col7' || f === '7') return 7;
+    if (f.indexOf('infak') !== -1 || f === 'col8' || f === '8') return 8;
+    if (f === 'index' || f === 'col9' || f === '9') return 9;
+  }
+  if (nama) {
+    var n = String(nama).toLowerCase().trim();
+    if (n === 'ir' && n.indexOf('1/10') === -1 && n.indexOf('10') === -1) return 5;
+    if (n.indexOf('1/10') !== -1 || n === 'ir10' || n === 'ir 10') return 6;
+    if (n.indexOf('cicilan') !== -1) return 7;
+    if (n.indexOf('infak') !== -1) return 8;
+    if (n.indexOf('index') !== -1) return 9;
+    // fallback: if contains 'ir' without '1/10'
+    if (n.indexOf('ir') !== -1 && n.indexOf('1/10') === -1) return 5;
+  }
+  return -1;
+}
+
+function getLaporanSetoran() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+    var periodeId = periode.id;
+
+    var cache = CacheService.getScriptCache();
+    var cacheKey = 'laporan_setoran_' + periodeId;
+    var cached = cache.get(cacheKey);
+    if (cached) {
+      try {
+        var parsed = JSON.parse(cached);
+        parsed.success = true;
+        return parsed;
+      } catch(e) {}
+    }
+
+    var ss = getSS_();
+
+    // Hitung jumlah bulan sejak periode mulai
+    var jumlahBulan = hitungJumlahBulan(periode.tanggalMulai);
+
+    // Ambil anggota aktif
+    var sheetAnggota = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    var anggotaAktif = [];
+    var anggotaMap = {};
+    if (sheetAnggota && sheetAnggota.getLastRow() > 1) {
+      var angRows = sheetAnggota.getDataRange().getValues();
+      for (var i = 1; i < angRows.length; i++) {
+        if (!angRows[i][0]) continue;
+        var statusAng = String(angRows[i][4] || '').trim().toLowerCase();
+        if (statusAng !== 'nonaktif') {
+          anggotaAktif.push({
+            id: String(angRows[i][0]),
+            nama: String(angRows[i][1] || ''),
+            noTelp: String(angRows[i][2] || ''),
+            ir: Number(angRows[i][5]) || 0,
+            ir10: Number(angRows[i][6]) || 0,
+            index: Number(angRows[i][7]) || 0,
+            infakDaerah: Number(angRows[i][8]) || 0
+          });
+          anggotaMap[String(angRows[i][0])] = anggotaAktif[anggotaAktif.length - 1];
+        }
+      }
+    }
+    var jumlahJamaahAktif = anggotaAktif.length;
+
+    // Ambil pos setoran aktif
+    var sheetPos = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
+    var posAktif = [];
+    if (sheetPos && sheetPos.getLastRow() > 1) {
+      var posRows = sheetPos.getDataRange().getValues();
+      for (var i = 1; i < posRows.length; i++) {
+        if (!posRows[i][0]) continue;
+        if (String(posRows[i][4] || '').trim() === 'Aktif') {
+          posAktif.push({
+            id: String(posRows[i][0]),
+            nama: String(posRows[i][1] || ''),
+            tipe: String(posRows[i][2] || ''),
+            formula: String(posRows[i][3] || ''),
+            status: String(posRows[i][4] || '')
+          });
+        }
+      }
+    }
+
+    // Ambil tarif dari Master Musyawaroh — map by nama
+    var sheetMsy = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
+    var musyawarahMap = {};
+    if (sheetMsy && sheetMsy.getLastRow() > 1) {
+      var msyRows = sheetMsy.getDataRange().getValues();
+      for (var i = 1; i < msyRows.length; i++) {
+        if (msyRows[i][0]) {
+          musyawarahMap[String(msyRows[i][1] || '').toLowerCase().trim()] = Number(msyRows[i][2]) || 0;
+        }
+      }
+    }
+
+    // Ambil Detail Buku IR untuk periode ini
+    var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+    // Kolom: [0]=ID, [1]=TransaksiID, [2]=PeriodeID, [3]=AnggotaID, [4]=Tanggal, [5]=IR, [6]=IR10, [7]=Cicilan, [8]=InfakDaerah, [9]=Index, [10]=Total
+    var irData = [];
+    if (sheetIR && sheetIR.getLastRow() > 1) {
+      var irRows = sheetIR.getDataRange().getValues();
+      for (var i = 1; i < irRows.length; i++) {
+        if (!irRows[i][0]) continue;
+        if (irRows[i][2] === periodeId) {
+          irData.push(irRows[i]);
+        }
+      }
+    }
+
+    // Ambil Setoran Desa (sudahSetor) per pos
+    var sheetSetoran = ss.getSheetByName(CONFIG.SHEETS.SETORAN_DESA);
+    var setoranMap = {};
+    if (sheetSetoran && sheetSetoran.getLastRow() > 1) {
+      var sRows = sheetSetoran.getDataRange().getValues();
+      for (var i = 1; i < sRows.length; i++) {
+        if (sRows[i][0]) {
+          setoranMap[String(sRows[i][1])] = Number(sRows[i][3]) || 0;
+        }
+      }
+    }
+
+    // Hitung per pos
+    var totalTarget = 0, totalTerkumpul = 0, totalSudahSetor = 0;
+    var dataPos = [];
+
+    for (var p = 0; p < posAktif.length; p++) {
+      var pos = posAktif[p];
+      var colIdx = mapPosNamaToBukuIRCol(pos.formula, pos.nama);
+
+      // Tarif dari musyawaroh — cari berdasarkan nama pos
+      var tarif = 0;
+      var posNamaLower = pos.nama.toLowerCase().trim();
+      if (musyawarahMap[posNamaLower] !== undefined) {
+        tarif = musyawarahMap[posNamaLower];
+      } else {
+        // Coba fuzzy match
+        for (var mk in musyawarahMap) {
+          if (posNamaLower.indexOf(mk) !== -1 || mk.indexOf(posNamaLower) !== -1) {
+            tarif = musyawarahMap[mk];
+            break;
+          }
+        }
+      }
+
+      var target = tarif * jumlahJamaahAktif * jumlahBulan;
+
+      // Hitung terkumpul dari Detail Buku IR
+      var terkumpul = 0;
+      if (colIdx >= 0) {
+        for (var r = 0; r < irData.length; r++) {
+          terkumpul += Number(irData[r][colIdx]) || 0;
+        }
+      }
+
+      var sudahSetor = setoranMap[pos.id] || 0;
+      var sisa = terkumpul - sudahSetor;
+      var kekurangan = target - terkumpul;
+      var persen = target > 0 ? Math.round((terkumpul / target) * 100 * 10) / 10 : 0;
+
+      var status, tindakLanjut;
+      if (target === 0) {
+        status = 'Belum Ada Target';
+        tindakLanjut = 'Belum ada target yang ditetapkan dari musyawarah untuk pos ini.';
+      } else if (terkumpul > target) {
+        status = 'Lebih';
+        tindakLanjut = 'Terkumpul melebihi target sebesar ' + fmtRp(terkumpul - target) + '. Kelebihan dapat digunakan untuk keperluan lain atau disimpan.';
+      } else if (terkumpul >= target) {
+        status = 'Tercapai';
+        tindakLanjut = 'Target tercapai. Segera setor ke desa sebesar ' + fmtRp(terkumpul - sudahSetor) + ' jika belum dilakukan.';
+      } else {
+        status = 'Kurang';
+        tindakLanjut = 'Masih kurang ' + fmtRp(kekurangan) + ' dari target. Lakukan penagihan kepada jamaah yang belum membayar.';
+      }
+
+      totalTarget += target;
+      totalTerkumpul += terkumpul;
+      totalSudahSetor += sudahSetor;
+
+      dataPos.push({
+        id: pos.id,
+        nama: pos.nama,
+        target: target,
+        terkumpul: terkumpul,
+        sudahSetor: sudahSetor,
+        sisa: sisa,
+        kekurangan: kekurangan,
+        persen: persen,
+        status: status,
+        tindakLanjut: tindakLanjut
+      });
+    }
+
+    var result = {
+      periode: periode,
+      summary: {
+        totalTarget: totalTarget,
+        totalTerkumpul: totalTerkumpul,
+        totalSudahSetor: totalSudahSetor,
+        jumlahJamaahAktif: jumlahJamaahAktif,
+        jumlahBulan: jumlahBulan
+      },
+      data: dataPos
+    };
+
+    try { cache.put(cacheKey, JSON.stringify(result), 90); } catch(e) {}
+    result.success = true;
+    return result;
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function getJamaahBelumBayar(posNama) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+    var periodeId = periode.id;
+
+    // Ambil pos setoran untuk cari formula
+    var sheetPos = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
+    var posFormula = '';
+    if (sheetPos && sheetPos.getLastRow() > 1) {
+      var posRows = sheetPos.getDataRange().getValues();
+      for (var i = 1; i < posRows.length; i++) {
+        if (String(posRows[i][1] || '') === posNama) {
+          posFormula = String(posRows[i][3] || '');
+          break;
+        }
+      }
+    }
+    var colIdx = mapPosNamaToBukuIRCol(posFormula, posNama);
+
+    // Ambil semua anggota aktif
+    var sheetAnggota = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    var anggotaMap = {};
+    if (sheetAnggota && sheetAnggota.getLastRow() > 1) {
+      var angRows = sheetAnggota.getDataRange().getValues();
+      for (var i = 1; i < angRows.length; i++) {
+        if (!angRows[i][0]) continue;
+        var statusAng = String(angRows[i][4] || '').trim().toLowerCase();
+        if (statusAng !== 'nonaktif') {
+          var angId = String(angRows[i][0]);
+          anggotaMap[angId] = {
+            id: angId,
+            nama: String(angRows[i][1] || ''),
+            noTelp: String(angRows[i][2] || ''),
+            ir: Number(angRows[i][5]) || 0,
+            ir10: Number(angRows[i][6]) || 0,
+            index: Number(angRows[i][7]) || 0,
+            infakDaerah: Number(angRows[i][8]) || 0
+          };
+        }
+      }
+    }
+
+    // Ambil Detail Buku IR untuk periode ini
+    var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+    var sudahBayarMap = {}; // anggotaId -> jumlah
+    if (sheetIR && sheetIR.getLastRow() > 1 && colIdx >= 0) {
+      var irRows = sheetIR.getDataRange().getValues();
+      for (var i = 1; i < irRows.length; i++) {
+        if (!irRows[i][0]) continue;
+        if (irRows[i][2] !== periodeId) continue;
+        var angId = String(irRows[i][3]);
+        var jumlah = Number(irRows[i][colIdx]) || 0;
+        if (jumlah > 0) {
+          sudahBayarMap[angId] = (sudahBayarMap[angId] || 0) + jumlah;
+        }
+      }
+    }
+
+    var belumBayar = [], sudahBayar = [];
+    for (var aid in anggotaMap) {
+      var ang = anggotaMap[aid];
+      // Tentukan target bayar per anggota berdasarkan kolom
+      var targetBayar = 0;
+      if (colIdx === 5) targetBayar = ang.ir;
+      else if (colIdx === 6) targetBayar = ang.ir10;
+      else if (colIdx === 8) targetBayar = ang.infakDaerah;
+      else if (colIdx === 9) targetBayar = ang.index;
+
+      if (sudahBayarMap[aid]) {
+        sudahBayar.push({ id: aid, nama: ang.nama, noTelp: ang.noTelp, jumlahBayar: sudahBayarMap[aid] });
+      } else {
+        belumBayar.push({ id: aid, nama: ang.nama, noTelp: ang.noTelp, targetBayar: targetBayar });
+      }
+    }
+
+    // Urutkan berdasarkan nama
+    belumBayar.sort(function(a, b) { return a.nama.localeCompare(b.nama); });
+    sudahBayar.sort(function(a, b) { return a.nama.localeCompare(b.nama); });
+
+    return {
+      success: true,
+      posNama: posNama,
+      periode: periode,
+      belumBayar: belumBayar,
+      sudahBayar: sudahBayar,
+      total: {
+        belum: belumBayar.length,
+        sudah: sudahBayar.length,
+        totalAnggota: belumBayar.length + sudahBayar.length
+      }
+    };
   } catch(e) {
     return { success: false, message: e.message };
   }
