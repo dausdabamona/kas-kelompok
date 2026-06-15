@@ -31,10 +31,12 @@ var App = {
         '<div class="login-card">' +
           '<div class="form-group">' +
             '<label>Email Anda</label>' +
-            '<input type="email" id="loginEmail" placeholder="contoh@email.com" />' +
+            '<input type="email" id="loginEmail" placeholder="contoh@email.com" ' +
+              'onkeydown="if(event.key===\'Enter\'){App.doLogin();}" autocomplete="email" />' +
           '</div>' +
           '<div id="loginError"></div>' +
-          '<button class="btn btn-primary" onclick="App.doLogin()">Masuk →</button>' +
+          '<button id="loginBtn" class="btn btn-primary" onclick="App.doLogin()">Masuk →</button>' +
+          '<p style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:12px;">Proses login pertama mungkin membutuhkan<br>beberapa detik. Mohon tunggu.</p>' +
         '</div>' +
       '</div>';
     setTimeout(function() {
@@ -49,7 +51,13 @@ var App = {
       document.getElementById('loginError').innerHTML = '<div class="error-box">Masukkan email Anda.</div>';
       return;
     }
-    document.getElementById('loginError').innerHTML = '<div class="info-box">Memeriksa...</div>';
+    var btn = document.getElementById('loginBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Memeriksa akun...'; }
+    document.getElementById('loginError').innerHTML =
+      '<div class="info-box" style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="display:inline-block;width:14px;height:14px;border:2px solid #BFDBFE;border-top-color:#2563EB;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></span>' +
+        'Memverifikasi akun, mohon tunggu...' +
+      '</div>';
     var self = this;
     google.script.run
       .withSuccessHandler(function(res) {
@@ -57,11 +65,13 @@ var App = {
           self.currentUser = res.user;
           self.loadDashboard();
         } else {
-          document.getElementById('loginError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+          if (btn) { btn.disabled = false; btn.textContent = 'Masuk →'; }
+          document.getElementById('loginError').innerHTML = '<div class="error-box">❌ ' + res.message + '</div>';
         }
       })
       .withFailureHandler(function(err) {
-        document.getElementById('loginError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+        if (btn) { btn.disabled = false; btn.textContent = 'Masuk →'; }
+        document.getElementById('loginError').innerHTML = '<div class="error-box">❌ Gagal terhubung. Coba lagi.<br><small>' + err.message + '</small></div>';
       })
       .loginWithEmail(email);
   },
