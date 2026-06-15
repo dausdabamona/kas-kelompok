@@ -1,8 +1,17 @@
 // ──────────────────────────────────────────────────────
+// SPREADSHEET — buka sekali per eksekusi
+// ──────────────────────────────────────────────────────
+var _ss = null;
+function getSS_() {
+  if (!_ss) _ss = SpreadsheetApp.openById(getSpreadsheetId());
+  return _ss;
+}
+
+// ──────────────────────────────────────────────────────
 // PERIODE
 // ──────────────────────────────────────────────────────
 function getPeriodeAktif() {
-  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var ss = getSS_();
   var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
   if (!sheet) return null;
   var data = sheet.getDataRange().getValues();
@@ -15,7 +24,7 @@ function getPeriodeAktif() {
 }
 
 function getAllPeriode() {
-  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var ss = getSS_();
   var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
   if (!sheet) return { success: true, data: [] };
   var data = sheet.getDataRange().getValues();
@@ -33,24 +42,40 @@ function getDashboardData() {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+
+    // Cek cache (non-user-specific: saldo + periode, bukan data user)
+    var cache = CacheService.getScriptCache();
+    var cacheKey = 'dashboard_saldo';
+    var cached = cache.get(cacheKey);
+    var saldoData = null;
+    if (cached) {
+      try { saldoData = JSON.parse(cached); } catch(e) {}
+    }
+
+    var ss = getSS_();
     var periode = getPeriodeAktif();
     var periodeId = periode ? periode.id : null;
 
-    var sheetK = ss.getSheetByName(CONFIG.SHEETS.KELOMPOK);
-    var namaKelompok = 'Kas Kelompok';
-    if (sheetK && sheetK.getLastRow() > 1) namaKelompok = sheetK.getRange(2, 2).getValue() || namaKelompok;
-
-    var saldo = calculateSaldo(periodeId);
+    if (!saldoData) {
+      var namaKelompok = 'Kas Kelompok';
+      try {
+        var sheetK = ss.getSheetByName(CONFIG.SHEETS.KELOMPOK);
+        if (sheetK && sheetK.getLastRow() > 1) namaKelompok = sheetK.getRange(2, 2).getValue() || namaKelompok;
+      } catch(e) {}
+      var saldo = { tunai: 0, bank: 0 };
+      try { saldo = calculateSaldo(periodeId); } catch(e) {}
+      saldoData = { namaKelompok: namaKelompok, tunai: saldo.tunai, bank: saldo.bank };
+      try { cache.put(cacheKey, JSON.stringify(saldoData), 60); } catch(e) {}
+    }
 
     return {
       success: true,
       user: auth.user,
       periode: periode,
-      namaKelompok: namaKelompok,
-      kasTunai: saldo.tunai,
-      kasBank: saldo.bank,
-      totalKas: saldo.tunai + saldo.bank
+      namaKelompok: saldoData.namaKelompok,
+      kasTunai: saldoData.tunai,
+      kasBank: saldoData.bank,
+      totalKas: saldoData.tunai + saldoData.bank
     };
   } catch(e) {
     return { success: false, message: e.message };
@@ -58,7 +83,7 @@ function getDashboardData() {
 }
 
 function calculateSaldo(periodeId) {
-  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var ss = getSS_();
   var tunai = 0, bank = 0;
 
   var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
@@ -110,7 +135,7 @@ function submitTransaksi(data) {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
 
@@ -138,6 +163,8 @@ function submitTransaksi(data) {
       logActivity(auth.user.email, 'MUTASI', 'Arah: ' + data.arah + ' Nominal: ' + data.nominal);
     }
 
+    // Invalidate saldo cache setiap ada transaksi baru
+    try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };
@@ -149,7 +176,7 @@ function submitTransaksi(data) {
 // ──────────────────────────────────────────────────────
 function getMasterPemasukan() {
   try {
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
@@ -165,7 +192,7 @@ function getMasterPemasukan() {
 
 function getMasterPengeluaran() {
   try {
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
@@ -181,7 +208,7 @@ function getMasterPengeluaran() {
 
 function getAnggota() {
   try {
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
@@ -206,7 +233,7 @@ function addAnggota(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.ANGGOTA);
@@ -225,7 +252,7 @@ function updateAnggota(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -246,7 +273,7 @@ function deleteAnggota(id) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -266,7 +293,7 @@ function getBukuIRData() {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var periode = getPeriodeAktif();
     var periodeId = periode ? periode.id : null;
 
@@ -333,7 +360,7 @@ function submitRincianIR(data) {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.BUKU_IR);
@@ -358,7 +385,7 @@ function getRekapitulasiData() {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var periode = getPeriodeAktif();
     var periodeId = periode ? periode.id : null;
 
@@ -432,7 +459,7 @@ function addPosPemasukan(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.PEMASUKAN);
@@ -450,7 +477,7 @@ function updatePosPemasukan(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -470,7 +497,7 @@ function deletePosPemasukan(id) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -490,7 +517,7 @@ function addPosPengeluaran(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.PENGELUARAN);
@@ -508,7 +535,7 @@ function updatePosPengeluaran(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -528,7 +555,7 @@ function deletePosPengeluaran(id) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -546,7 +573,7 @@ function deletePosPengeluaran(id) {
 // ──────────────────────────────────────────────────────
 function getPosSetoranAll() {
   try {
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
@@ -564,7 +591,7 @@ function addPosSetoran(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.POS_SETORAN);
@@ -582,7 +609,7 @@ function updatePosSetoran(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -602,7 +629,7 @@ function deletePosSetoran(id) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -620,7 +647,7 @@ function deletePosSetoran(id) {
 // ──────────────────────────────────────────────────────
 function getMusyawaroh() {
   try {
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
@@ -638,7 +665,7 @@ function addMusyawaroh(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.MUSYAWARAH);
@@ -656,7 +683,7 @@ function updateMusyawaroh(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -676,7 +703,7 @@ function deleteMusyawaroh(id) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -696,7 +723,7 @@ function getRekapSetoran() {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheetPos = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
     var sheetSetoran = ss.getSheetByName(CONFIG.SHEETS.SETORAN_DESA);
     if (!sheetPos) return { success: true, data: [] };
@@ -737,7 +764,7 @@ function submitRealisasiSetoran(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.SETORAN_DESA);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.SETORAN_DESA);
@@ -826,7 +853,7 @@ function getBankDaily(periodeId) {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_DAILY);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
@@ -852,7 +879,7 @@ function addBankTransaction(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_DAILY);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.BANK_DAILY);
@@ -875,7 +902,7 @@ function updateBankDaily(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_DAILY);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
@@ -901,7 +928,7 @@ function getBankPending(periodeId) {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_PENDING);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
@@ -940,7 +967,7 @@ function addPendingTransaction(data) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_PENDING);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.BANK_PENDING);
@@ -1028,7 +1055,7 @@ function updatePendingStatus(id, status, catatan) {
   try {
     var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_PENDING);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
