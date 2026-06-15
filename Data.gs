@@ -11,16 +11,30 @@ function getSS_() {
 // PERIODE
 // ──────────────────────────────────────────────────────
 function getPeriodeAktif() {
-  var ss = getSS_();
-  var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
-  if (!sheet) return null;
-  var data = sheet.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][3] === CONFIG.STATUS.OPEN) {
-      return { id: data[i][0], nama: data[i][1], tanggalMulai: data[i][2], status: data[i][3] };
+  try {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+    if (!sheet) return null;
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][3]) === CONFIG.STATUS.OPEN) {
+        // Konversi Date ke string agar bisa di-serialize google.script.run
+        var tgl = data[i][2];
+        if (tgl instanceof Date) {
+          try { tgl = Utilities.formatDate(tgl, Session.getScriptTimeZone(), 'dd/MM/yyyy'); } catch(e) { tgl = String(tgl); }
+        }
+        return {
+          id: String(data[i][0] || ''),
+          nama: String(data[i][1] || ''),
+          tanggalMulai: tgl ? String(tgl) : '',
+          status: String(data[i][3] || '')
+        };
+      }
     }
+    return null;
+  } catch(e) {
+    return null;
   }
-  return null;
 }
 
 function getAllPeriode() {

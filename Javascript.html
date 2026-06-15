@@ -116,16 +116,31 @@ var App = {
       .withSuccessHandler(function(res) {
         done = true;
         clearTimeout(timeout);
-        if (res.success) {
-          self.renderDashboard(res);
-        } else {
-          self.showError(res.message);
+        try {
+          if (res && res.success) {
+            self.renderDashboard(res);
+          } else {
+            self.showError((res && res.message) || 'Gagal memuat data. Pastikan spreadsheet sudah dikonfigurasi.');
+          }
+        } catch(err) {
+          // Tampilkan error JS yang sebenarnya — membantu debugging
+          document.getElementById('app').innerHTML =
+            '<div style="padding:20px;">' +
+              '<div class="error-box"><strong>Error Render:</strong> ' + err.message + '</div>' +
+              '<button class="btn btn-outline mt-16" onclick="App.loadDashboard()">🔄 Coba Lagi</button>' +
+            '</div>';
         }
       })
       .withFailureHandler(function(err) {
         done = true;
         clearTimeout(timeout);
-        self.showError('Gagal memuat dashboard: ' + err.message);
+        document.getElementById('app').innerHTML =
+          '<div style="padding:20px;">' +
+            '<div class="error-box"><strong>Error Server:</strong> ' + (err ? err.message : 'Tidak diketahui') + '</div>' +
+            '<p style="font-size:13px;color:var(--text-muted);margin-top:8px;">Pastikan email Anda ada di sheet <strong>Master User</strong> dan sheet <strong>Master Period</strong> sudah dibuat.</p>' +
+            '<button class="btn btn-outline mt-16" onclick="App.loadDashboard()">🔄 Coba Lagi</button>' +
+            '<button class="btn btn-danger mt-8" onclick="App.doLogout()" style="max-width:100%;">Logout</button>' +
+          '</div>';
       })
       .getDashboardData();
   },
