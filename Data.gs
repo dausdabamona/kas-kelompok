@@ -1107,22 +1107,55 @@ function getRekapSetoran() {
       }
     }
 
+    // Baca BUKU_IR untuk hitung auto-terkumpul per pos setoran tipe 'auto'
+    var irData = [], irColMap = {};
+    var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+    if (sheetIR && sheetIR.getLastRow() > 1) {
+      var irRows = sheetIR.getDataRange().getValues();
+      irColMap = headerMap_(irRows[0]);
+      var ir_perid = irColMap['periodeid'] !== undefined ? irColMap['periodeid'] : 2;
+      for (var j = 1; j < irRows.length; j++) {
+        if (!irRows[j][0]) continue;
+        if (periodeId && String(irRows[j][ir_perid]) !== periodeId) continue;
+        irData.push(irRows[j]);
+      }
+    }
+
     var result = [];
+    var posH = headerMap_(posRows[0]);
     for (var i = 1; i < posRows.length; i++) {
-      if (!posRows[i][0] || posRows[i][4] !== 'Aktif') continue;
+      if (!posRows[i][0]) continue;
+      var posStatus = posH['status'] !== undefined ? posRows[i][posH['status']] : posRows[i][4];
+      if (String(posStatus) !== 'Aktif') continue;
       var posId = posRows[i][0];
-      var target = Number(posRows[i][5]) || 0;
+      var posNama = posRows[i][posH['nama'] !== undefined ? posH['nama'] : 1];
+      var posTipe = String(posRows[i][posH['tipe'] !== undefined ? posH['tipe'] : 2] || '').toLowerCase();
+      var posFormula = String(posRows[i][posH['formula'] !== undefined ? posH['formula'] : 3] || '');
+
+      // Untuk pos tipe 'auto': target = jumlah terkumpul dari kolom BUKU_IR
+      var target = 0;
+      if (posTipe === 'auto') {
+        var colIdx = mapPosNamaToBukuIRCol(posFormula, posNama, irColMap);
+        if (colIdx >= 0) {
+          for (var r = 0; r < irData.length; r++) {
+            target += Number(irData[r][colIdx]) || 0;
+          }
+        }
+      } else {
+        target = Number(posRows[i][posH['target'] !== undefined ? posH['target'] : 5]) || 0;
+      }
+
       var realisasi = setoranMap[posId] ? setoranMap[posId].realisasi : 0;
       var sisa = target - realisasi;
-      var pct = target > 0 ? Math.round((realisasi / target) * 100) : 0;
+      var pct = target > 0 ? Math.round((realisasi / target) * 100) : (realisasi > 0 ? 100 : 0);
       result.push({
-        id: posId, nama: posRows[i][1], tipe: posRows[i][2],
+        id: posId, nama: posNama, tipe: posTipe,
         target: target, realisasi: realisasi, sisa: sisa, persen: pct,
         status: pct >= 100 ? 'Lunas' : 'Belum Lunas',
-        catatan: setoranMap[posId] ? setoranMap[posId].catatan : ''
+        catatan: setoranMap[posId] ? setoranMap[posId].catatan : '',
+        isAuto: posTipe === 'auto'
       });
     }
-    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, data: result };
   } catch(e) {
     return { success: false, message: e.message };
