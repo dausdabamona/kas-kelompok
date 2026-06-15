@@ -206,21 +206,47 @@ function getTransaksiMasterData() {
     }
     var ss = getSS_();
     // Pemasukan
+    // Kolom: A=Kode, B=Nama, C=Kategori, D=%Kelompok, E=%Desa, F=%Daerah, G=InputTipe, H=Status
     var pemasukan = [];
     var sheetP = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
     if (sheetP) {
       var rp = sheetP.getDataRange().getValues();
+      var header = rp[0] || [];
+      // Cari kolom Status secara dinamis (toleran terhadap urutan kolom berbeda)
+      var statusColP = -1;
+      for (var c = 0; c < header.length; c++) {
+        if (String(header[c]).toLowerCase().trim() === 'status') { statusColP = c; break; }
+      }
       for (var i = 1; i < rp.length; i++) {
-        if (rp[i][0]) pemasukan.push({ id: String(rp[i][0]), nama: String(rp[i][1]), kategori: String(rp[i][2] || ''), status: String(rp[i][3] || '') });
+        if (!rp[i][0]) continue;
+        var statusVal = statusColP >= 0 ? String(rp[i][statusColP] || '') : 'Aktif';
+        pemasukan.push({
+          id: String(rp[i][0]),
+          nama: String(rp[i][1] || ''),
+          kategori: String(rp[i][2] || ''),
+          status: statusVal
+        });
       }
     }
-    // Pengeluaran
+    // Pengeluaran — cari kolom Status secara dinamis
     var pengeluaran = [];
     var sheetPK = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
     if (sheetPK) {
       var rpk = sheetPK.getDataRange().getValues();
+      var headerPK = rpk[0] || [];
+      var statusColPK = -1;
+      for (var c = 0; c < headerPK.length; c++) {
+        if (String(headerPK[c]).toLowerCase().trim() === 'status') { statusColPK = c; break; }
+      }
       for (var i = 1; i < rpk.length; i++) {
-        if (rpk[i][0]) pengeluaran.push({ id: String(rpk[i][0]), nama: String(rpk[i][1]), kategori: String(rpk[i][2] || ''), status: String(rpk[i][3] || '') });
+        if (!rpk[i][0]) continue;
+        var statusVal = statusColPK >= 0 ? String(rpk[i][statusColPK] || '') : 'Aktif';
+        pengeluaran.push({
+          id: String(rpk[i][0]),
+          nama: String(rpk[i][1] || ''),
+          kategori: String(rpk[i][2] || ''),
+          status: statusVal
+        });
       }
     }
     // Anggota
@@ -252,9 +278,14 @@ function getMasterPemasukan() {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
     if (!sheet) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
+    var header = rows[0] || [];
+    var statusCol = 3; // default kolom D
+    for (var c = 0; c < header.length; c++) {
+      if (String(header[c]).toLowerCase().trim() === 'status') { statusCol = c; break; }
+    }
     var result = [];
     for (var i = 1; i < rows.length; i++) {
-      if (rows[i][0]) result.push({ id: rows[i][0], nama: rows[i][1], kategori: rows[i][2], status: rows[i][3] });
+      if (rows[i][0]) result.push({ id: String(rows[i][0]), nama: String(rows[i][1] || ''), kategori: String(rows[i][2] || ''), status: String(rows[i][statusCol] || '') });
     }
     return { success: true, data: result };
   } catch(e) {
