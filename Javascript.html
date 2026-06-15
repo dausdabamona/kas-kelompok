@@ -1,0 +1,1174 @@
+<script>
+var App = {
+  history: [],
+
+  // ─────────────────────────────────────────────────
+  // INIT & AUTH
+  // ─────────────────────────────────────────────────
+  init: function() {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(user) {
+        if (user) {
+          self.currentUser = user;
+          self.loadDashboard();
+        } else {
+          self.renderLogin();
+        }
+      })
+      .withFailureHandler(function() {
+        self.renderLogin();
+      })
+      .getCurrentUser();
+  },
+
+  renderLogin: function() {
+    document.getElementById('app').innerHTML =
+      '<div class="login-container">' +
+        '<div class="login-logo">🕌</div>' +
+        '<div class="login-title">Kas Kelompok</div>' +
+        '<p class="login-subtitle">Manajemen Keuangan Jamaah</p>' +
+        '<div class="login-card">' +
+          '<div class="form-group">' +
+            '<label>Email Anda</label>' +
+            '<input type="email" id="loginEmail" placeholder="contoh@email.com" />' +
+          '</div>' +
+          '<div id="loginError"></div>' +
+          '<button class="btn btn-primary" onclick="App.doLogin()">Masuk →</button>' +
+        '</div>' +
+      '</div>';
+    setTimeout(function() {
+      var el = document.getElementById('loginEmail');
+      if (el) el.focus();
+    }, 100);
+  },
+
+  doLogin: function() {
+    var email = (document.getElementById('loginEmail').value || '').trim();
+    if (!email) {
+      document.getElementById('loginError').innerHTML = '<div class="error-box">Masukkan email Anda.</div>';
+      return;
+    }
+    document.getElementById('loginError').innerHTML = '<div class="info-box">Memeriksa...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.currentUser = res.user;
+          self.loadDashboard();
+        } else {
+          document.getElementById('loginError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('loginError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .loginWithEmail(email);
+  },
+
+  doLogout: function() {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function() {
+        self.currentUser = null;
+        self.history = [];
+        self.renderLogin();
+      })
+      .withFailureHandler(function() {
+        self.renderLogin();
+      })
+      .logoutUser();
+  },
+
+  // ─────────────────────────────────────────────────
+  // DASHBOARD
+  // ─────────────────────────────────────────────────
+  loadDashboard: function() {
+    this.history = [];
+    this.showLoading('Memuat dashboard...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.renderDashboard(res);
+        } else {
+          self.showError(res.message);
+        }
+      })
+      .withFailureHandler(function(err) {
+        self.showError(err.message);
+      })
+      .getDashboardData();
+  },
+
+  renderDashboard: function(data) {
+    var u = data.user || {};
+    var inisial = (u.nama || 'U').charAt(0).toUpperCase();
+    var isAdmin = u.role === 'ADMIN';
+    var periode = data.periode;
+
+    var html = '<div class="page-content" style="padding-top:20px;">' +
+      '<div class="user-info">' +
+        '<div class="avatar">' + inisial + '</div>' +
+        '<div>' +
+          '<div class="user-name">' + (u.nama || '-') + '</div>' +
+          '<div class="user-role">' + (u.role || '') + ' · ' + (data.namaKelompok || 'Kas Kelompok') + '</div>' +
+          (periode ? '<div class="text-small text-muted mt-8">Periode: ' + periode.nama + '</div>' : '<div class="text-small text-danger mt-8">⚠ Tidak ada periode aktif</div>') +
+        '</div>' +
+        '<button class="btn btn-sm" style="background:#FEF2F2;color:#DC2626;border:none;cursor:pointer;" onclick="App.doLogout()">Keluar</button>' +
+      '</div>' +
+
+      '<div class="total-card">' +
+        '<div class="total-label">💰 Total Kas</div>' +
+        '<div class="total-amount">' + this.formatNumber(data.totalKas || 0) + '</div>' +
+      '</div>' +
+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">' +
+        '<div class="kas-card tunai">' +
+          '<div class="kas-label">🪙 Kas Tunai</div>' +
+          '<div class="kas-amount">' + this.formatNumber(data.kasTunai || 0) + '</div>' +
+        '</div>' +
+        '<div class="kas-card bank">' +
+          '<div class="kas-label">🏦 Kas Bank</div>' +
+          '<div class="kas-amount">' + this.formatNumber(data.kasBank || 0) + '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<button class="btn btn-success mb-16" onclick="App.pageTransaksi()">+ Input Transaksi</button>' +
+
+      '<div class="section-title mb-8">Menu</div>' +
+      '<div class="menu-grid">' +
+        '<div class="menu-item" onclick="App.pageBukuIR()"><span class="icon">📖</span><span>Buku IR</span></div>' +
+        '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' +
+        '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' +
+        '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' +
+        (isAdmin ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
+        '<div class="menu-item" onclick="App.loadDashboard()"><span class="icon">🔄</span><span>Refresh</span></div>' +
+      '</div>' +
+
+      '<div class="app-footer">' + (data.namaKelompok || 'Kas Kelompok') + '</div>' +
+    '</div>';
+
+    document.getElementById('app').innerHTML = html;
+  },
+
+  // ─────────────────────────────────────────────────
+  // TRANSAKSI
+  // ─────────────────────────────────────────────────
+  pageTransaksi: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat...');
+    var self = this;
+    var masterP, masterPK, anggota;
+    var loaded = 0;
+    function checkDone() {
+      loaded++;
+      if (loaded === 3) self.renderTransaksiForm('masuk', masterP, masterPK, anggota);
+    }
+    google.script.run.withSuccessHandler(function(r) { masterP = r.data || []; checkDone(); }).withFailureHandler(function() { masterP = []; checkDone(); }).getMasterPemasukan();
+    google.script.run.withSuccessHandler(function(r) { masterPK = r.data || []; checkDone(); }).withFailureHandler(function() { masterPK = []; checkDone(); }).getMasterPengeluaran();
+    google.script.run.withSuccessHandler(function(r) { anggota = r.data || []; checkDone(); }).withFailureHandler(function() { anggota = []; checkDone(); }).getAnggota();
+    this._masterP = null; this._masterPK = null; this._anggota = null;
+  },
+
+  renderTransaksiForm: function(tipe, masterP, masterPK, anggota) {
+    this._masterP = masterP;
+    this._masterPK = masterPK;
+    this._anggota = anggota;
+    this._tipeTransaksi = tipe;
+
+    var formHtml = '';
+    var today = new Date().toISOString().split('T')[0];
+
+    if (tipe === 'masuk') {
+      var opts = (masterP || []).filter(function(p) { return p.status === 'Aktif'; }).map(function(p) {
+        return '<option value="' + p.id + '" data-kategori="' + (p.kategori || '') + '">' + p.nama + '</option>';
+      }).join('');
+      var angOpts = '<option value="">-- Pilih Jamaah --</option>' + (anggota || []).map(function(a) {
+        return '<option value="' + a.id + '">' + a.nama + '</option>';
+      }).join('');
+      formHtml =
+        '<div class="form-group"><label>Jenis Pemasukan</label>' +
+        '<select id="trxJenis" onchange="App.onJenisMasukChange()">' + opts + '</select></div>' +
+        '<div id="jamaahGroup" style="display:none;" class="form-group"><label>Jamaah</label>' +
+        '<select id="trxAnggota">' + angOpts + '</select></div>' +
+        '<div class="form-group"><label>Nominal (Rp)</label>' +
+        '<input type="number" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
+        '<div id="previewNominal"></div></div>' +
+        '<div class="form-group"><label>Sumber Kas</label>' +
+        '<select id="trxSumber"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>' +
+        '<div class="form-group"><label>Tanggal</label><input type="date" id="trxTanggal" value="' + today + '"/></div>' +
+        '<div class="form-group"><label>Catatan</label><textarea id="trxCatatan" placeholder="Opsional..."></textarea></div>';
+      setTimeout(function() { App.onJenisMasukChange(); }, 100);
+    } else if (tipe === 'keluar') {
+      var opts = (masterPK || []).filter(function(p) { return p.status === 'Aktif'; }).map(function(p) {
+        return '<option value="' + p.id + '">' + p.nama + '</option>';
+      }).join('');
+      formHtml =
+        '<div class="form-group"><label>Jenis Pengeluaran</label><select id="trxJenis">' + opts + '</select></div>' +
+        '<div class="form-group"><label>Nominal (Rp)</label>' +
+        '<input type="number" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
+        '<div id="previewNominal"></div></div>' +
+        '<div class="form-group"><label>Sumber Kas</label>' +
+        '<select id="trxSumber"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>' +
+        '<div class="form-group"><label>Tanggal</label><input type="date" id="trxTanggal" value="' + today + '"/></div>' +
+        '<div class="form-group"><label>Catatan</label><textarea id="trxCatatan" placeholder="Opsional..."></textarea></div>';
+    } else {
+      formHtml =
+        '<div class="form-group"><label>Arah Mutasi</label>' +
+        '<select id="trxArah"><option value="setor">Setor (Tunai → Bank)</option><option value="tarik">Tarik (Bank → Tunai)</option></select></div>' +
+        '<div class="form-group"><label>Nominal (Rp)</label>' +
+        '<input type="number" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
+        '<div id="previewNominal"></div></div>' +
+        '<div class="form-group"><label>Tanggal</label><input type="date" id="trxTanggal" value="' + today + '"/></div>';
+    }
+
+    var html = this.pageWrapper('Input Transaksi',
+      '<div class="tabs">' +
+        '<button class="tab-btn' + (tipe === 'masuk' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'masuk\', App._masterP, App._masterPK, App._anggota)">💚 Masuk</button>' +
+        '<button class="tab-btn' + (tipe === 'keluar' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'keluar\', App._masterP, App._masterPK, App._anggota)">❤️ Keluar</button>' +
+        '<button class="tab-btn' + (tipe === 'mutasi' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'mutasi\', App._masterP, App._masterPK, App._anggota)">🔄 Mutasi</button>' +
+      '</div>' +
+      formHtml +
+      '<div id="trxError"></div>' +
+      '<button class="btn btn-primary" onclick="App.submitTransaksi()">Simpan Transaksi</button>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  onJenisMasukChange: function() {
+    var sel = document.getElementById('trxJenis');
+    if (!sel) return;
+    var opt = sel.options[sel.selectedIndex];
+    var kategori = opt ? (opt.getAttribute('data-kategori') || '') : '';
+    var grp = document.getElementById('jamaahGroup');
+    if (grp) grp.style.display = kategori === 'Buku IR' ? 'block' : 'none';
+  },
+
+  onNominalInput: function() {
+    var val = parseInt(document.getElementById('trxNominal').value) || 0;
+    var el = document.getElementById('previewNominal');
+    if (el && val > 0) {
+      el.innerHTML = '<div class="preview-box"><span class="preview-amount">' + this.formatNumber(val) + '</span></div>';
+    } else if (el) {
+      el.innerHTML = '';
+    }
+  },
+
+  submitTransaksi: function() {
+    var tipe = this._tipeTransaksi;
+    var nominal = parseInt(document.getElementById('trxNominal').value) || 0;
+    var tanggal = document.getElementById('trxTanggal').value;
+    if (nominal <= 0) {
+      document.getElementById('trxError').innerHTML = '<div class="error-box">Nominal harus lebih dari 0.</div>';
+      return;
+    }
+    var data = { tipe: tipe, nominal: nominal, tanggal: tanggal };
+    if (tipe === 'masuk') {
+      data.jenisId = document.getElementById('trxJenis').value;
+      data.sumberKas = document.getElementById('trxSumber').value;
+      data.anggotaId = (document.getElementById('trxAnggota') || {}).value || '';
+      data.catatan = document.getElementById('trxCatatan').value;
+    } else if (tipe === 'keluar') {
+      data.jenisId = document.getElementById('trxJenis').value;
+      data.sumberKas = document.getElementById('trxSumber').value;
+      data.catatan = document.getElementById('trxCatatan').value;
+    } else {
+      data.arah = document.getElementById('trxArah').value;
+    }
+    document.getElementById('trxError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Transaksi berhasil disimpan ✓');
+          self.loadDashboard();
+        } else {
+          document.getElementById('trxError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('trxError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .submitTransaksi(data);
+  },
+
+  // ─────────────────────────────────────────────────
+  // BUKU IR
+  // ─────────────────────────────────────────────────
+  pageBukuIR: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat Buku IR...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) self.renderBukuIR(res.data, 'belum');
+        else self.showError(res.message);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getBukuIRData();
+  },
+
+  renderBukuIR: function(data, activeTab) {
+    this._bukuIRData = data;
+    var belum = data.belumDirincikan || [];
+    var sudah = data.sudahDirincikan || [];
+
+    var listBelum = belum.length === 0
+      ? '<div class="text-center text-muted" style="padding:32px;">Semua sudah dirincikan 👍</div>'
+      : belum.map(function(item) {
+          return '<div class="card" style="cursor:pointer;" onclick="App.pageRincianIR(' + JSON.stringify(item).replace(/'/g, '&#39;') + ')">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+              '<div>' +
+                '<div class="font-bold">' + (item.anggota ? item.anggota.nama : item.anggotaId || 'Umum') + '</div>' +
+                '<div class="text-small text-muted">' + App.formatDate(item.tanggal) + '</div>' +
+              '</div>' +
+              '<div style="text-align:right;">' +
+                '<div class="font-bold text-success">' + App.formatNumber(item.nominal) + '</div>' +
+                '<div class="text-small" style="color:#F59E0B;">· ' + (item.sumberKas || '-') + '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+
+    var listSudah = sudah.length === 0
+      ? '<div class="text-center text-muted" style="padding:32px;">Belum ada yang dirincikan.</div>'
+      : sudah.map(function(item) {
+          return '<div class="card">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+              '<div>' +
+                '<div class="font-bold">' + (item.anggota ? item.anggota.nama : item.anggotaId || 'Umum') + '</div>' +
+                '<div class="text-small text-muted">' + App.formatDate(item.tanggal) + '</div>' +
+              '</div>' +
+              '<div style="text-align:right;">' +
+                '<div class="font-bold">' + App.formatNumber(item.nominal) + '</div>' +
+                '<span class="status-badge lunas">✓ Dirincikan</span>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+
+    var html = this.pageWrapper('Buku IR',
+      '<div class="tabs">' +
+        '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderBukuIR(App._bukuIRData, \'belum\')">Belum <span class="badge">' + belum.length + '</span></button>' +
+        '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderBukuIR(App._bukuIRData, \'sudah\')">Sudah <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
+      '</div>' +
+      (activeTab === 'belum' ? listBelum : listSudah)
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  pageRincianIR: function(item) {
+    this.history.push('bukuIR');
+    this._rincianItem = item;
+    var anggota = item.anggota || {};
+    var total = item.nominal;
+
+    var html = this.pageWrapper('Rincian IR',
+      '<div class="card">' +
+        '<div class="stat-row"><span class="stat-label">Jamaah</span><span class="stat-value">' + (anggota.nama || '-') + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Total Diterima</span><span class="stat-value text-success">' + this.formatNumber(total) + '</span></div>' +
+      '</div>' +
+      '<div class="form-group"><label>IR (Rp)</label><input type="number" id="rIR" value="' + (anggota.ir || 0) + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>1/10 IR (Rp)</label><input type="number" id="rIR10" value="' + (anggota.ir10 || 0) + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Cicilan (Rp)</label><input type="number" id="rCicilan" value="0" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="number" id="rInfakDaerah" value="' + (anggota.infakDaerah || 0) + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Index (Rp)</label><input type="number" id="rIndex" value="' + (anggota.index || 0) + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div id="validasiRincian" class="mb-16"></div>' +
+      '<div id="rincianError"></div>' +
+      '<button class="btn btn-primary" onclick="App.submitRincianIR()">Simpan Rincian</button>'
+    );
+    document.getElementById('app').innerHTML = html;
+    setTimeout(function() { App.cekTotalRincian(); }, 100);
+  },
+
+  cekTotalRincian: function() {
+    var ir = parseInt(document.getElementById('rIR').value) || 0;
+    var ir10 = parseInt(document.getElementById('rIR10').value) || 0;
+    var cicilan = parseInt(document.getElementById('rCicilan').value) || 0;
+    var infak = parseInt(document.getElementById('rInfakDaerah').value) || 0;
+    var index = parseInt(document.getElementById('rIndex').value) || 0;
+    var totalRincian = ir + ir10 + cicilan + infak + index;
+    var totalTrx = this._rincianItem ? this._rincianItem.nominal : 0;
+    var el = document.getElementById('validasiRincian');
+    if (totalRincian === totalTrx) {
+      el.innerHTML = '<div class="valid-indicator ok">✓ Total sesuai: ' + this.formatNumber(totalRincian) + '</div>';
+    } else {
+      el.innerHTML = '<div class="valid-indicator error">✗ Total rincian: ' + this.formatNumber(totalRincian) + ' (selisih: ' + this.formatNumber(totalTrx - totalRincian) + ')</div>';
+    }
+    return totalRincian === totalTrx;
+  },
+
+  submitRincianIR: function() {
+    if (!this.cekTotalRincian()) {
+      document.getElementById('rincianError').innerHTML = '<div class="error-box">Total rincian harus sama dengan total transaksi.</div>';
+      return;
+    }
+    var item = this._rincianItem;
+    var data = {
+      transaksiId: item.id, periodeId: item.periodeId, anggotaId: item.anggotaId,
+      tanggal: item.tanggal,
+      ir: parseInt(document.getElementById('rIR').value) || 0,
+      ir10: parseInt(document.getElementById('rIR10').value) || 0,
+      cicilan: parseInt(document.getElementById('rCicilan').value) || 0,
+      infakDaerah: parseInt(document.getElementById('rInfakDaerah').value) || 0,
+      index: parseInt(document.getElementById('rIndex').value) || 0,
+      total: item.nominal
+    };
+    document.getElementById('rincianError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Rincian berhasil disimpan ✓');
+          self.pageBukuIR();
+        } else {
+          document.getElementById('rincianError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('rincianError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .submitRincianIR(data);
+  },
+
+  // ─────────────────────────────────────────────────
+  // KELOLA BUKU
+  // ─────────────────────────────────────────────────
+  pageKelolaBuku: function() {
+    this.history.push('dashboard');
+    var html = this.pageWrapper('Kelola Buku',
+      '<div class="kelola-menu-item" onclick="App.pageRekapitulasi()">' +
+        '<div class="kelola-menu-icon">📊</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Rekapitulasi</div><div class="kelola-menu-desc">Ringkasan pemasukan & pengeluaran</div></div>' +
+        '<span>›</span>' +
+      '</div>' +
+      '<div class="kelola-menu-item" onclick="App.pageRekonsiliasi()">' +
+        '<div class="kelola-menu-icon">🏦</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Rekonsiliasi Bank</div><div class="kelola-menu-desc">Cocokkan saldo sistem dengan buku bank</div></div>' +
+        '<span>›</span>' +
+      '</div>' +
+      '<div class="kelola-menu-item" onclick="App.pageTutupBuku()">' +
+        '<div class="kelola-menu-icon">📚</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Tutup Buku</div><div class="kelola-menu-desc">Tutup periode & buka periode baru</div></div>' +
+        '<span>›</span>' +
+      '</div>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  pageRekapitulasi: function() {
+    this.history.push('kelolaBuku');
+    this.showLoading('Memuat rekapitulasi...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        var rowsP = (res.pemasukan || []).map(function(p) {
+          return '<tr><td>' + (p.jenis || '-') + '</td><td>' + App.formatDate(p.tanggal) + '</td><td style="text-align:right;">' + App.formatNumber(p.nominal) + '</td><td>' + (p.sumber || '-') + '</td></tr>';
+        }).join('') || '<tr><td colspan="4" class="text-center text-muted" style="padding:16px;">Belum ada data</td></tr>';
+        var rowsPK = (res.pengeluaran || []).map(function(p) {
+          return '<tr><td>' + (p.jenis || '-') + '</td><td>' + App.formatDate(p.tanggal) + '</td><td style="text-align:right;">' + App.formatNumber(p.nominal) + '</td><td>' + (p.sumber || '-') + '</td></tr>';
+        }).join('') || '<tr><td colspan="4" class="text-center text-muted" style="padding:16px;">Belum ada data</td></tr>';
+
+        var html = self.pageWrapper('Rekapitulasi',
+          '<div class="card">' +
+            '<div class="stat-row"><span class="stat-label">Periode</span><span class="stat-value">' + (res.periode ? res.periode.nama : '-') + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Saldo Tunai</span><span class="stat-value text-warning">' + App.formatNumber(res.saldoTunai || 0) + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Saldo Bank</span><span class="stat-value" style="color:var(--bank);">' + App.formatNumber(res.saldoBank || 0) + '</span></div>' +
+          '</div>' +
+          '<div class="section-header"><span class="section-title">Pemasukan</span></div>' +
+          '<div style="overflow-x:auto;"><table class="tabel-rekap"><thead><tr><th>Jenis</th><th>Tanggal</th><th>Nominal</th><th>Kas</th></tr></thead><tbody>' + rowsP + '</tbody>' +
+          '<tfoot><tr class="total-row"><td colspan="2">TOTAL</td><td style="text-align:right;">' + App.formatNumber((res.totalPemasukanTunai || 0) + (res.totalPemasukanBank || 0)) + '</td><td></td></tr></tfoot></table></div>' +
+          '<div class="section-header"><span class="section-title">Pengeluaran</span></div>' +
+          '<div style="overflow-x:auto;"><table class="tabel-rekap"><thead><tr><th>Jenis</th><th>Tanggal</th><th>Nominal</th><th>Kas</th></tr></thead><tbody>' + rowsPK + '</tbody>' +
+          '<tfoot><tr class="total-row"><td colspan="2">TOTAL</td><td style="text-align:right;">' + App.formatNumber((res.totalPengeluaranTunai || 0) + (res.totalPengeluaranBank || 0)) + '</td><td></td></tr></tfoot></table></div>'
+        );
+        document.getElementById('app').innerHTML = html;
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getRekapitulasiData();
+  },
+
+  pageTutupBuku: function() {
+    this.history.push('kelolaBuku');
+    var html = this.pageWrapper('Tutup Buku',
+      '<div class="info-box" style="margin-top:20px;">🚧 Fitur Tutup Buku sedang dalam pengembangan.<br><br>Akan segera hadir di versi berikutnya.</div>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  // ─────────────────────────────────────────────────
+  // SETORAN DESA
+  // ─────────────────────────────────────────────────
+  pageSetoranDesa: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat setoran desa...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        var data = res.data || [];
+        var totalTarget = 0, totalRealisasi = 0;
+        var rows = data.map(function(item) {
+          totalTarget += item.target;
+          totalRealisasi += item.realisasi;
+          var fill = Math.min(item.persen, 100);
+          var fillClass = fill >= 100 ? '' : fill >= 60 ? 'warning' : 'danger';
+          return '<tr>' +
+            '<td>' + item.nama + '<div class="progress-bar"><div class="progress-fill ' + fillClass + '" style="width:' + fill + '%;"></div></div></td>' +
+            '<td style="text-align:right;">' + App.formatNumber(item.target) + '</td>' +
+            '<td style="text-align:right;">' + App.formatNumber(item.realisasi) + '</td>' +
+            '<td style="text-align:right;">' + App.formatNumber(item.sisa) + '</td>' +
+            '<td>' + item.persen + '%</td>' +
+            '<td><span class="status-badge ' + (item.status === 'Lunas' ? 'lunas' : 'belum') + '">' + item.status + '</span></td>' +
+            '<td><button class="action-btn-sm edit" onclick="App.showEditSetoran(' + JSON.stringify(item).replace(/'/g, '&#39;') + ')">Edit</button></td>' +
+          '</tr>';
+        }).join('') || '<tr><td colspan="7" class="text-center text-muted" style="padding:16px;">Belum ada data pos setoran aktif.</td></tr>';
+
+        var html = self.pageWrapper('Setoran Desa',
+          '<div style="overflow-x:auto;">' +
+          '<table class="tabel-rekap"><thead><tr><th>Pos</th><th>Target</th><th>Realisasi</th><th>Sisa</th><th>%</th><th>Status</th><th>Aksi</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+          '<tfoot><tr class="total-row"><td>TOTAL</td><td style="text-align:right;">' + App.formatNumber(totalTarget) + '</td><td style="text-align:right;">' + App.formatNumber(totalRealisasi) + '</td><td style="text-align:right;">' + App.formatNumber(totalTarget - totalRealisasi) + '</td><td colspan="3"></td></tr></tfoot>' +
+          '</table></div>' +
+          '<div id="setoranModal"></div>'
+        );
+        document.getElementById('app').innerHTML = html;
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getRekapSetoran();
+  },
+
+  showEditSetoran: function(item) {
+    this._editSetoranItem = item;
+    document.getElementById('setoranModal').innerHTML =
+      '<div class="modal-overlay" onclick="App.closeModalSetoran(event)">' +
+        '<div class="modal">' +
+          '<div class="modal-title">Edit Setoran: ' + item.nama + '</div>' +
+          '<div class="form-group"><label>Target (Rp)</label><input type="number" id="sTarget" value="' + item.target + '"/></div>' +
+          '<div class="form-group"><label>Realisasi (Rp)</label><input type="number" id="sRealisasi" value="' + item.realisasi + '"/></div>' +
+          '<div class="form-group"><label>Catatan</label><input type="text" id="sCatatan" value="' + (item.catatan || '') + '"/></div>' +
+          '<div id="setoranError"></div>' +
+          '<button class="btn btn-primary" onclick="App.submitSetoran()">Simpan</button>' +
+          '<button class="btn btn-outline mt-8" onclick="App.closeModalSetoranDirect()">Batal</button>' +
+        '</div>' +
+      '</div>';
+  },
+
+  closeModalSetoran: function(e) {
+    if (e.target.classList.contains('modal-overlay')) this.closeModalSetoranDirect();
+  },
+
+  closeModalSetoranDirect: function() {
+    var el = document.getElementById('setoranModal');
+    if (el) el.innerHTML = '';
+  },
+
+  submitSetoran: function() {
+    var item = this._editSetoranItem;
+    var data = {
+      posId: item.id,
+      target: parseInt(document.getElementById('sTarget').value) || 0,
+      realisasi: parseInt(document.getElementById('sRealisasi').value) || 0,
+      catatan: document.getElementById('sCatatan').value
+    };
+    document.getElementById('setoranError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Setoran berhasil diperbarui ✓');
+          self.pageSetoranDesa();
+        } else {
+          document.getElementById('setoranError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('setoranError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .submitRealisasiSetoran(data);
+  },
+
+  // ─────────────────────────────────────────────────
+  // KELOLA JAMAAH
+  // ─────────────────────────────────────────────────
+  pageJamaah: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat daftar jamaah...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        var data = res.data || [];
+        var list = data.map(function(a) {
+          var inisial = (a.nama || 'J').charAt(0).toUpperCase();
+          return '<div class="jamaah-card">' +
+            '<div class="jamaah-avatar">' + inisial + '</div>' +
+            '<div class="jamaah-info">' +
+              '<div class="jamaah-nama">' + a.nama + '</div>' +
+              '<div class="jamaah-detail">IR: ' + App.formatNumber(a.ir) + ' · 1/10: ' + App.formatNumber(a.ir10) + '</div>' +
+              '<div class="jamaah-detail">' + (a.noTelp || '-') + ' · ' + (a.status || '') + '</div>' +
+            '</div>' +
+            '<div style="display:flex;flex-direction:column;gap:6px;">' +
+              '<button class="action-btn-sm edit" onclick="App.showFormJamaah(' + JSON.stringify(a).replace(/'/g, '&#39;') + ')">Edit</button>' +
+              '<button class="action-btn-sm hapus" onclick="App.deleteJamaah(\'' + a.id + '\')">Hapus</button>' +
+            '</div>' +
+          '</div>';
+        }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada jamaah.</div>';
+
+        var html = self.pageWrapper('Kelola Jamaah',
+          '<button class="btn btn-primary mb-16" onclick="App.showFormJamaah(null)">+ Tambah Jamaah</button>' +
+          list +
+          '<div id="jamaahModal"></div>'
+        );
+        document.getElementById('app').innerHTML = html;
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getAnggota();
+  },
+
+  showFormJamaah: function(item) {
+    this._editJamaah = item;
+    var isEdit = !!item;
+    var v = item || { nama: '', noTelp: '', alamat: '', status: 'Aktif', ir: 0, ir10: 0, index: 0, infakDaerah: 0 };
+    document.getElementById('jamaahModal').innerHTML =
+      '<div class="modal-overlay" onclick="App.closeModalJamaah(event)">' +
+        '<div class="modal">' +
+          '<div class="modal-title">' + (isEdit ? 'Edit' : 'Tambah') + ' Jamaah</div>' +
+          '<div class="form-group"><label>Nama *</label><input type="text" id="jNama" value="' + (v.nama || '') + '"/></div>' +
+          '<div class="form-group"><label>No. Telepon</label><input type="tel" id="jTelp" value="' + (v.noTelp || '') + '"/></div>' +
+          '<div class="form-group"><label>Alamat</label><input type="text" id="jAlamat" value="' + (v.alamat || '') + '"/></div>' +
+          '<div class="form-group"><label>Status</label><select id="jStatus"><option value="Aktif"' + (v.status === 'Aktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>' +
+          '<div class="form-group"><label>IR (Rp)</label><input type="number" id="jIR" value="' + (v.ir || 0) + '"/></div>' +
+          '<div class="form-group"><label>1/10 IR (Rp)</label><input type="number" id="jIR10" value="' + (v.ir10 || 0) + '"/></div>' +
+          '<div class="form-group"><label>Index (Rp)</label><input type="number" id="jIndex" value="' + (v.index || 0) + '"/></div>' +
+          '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="number" id="jInfak" value="' + (v.infakDaerah || 0) + '"/></div>' +
+          '<div id="jamaahFormError"></div>' +
+          '<button class="btn btn-primary" onclick="App.submitJamaah()">Simpan</button>' +
+          '<button class="btn btn-outline mt-8" onclick="App.closeModalJamaahDirect()">Batal</button>' +
+        '</div>' +
+      '</div>';
+  },
+
+  closeModalJamaah: function(e) {
+    if (e.target.classList.contains('modal-overlay')) this.closeModalJamaahDirect();
+  },
+
+  closeModalJamaahDirect: function() {
+    var el = document.getElementById('jamaahModal');
+    if (el) el.innerHTML = '';
+  },
+
+  submitJamaah: function() {
+    var nama = document.getElementById('jNama').value.trim();
+    if (!nama) {
+      document.getElementById('jamaahFormError').innerHTML = '<div class="error-box">Nama wajib diisi.</div>';
+      return;
+    }
+    var data = {
+      nama: nama,
+      noTelp: document.getElementById('jTelp').value,
+      alamat: document.getElementById('jAlamat').value,
+      status: document.getElementById('jStatus').value,
+      ir: parseInt(document.getElementById('jIR').value) || 0,
+      ir10: parseInt(document.getElementById('jIR10').value) || 0,
+      index: parseInt(document.getElementById('jIndex').value) || 0,
+      infakDaerah: parseInt(document.getElementById('jInfak').value) || 0
+    };
+    var isEdit = !!this._editJamaah;
+    if (isEdit) data.id = this._editJamaah.id;
+    document.getElementById('jamaahFormError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    var fn = isEdit ? 'updateAnggota' : 'addAnggota';
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast((isEdit ? 'Data diperbarui' : 'Jamaah ditambahkan') + ' ✓');
+          self.pageJamaah();
+        } else {
+          document.getElementById('jamaahFormError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('jamaahFormError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      [fn](data);
+  },
+
+  deleteJamaah: function(id) {
+    if (!confirm('Hapus jamaah ini?')) return;
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) { self.toast('Jamaah dihapus'); self.pageJamaah(); }
+        else self.toast('Gagal: ' + res.message);
+      })
+      .withFailureHandler(function(err) { self.toast('Error: ' + err.message); })
+      .deleteAnggota(id);
+  },
+
+  // ─────────────────────────────────────────────────
+  // SETTING
+  // ─────────────────────────────────────────────────
+  pageSetting: function() {
+    this.history.push('dashboard');
+    var html = this.pageWrapper('Setting',
+      '<div class="kelola-menu-item" onclick="App.pagePosPemasukan()">' +
+        '<div class="kelola-menu-icon">💚</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Pos Pemasukan</div><div class="kelola-menu-desc">Kelola jenis-jenis pemasukan</div></div><span>›</span>' +
+      '</div>' +
+      '<div class="kelola-menu-item" onclick="App.pagePosPengeluaran()">' +
+        '<div class="kelola-menu-icon">❤️</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Pos Pengeluaran</div><div class="kelola-menu-desc">Kelola jenis-jenis pengeluaran</div></div><span>›</span>' +
+      '</div>' +
+      '<div class="kelola-menu-item" onclick="App.pagePosSetoran()">' +
+        '<div class="kelola-menu-icon">🏘️</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Pos Setoran</div><div class="kelola-menu-desc">Kelola pos setoran desa</div></div><span>›</span>' +
+      '</div>' +
+      '<div class="kelola-menu-item" onclick="App.pageMusyawaroh()">' +
+        '<div class="kelola-menu-icon">🤝</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Hasil Musyawaroh</div><div class="kelola-menu-desc">Kelola keputusan musyawarah</div></div><span>›</span>' +
+      '</div>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  pagePosPemasukan: function() {
+    this.history.push('setting');
+    this._settingMode = 'pemasukan';
+    this.showLoading('Memuat...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) { self.renderSettingList('Pos Pemasukan', res.data || [], 'pemasukan'); })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getMasterPemasukan();
+  },
+
+  pagePosPengeluaran: function() {
+    this.history.push('setting');
+    this._settingMode = 'pengeluaran';
+    this.showLoading('Memuat...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) { self.renderSettingList('Pos Pengeluaran', res.data || [], 'pengeluaran'); })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getMasterPengeluaran();
+  },
+
+  pagePosSetoran: function() {
+    this.history.push('setting');
+    this._settingMode = 'posSetoran';
+    this.showLoading('Memuat...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) { self.renderSettingList('Pos Setoran', res.data || [], 'posSetoran'); })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getPosSetoranAll();
+  },
+
+  pageMusyawaroh: function() {
+    this.history.push('setting');
+    this._settingMode = 'musyawaroh';
+    this.showLoading('Memuat...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) { self.renderSettingList('Hasil Musyawaroh', res.data || [], 'musyawaroh'); })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getMusyawaroh();
+  },
+
+  renderSettingList: function(title, data, mode) {
+    this._settingData = data;
+    var list = data.map(function(item) {
+      var detail = '';
+      if (mode === 'pemasukan' || mode === 'pengeluaran') detail = (item.kategori || '') + ' · ' + (item.status || '');
+      else if (mode === 'posSetoran') detail = (item.tipe || '') + ' · ' + (item.status || '');
+      else if (mode === 'musyawaroh') detail = App.formatNumber(item.nilai || 0);
+      return '<div class="setting-item">' +
+        '<div class="setting-item-info"><div class="setting-item-nama">' + item.nama + '</div><div class="setting-item-detail">' + detail + '</div></div>' +
+        '<div class="setting-item-actions">' +
+          '<button class="action-btn-sm edit" onclick="App.showSettingForm(' + JSON.stringify(item).replace(/'/g, '&#39;') + ')">Edit</button>' +
+          '<button class="action-btn-sm hapus" onclick="App.deleteSettingItem(\'' + item.id + '\')">Hapus</button>' +
+        '</div>' +
+      '</div>';
+    }).join('') || '<div class="text-center text-muted" style="padding:24px;">Belum ada data.</div>';
+
+    var html = this.pageWrapper(title,
+      '<button class="btn btn-primary mb-16" onclick="App.showSettingForm(null)">+ Tambah</button>' +
+      list +
+      '<div id="settingModal"></div>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  showSettingForm: function(item) {
+    this._editSettingItem = item;
+    var mode = this._settingMode;
+    var isEdit = !!item;
+    var v = item || {};
+    var fields = '';
+    if (mode === 'pemasukan' || mode === 'pengeluaran') {
+      fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
+        '<div class="form-group"><label>Kategori</label><input type="text" id="sKategori" value="' + (v.kategori || '') + '" placeholder="misal: Buku IR, Umum"/></div>' +
+        '<div class="form-group"><label>Status</label><select id="sStatus"><option value="Aktif"' + (v.status !== 'Nonaktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>';
+    } else if (mode === 'posSetoran') {
+      fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
+        '<div class="form-group"><label>Tipe</label><select id="sTipe"><option value="manual"' + (v.tipe !== 'auto' ? ' selected' : '') + '>Manual</option><option value="auto"' + (v.tipe === 'auto' ? ' selected' : '') + '>Auto</option></select></div>' +
+        '<div class="form-group"><label>Target (Rp)</label><input type="number" id="sTarget" value="' + (v.target || 0) + '"/></div>' +
+        '<div class="form-group"><label>Status</label><select id="sStatus"><option value="Aktif"' + (v.status !== 'Nonaktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>';
+    } else if (mode === 'musyawaroh') {
+      fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
+        '<div class="form-group"><label>Nilai (Rp)</label><input type="number" id="sNilai" value="' + (v.nilai || 0) + '"/></div>' +
+        '<div class="form-group"><label>Keterangan</label><input type="text" id="sKet" value="' + (v.keterangan || '') + '"/></div>';
+    }
+
+    document.getElementById('settingModal').innerHTML =
+      '<div class="modal-overlay" onclick="App.closeModalSetting(event)">' +
+        '<div class="modal">' +
+          '<div class="modal-title">' + (isEdit ? 'Edit' : 'Tambah') + '</div>' +
+          fields +
+          '<div id="settingFormError"></div>' +
+          '<button class="btn btn-primary" onclick="App.submitSettingItem()">Simpan</button>' +
+          '<button class="btn btn-outline mt-8" onclick="App.closeModalSettingDirect()">Batal</button>' +
+        '</div>' +
+      '</div>';
+  },
+
+  closeModalSetting: function(e) {
+    if (e.target.classList.contains('modal-overlay')) this.closeModalSettingDirect();
+  },
+
+  closeModalSettingDirect: function() {
+    var el = document.getElementById('settingModal');
+    if (el) el.innerHTML = '';
+  },
+
+  submitSettingItem: function() {
+    var mode = this._settingMode;
+    var isEdit = !!this._editSettingItem;
+    var nama = (document.getElementById('sNama').value || '').trim();
+    if (!nama) {
+      document.getElementById('settingFormError').innerHTML = '<div class="error-box">Nama wajib diisi.</div>';
+      return;
+    }
+    var data = { nama: nama };
+    if (isEdit) data.id = this._editSettingItem.id;
+
+    if (mode === 'pemasukan' || mode === 'pengeluaran') {
+      data.kategori = document.getElementById('sKategori').value;
+      data.status = document.getElementById('sStatus').value;
+    } else if (mode === 'posSetoran') {
+      data.tipe = document.getElementById('sTipe').value;
+      data.target = parseInt(document.getElementById('sTarget').value) || 0;
+      data.status = document.getElementById('sStatus').value;
+    } else if (mode === 'musyawaroh') {
+      data.nilai = parseInt(document.getElementById('sNilai').value) || 0;
+      data.keterangan = document.getElementById('sKet').value;
+    }
+
+    var fnMap = {
+      pemasukan: isEdit ? 'updatePosPemasukan' : 'addPosPemasukan',
+      pengeluaran: isEdit ? 'updatePosPengeluaran' : 'addPosPengeluaran',
+      posSetoran: isEdit ? 'updatePosSetoran' : 'addPosSetoran',
+      musyawaroh: isEdit ? 'updateMusyawaroh' : 'addMusyawaroh'
+    };
+    var fn = fnMap[mode];
+    document.getElementById('settingFormError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Tersimpan ✓');
+          if (mode === 'pemasukan') self.pagePosPemasukan();
+          else if (mode === 'pengeluaran') self.pagePosPengeluaran();
+          else if (mode === 'posSetoran') self.pagePosSetoran();
+          else self.pageMusyawaroh();
+        } else {
+          document.getElementById('settingFormError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('settingFormError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      [fn](data);
+  },
+
+  deleteSettingItem: function(id) {
+    if (!confirm('Hapus item ini?')) return;
+    var mode = this._settingMode;
+    var fnMap = {
+      pemasukan: 'deletePosPemasukan',
+      pengeluaran: 'deletePosPengeluaran',
+      posSetoran: 'deletePosSetoran',
+      musyawaroh: 'deleteMusyawaroh'
+    };
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Dihapus');
+          if (mode === 'pemasukan') self.pagePosPemasukan();
+          else if (mode === 'pengeluaran') self.pagePosPengeluaran();
+          else if (mode === 'posSetoran') self.pagePosSetoran();
+          else self.pageMusyawaroh();
+        } else { self.toast('Gagal: ' + res.message); }
+      })
+      .withFailureHandler(function(err) { self.toast('Error: ' + err.message); })
+      [fnMap[mode]](id);
+  },
+
+  // ─────────────────────────────────────────────────
+  // UTILITIES
+  // ─────────────────────────────────────────────────
+  pageWrapper: function(title, content, hideBack) {
+    var backBtn = hideBack ? '<span style="width:36px;"></span>' : '<button class="btn-back" onclick="App.back()">‹</button>';
+    return '<div class="page-header">' +
+      backBtn +
+      '<h2>' + title + '</h2>' +
+      '<button class="btn-home" onclick="App.loadDashboard()" title="Beranda">⌂</button>' +
+    '</div>' +
+    '<div class="page-content">' + content + '</div>';
+  },
+
+  showLoading: function(msg) {
+    document.getElementById('app').innerHTML =
+      '<div class="loading-screen"><div class="loading-spinner"></div><p>' + (msg || 'Memuat...') + '</p></div>';
+  },
+
+  showError: function(msg) {
+    document.getElementById('app').innerHTML =
+      '<div style="padding:24px;">' +
+        '<div class="error-box">' + (msg || 'Terjadi kesalahan.') + '</div>' +
+        '<button class="btn btn-outline mt-16" onclick="App.loadDashboard()">← Kembali ke Dashboard</button>' +
+      '</div>';
+  },
+
+  toast: function(msg, duration) {
+    var existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+    var el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function() { el.classList.add('show'); }, 10);
+    setTimeout(function() {
+      el.classList.remove('show');
+      setTimeout(function() { if (el.parentNode) el.remove(); }, 300);
+    }, duration || 2500);
+  },
+
+  back: function() {
+    var prev = this.history.pop();
+    if (!prev || prev === 'dashboard') { this.loadDashboard(); return; }
+    var map = {
+      bukuIR: 'pageBukuIR',
+      kelolaBuku: 'pageKelolaBuku',
+      setting: 'pageSetting',
+      jamaah: 'pageJamaah',
+      setoranDesa: 'pageSetoranDesa'
+    };
+    if (map[prev]) this[map[prev]]();
+    else this.loadDashboard();
+  },
+
+  formatNumber: function(n) {
+    if (!n && n !== 0) return 'Rp 0';
+    return 'Rp ' + Number(n).toLocaleString('id-ID');
+  },
+
+  formatDate: function(d) {
+    if (!d) return '-';
+    try {
+      var dt = new Date(d);
+      var months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+      return dt.getDate() + ' ' + months[dt.getMonth()] + ' ' + dt.getFullYear();
+    } catch(e) { return String(d); }
+  },
+
+  // ─────────────────────────────────────────────────
+  // REKONSILIASI BANK
+  // ─────────────────────────────────────────────────
+  pageRekonsiliasi: function() {
+    this.history.push('kelolaBuku');
+    this.showLoading('Memuat rekonsiliasi bank...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.renderRekonsiliasi(res);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getRekonsiliasiData();
+  },
+
+  renderRekonsiliasi: function(data) {
+    var selisih = data.selisih || 0;
+    var statusClass = selisih === 0 ? 'balance' : 'selisih';
+
+    var rowsDaily = (data.bankDaily || []).map(function(d) {
+      return '<tr>' +
+        '<td>' + App.formatDate(d.tanggal) + '</td>' +
+        '<td style="text-align:right;">' + App.formatNumber(d.saldoAwal) + '</td>' +
+        '<td style="text-align:right;" class="text-success">' + App.formatNumber(d.pemasukan) + '</td>' +
+        '<td style="text-align:right;" class="text-danger">' + App.formatNumber(d.pengeluaran) + '</td>' +
+        '<td style="text-align:right;">' + App.formatNumber(d.saldoAkhirActual) + '</td>' +
+        '<td><span class="status-badge ' + (d.status === 'Balance' ? 'balance' : 'selisih') + '">' + (d.status || '-') + '</span></td>' +
+      '</tr>';
+    }).join('') || '<tr><td colspan="6" class="text-center text-muted" style="padding:16px;">Belum ada data harian.</td></tr>';
+
+    var rowsPending = (data.bankPending || []).map(function(p) {
+      return '<tr>' +
+        '<td>' + App.formatDate(p.tanggal) + '</td>' +
+        '<td>' + (p.keterangan || '-') + '</td>' +
+        '<td style="text-align:right;">' + App.formatNumber(p.nominal) + '</td>' +
+        '<td>' + (p.sumber || '-') + '</td>' +
+        '<td><span class="status-badge ' + (p.status === 'Found' ? 'lunas' : 'pending') + '">' + (p.status || '-') + '</span></td>' +
+        '<td>' + (p.status === 'Pending' ? '<button class="action-btn-sm edit" onclick="App.markPendingFound(\'' + p.id + '\')">Found</button>' : '') + '</td>' +
+      '</tr>';
+    }).join('') || '<tr><td colspan="6" class="text-center text-muted" style="padding:16px;">Tidak ada transaksi pending.</td></tr>';
+
+    var today = new Date().toISOString().split('T')[0];
+
+    var html = this.pageWrapper('Rekonsiliasi Bank',
+      '<div class="card rekon-card ' + statusClass + '">' +
+        '<div class="stat-row"><span class="stat-label">Periode</span><span class="stat-value">' + (data.periode ? data.periode.nama : '-') + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Saldo Bank (Sistem)</span><span class="stat-value">' + this.formatNumber(data.saldoSystem || 0) + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Saldo Bank (Aktual)</span><span class="stat-value">' + this.formatNumber(data.saldoBankAktual || 0) + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Selisih</span><span class="stat-value ' + (selisih === 0 ? 'text-success' : 'text-danger') + '">' + this.formatNumber(selisih) + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Total Pending</span><span class="stat-value text-warning">' + this.formatNumber(data.totalPending || 0) + '</span></div>' +
+      '</div>' +
+
+      '<div class="card">' +
+        '<div class="section-title mb-8">Input Saldo Harian</div>' +
+        '<div class="form-group"><label>Tanggal</label><input type="date" id="rekonTgl" value="' + today + '"/></div>' +
+        '<div class="form-group"><label>Saldo Awal (Rp)</label><input type="number" id="rekonSaldoAwal" value="' + (data.saldoBankAktual || 0) + '" min="0"/></div>' +
+        '<div class="form-group"><label>Pemasukan Bank (Rp)</label><input type="number" id="rekonMasuk" value="0" min="0"/></div>' +
+        '<div class="form-group"><label>Pengeluaran Bank (Rp)</label><input type="number" id="rekonKeluar" value="0" min="0"/></div>' +
+        '<div class="form-group"><label>Saldo Akhir Aktual (Rp)</label><input type="number" id="rekonSaldoAkhir" value="0" min="0"/></div>' +
+        '<div class="form-group"><label>Catatan</label><input type="text" id="rekonCatatan"/></div>' +
+        '<div id="rekonError"></div>' +
+        '<button class="btn btn-primary" onclick="App.submitRekonsiliasi()">Simpan Rekonsiliasi</button>' +
+      '</div>' +
+
+      '<div class="section-header"><span class="section-title">Riwayat Harian</span></div>' +
+      '<div style="overflow-x:auto;"><table class="tabel-rekap"><thead><tr><th>Tgl</th><th>Awal</th><th>Masuk</th><th>Keluar</th><th>Akhir</th><th>Status</th></tr></thead><tbody>' + rowsDaily + '</tbody></table></div>' +
+
+      '<div class="section-header">' +
+        '<span class="section-title">Transaksi Pending</span>' +
+        '<button class="btn-xs btn-primary" onclick="App.showAddPendingForm()">+ Pending</button>' +
+      '</div>' +
+      '<div style="overflow-x:auto;"><table class="tabel-rekap"><thead><tr><th>Tgl</th><th>Keterangan</th><th>Nominal</th><th>Sumber</th><th>Status</th><th>Aksi</th></tr></thead><tbody>' + rowsPending + '</tbody></table></div>' +
+      '<div id="pendingModal"></div>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  submitRekonsiliasi: function() {
+    var periode = this._lastRekonData ? this._lastRekonData.periode : null;
+    var periodeId = periode ? periode.id : '';
+    var data = {
+      periodeId: periodeId,
+      tanggal: document.getElementById('rekonTgl').value,
+      saldoAwal: parseInt(document.getElementById('rekonSaldoAwal').value) || 0,
+      pemasukan: parseInt(document.getElementById('rekonMasuk').value) || 0,
+      pengeluaran: parseInt(document.getElementById('rekonKeluar').value) || 0,
+      saldoAkhirActual: parseInt(document.getElementById('rekonSaldoAkhir').value) || 0,
+      catatan: document.getElementById('rekonCatatan').value
+    };
+    document.getElementById('rekonError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Rekonsiliasi tersimpan ✓');
+          self.pageRekonsiliasi();
+        } else {
+          document.getElementById('rekonError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('rekonError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .submitRekonsiliasiBank(data);
+  },
+
+  showAddPendingForm: function() {
+    var today = new Date().toISOString().split('T')[0];
+    document.getElementById('pendingModal').innerHTML =
+      '<div class="modal-overlay" onclick="App.closeModalPending(event)">' +
+        '<div class="modal">' +
+          '<div class="modal-title">Tambah Transaksi Pending</div>' +
+          '<div class="form-group"><label>Tanggal</label><input type="date" id="pTgl" value="' + today + '"/></div>' +
+          '<div class="form-group"><label>Keterangan *</label><input type="text" id="pKet" placeholder="Deskripsi transaksi..."/></div>' +
+          '<div class="form-group"><label>Nominal (Rp)</label><input type="number" id="pNominal" min="0" value="0"/></div>' +
+          '<div class="form-group"><label>Sumber</label>' +
+            '<select id="pSumber"><option value="Desa">Desa</option><option value="Daerah">Daerah</option><option value="Jamaah">Jamaah</option><option value="Bank">Bank</option><option value="Manual">Manual</option></select>' +
+          '</div>' +
+          '<div class="form-group"><label>Catatan</label><input type="text" id="pCatatan"/></div>' +
+          '<div id="pendingFormError"></div>' +
+          '<button class="btn btn-primary" onclick="App.submitAddPending()">Tambah</button>' +
+          '<button class="btn btn-outline mt-8" onclick="App.closeModalPendingDirect()">Batal</button>' +
+        '</div>' +
+      '</div>';
+  },
+
+  closeModalPending: function(e) {
+    if (e.target.classList.contains('modal-overlay')) this.closeModalPendingDirect();
+  },
+
+  closeModalPendingDirect: function() {
+    var el = document.getElementById('pendingModal');
+    if (el) el.innerHTML = '';
+  },
+
+  submitAddPending: function() {
+    var ket = (document.getElementById('pKet').value || '').trim();
+    if (!ket) {
+      document.getElementById('pendingFormError').innerHTML = '<div class="error-box">Keterangan wajib diisi.</div>';
+      return;
+    }
+    var data = {
+      tanggal: document.getElementById('pTgl').value,
+      keterangan: ket,
+      nominal: parseInt(document.getElementById('pNominal').value) || 0,
+      sumber: document.getElementById('pSumber').value,
+      catatan: document.getElementById('pCatatan').value
+    };
+    document.getElementById('pendingFormError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Pending ditambahkan ✓');
+          self.pageRekonsiliasi();
+        } else {
+          document.getElementById('pendingFormError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('pendingFormError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      })
+      .addPendingTransaction(data);
+  },
+
+  markPendingFound: function(id) {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          self.toast('Status diperbarui menjadi Found ✓');
+          self.pageRekonsiliasi();
+        } else {
+          self.toast('Gagal: ' + res.message);
+        }
+      })
+      .withFailureHandler(function(err) { self.toast('Error: ' + err.message); })
+      .updatePendingStatus(id, 'Found', '');
+  }
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+  App.init();
+});
+</script>
