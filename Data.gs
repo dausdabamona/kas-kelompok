@@ -103,6 +103,16 @@ function getDashboardData() {
       try { cache.put(cacheKey, JSON.stringify(saldoData), 60); } catch(e) {}
     }
 
+    // Ambil jumlah belum dirincikan dari cache buku IR (jika ada, gratis)
+    var belumCount = 0;
+    try {
+      var bukuCache = cache.get('buku_ir_data');
+      if (bukuCache) {
+        var bd = JSON.parse(bukuCache);
+        belumCount = (bd.data && bd.data.belumDirincikan) ? bd.data.belumDirincikan.length : 0;
+      }
+    } catch(e) {}
+
     return {
       success: true,
       user: auth.user,
@@ -110,7 +120,8 @@ function getDashboardData() {
       namaKelompok: saldoData.namaKelompok,
       kasTunai: saldoData.tunai,
       kasBank: saldoData.bank,
-      totalKas: saldoData.tunai + saldoData.bank
+      totalKas: saldoData.tunai + saldoData.bank,
+      belumDirincikanCount: belumCount
     };
   } catch(e) {
     return { success: false, message: e.message };
@@ -421,6 +432,14 @@ function getBukuIRData() {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
+
+    var cache = CacheService.getScriptCache();
+    var cacheKey = 'buku_ir_data';
+    var cached = cache.get(cacheKey);
+    if (cached) {
+      try { return JSON.parse(cached); } catch(e) {}
+    }
+
     var ss = getSS_();
     var periode = getPeriodeAktif();
     var periodeId = periode ? periode.id : null;
@@ -478,8 +497,9 @@ function getBukuIRData() {
       }
     }
 
-    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
-    return { success: true, data: { belumDirincikan: belum, sudahDirincikan: sudah } };
+    var result = { success: true, data: { belumDirincikan: belum, sudahDirincikan: sudah } };
+    try { cache.put(cacheKey, JSON.stringify(result), 90); } catch(e) {}
+    return result;
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -501,7 +521,7 @@ function submitRincianIR(data) {
       Number(data.ir) || 0, Number(data.ir10) || 0, Number(data.cicilan) || 0,
       Number(data.infakDaerah) || 0, Number(data.index) || 0, Number(data.total) || 0,
       auth.user.email, now]);
-    try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
+    try { var c = CacheService.getScriptCache(); c.remove('master_trx_data'); c.remove('buku_ir_data'); c.remove('dashboard_saldo'); } catch(e) {}
     return { success: true, id: id };
   } catch(e) {
     return { success: false, message: e.message };

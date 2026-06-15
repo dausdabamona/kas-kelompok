@@ -12,6 +12,8 @@ var App = {
         if (user) {
           self.currentUser = user;
           self.loadDashboard();
+          // Coba kirim antrian offline yang tertunda
+          setTimeout(function() { self.checkAndFlushQueue(); }, 3000);
         } else {
           self.renderLogin();
         }
@@ -182,7 +184,9 @@ var App = {
 
       '<div class="section-title mb-8">Menu</div>' +
       '<div class="menu-grid">' +
-        '<div class="menu-item" onclick="App.pageBukuIR()"><span class="icon">📖</span><span>Buku IR</span></div>' +
+        '<div class="menu-item' + (data.belumDirincikanCount > 0 ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()">' +
+          '<span class="icon">📖</span><span>Buku IR' + (data.belumDirincikanCount > 0 ? ' <span class="menu-badge">' + data.belumDirincikanCount + '</span>' : '') + '</span>' +
+        '</div>' +
         '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' +
         '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' +
         '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' +
@@ -385,6 +389,11 @@ var App = {
   // ─────────────────────────────────────────────────
   pageBukuIR: function() {
     this.history.push('dashboard');
+    // Auto-flush antrian offline jika ada
+    var qLen = this.getQueue().length;
+    if (qLen > 0) {
+      this.checkAndFlushQueue();
+    }
     this.showLoading('Memuat Buku IR...');
     var self = this;
     google.script.run
@@ -400,6 +409,13 @@ var App = {
     this._bukuIRData = data;
     var belum = data.belumDirincikan || [];
     var sudah = data.sudahDirincikan || [];
+    var qLen = this.getQueue().length;
+    var queueBanner = qLen > 0
+      ? '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">' +
+          '<span style="font-size:13px;color:#92400E;">📤 <strong>' + qLen + ' rincian</strong> belum terkirim (offline)</span>' +
+          '<button class="action-btn-sm edit" onclick="App.checkAndFlushQueue();App.pageBukuIR();" style="font-size:11px;">Kirim Sekarang</button>' +
+        '</div>'
+      : '';
 
     var listBelum = belum.length === 0
       ? '<div class="text-center text-muted" style="padding:32px;">Semua sudah dirincikan 👍</div>'
@@ -436,9 +452,10 @@ var App = {
         }).join('');
 
     var html = this.pageWrapper('Buku IR',
+      queueBanner +
       '<div class="tabs">' +
-        '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderBukuIR(App._bukuIRData, \'belum\')">Belum <span class="badge">' + belum.length + '</span></button>' +
-        '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderBukuIR(App._bukuIRData, \'sudah\')">Sudah <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
+        '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderBukuIR(App._bukuIRData, \'belum\')">Belum Rincian <span class="badge">' + belum.length + '</span></button>' +
+        '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderBukuIR(App._bukuIRData, \'sudah\')">Sudah Rincian <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
       '</div>' +
       (activeTab === 'belum' ? listBelum : listSudah)
     );
@@ -500,23 +517,88 @@ var App = {
       cicilan: parseInt(document.getElementById('rCicilan').value) || 0,
       infakDaerah: parseInt(document.getElementById('rInfakDaerah').value) || 0,
       index: parseInt(document.getElementById('rIndex').value) || 0,
-      total: item.nominal
+      total: item.nominal,
+      anggotaNama: item.anggota ? item.anggota.nama : ''
     };
-    document.getElementById('rincianError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+
+    // Simpan ke antrian lokal dulu (offline-first)
+    App.queueRincian(data);
+    document.getElementById('rincianError').innerHTML = '<div class="valid-indicator ok">✓ Tersimpan lokal. Mengirim ke server...</div>';
     var self = this;
+
+    // Coba kirim langsung; jika gagal tetap ada di antrian
+    App.flushRincianQueue(function(berhasil) {
+      if (berhasil) {
+        self.toast('Rincian berhasil disimpan ✓');
+        self.pageBukuIR();
+      } else {
+        self.toast('Tersimpan lokal. Akan dikirim saat ada jaringan. 📲', 4000);
+        self.pageBukuIR();
+      }
+    });
+  },
+
+  // ─────────────────────────────────────────────────
+  // OFFLINE QUEUE — Buku IR
+  // ─────────────────────────────────────────────────
+  _QUEUE_KEY: 'kas_rincian_queue',
+
+  queueRincian: function(data) {
+    var q = this.getQueue();
+    data._queuedAt = new Date().toISOString();
+    q.push(data);
+    try { localStorage.setItem(this._QUEUE_KEY, JSON.stringify(q)); } catch(e) {}
+  },
+
+  getQueue: function() {
+    try {
+      var raw = localStorage.getItem(this._QUEUE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch(e) { return []; }
+  },
+
+  saveQueue: function(q) {
+    try { localStorage.setItem(this._QUEUE_KEY, JSON.stringify(q)); } catch(e) {}
+  },
+
+  flushRincianQueue: function(callback) {
+    var q = this.getQueue();
+    if (q.length === 0) { if (callback) callback(true); return; }
+    var self = this;
+    var item = q[0];
+
     google.script.run
       .withSuccessHandler(function(res) {
         if (res.success) {
-          self.toast('Rincian berhasil disimpan ✓');
-          self.pageBukuIR();
+          q.shift();
+          self.saveQueue(q);
+          if (q.length > 0) {
+            self.flushRincianQueue(callback);
+          } else {
+            if (callback) callback(true);
+          }
         } else {
-          document.getElementById('rincianError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+          if (callback) callback(false);
         }
       })
-      .withFailureHandler(function(err) {
-        document.getElementById('rincianError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
+      .withFailureHandler(function() {
+        if (callback) callback(false);
       })
-      .submitRincianIR(data);
+      .submitRincianIR(item);
+  },
+
+  checkAndFlushQueue: function() {
+    var q = this.getQueue();
+    if (q.length === 0) return;
+    var self = this;
+    this.flushRincianQueue(function(ok) {
+      var remaining = self.getQueue().length;
+      if (ok && remaining === 0) {
+        self.toast('✅ ' + q.length + ' rincian antrian berhasil dikirim');
+      } else if (remaining > 0) {
+        self.toast('⏳ ' + remaining + ' rincian masih dalam antrian (offline)', 3000);
+      }
+    });
   },
 
   // ─────────────────────────────────────────────────
