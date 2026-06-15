@@ -511,11 +511,22 @@ function getBukuIRData() {
       }
     }
 
-    var dirincikanIds = {};
+    // Kumpulkan rincian yang sudah ada per transaksiId (untuk edit)
+    var rincianMap = {};
     if (sheetIR && sheetIR.getLastRow() > 1) {
       var irRows = sheetIR.getDataRange().getValues();
+      var irH = headerMap_(irRows[0]);
       for (var i = 1; i < irRows.length; i++) {
-        if (irRows[i][1]) dirincikanIds[irRows[i][1]] = true;
+        var trxId = String(hGet_(irRows[i], irH, 'transaksiid', 1) || '');
+        if (!trxId) continue;
+        rincianMap[trxId] = {
+          rincianId: String(hGet_(irRows[i], irH, 'id', 0) || ''),
+          ir: Number(hGet_(irRows[i], irH, 'ir', 5)) || 0,
+          ir10: Number(hGet_(irRows[i], irH, 'ir10', 6)) || 0,
+          cicilan: Number(hGet_(irRows[i], irH, 'cicilan', 7)) || 0,
+          infakDaerah: Number(hGet_(irRows[i], irH, 'infakdaerah', 8)) || 0,
+          index: Number(hGet_(irRows[i], irH, 'index', 9)) || 0
+        };
       }
     }
 
@@ -524,20 +535,21 @@ function getBukuIRData() {
       var pRows = sheetP.getDataRange().getValues();
       var pHdr = headerMap_(pRows[0]);
       var c_id = pHdr['id'] !== undefined ? pHdr['id'] : 0;
-      var c_pid = pHdr['periode id'] !== undefined ? pHdr['periode id'] : 1;
-      var c_jid = pHdr['jenis id'] !== undefined ? pHdr['jenis id'] : 2;
-      var c_aid = pHdr['anggota id'] !== undefined ? pHdr['anggota id'] : 3;
+      var c_pid = pHdr['periodeid'] !== undefined ? pHdr['periodeid'] : 1;
+      var c_jid = pHdr['jenisid'] !== undefined ? pHdr['jenisid'] : 2;
+      var c_aid = pHdr['anggotaid'] !== undefined ? pHdr['anggotaid'] : 3;
       var c_tgl = pHdr['tanggal'] !== undefined ? pHdr['tanggal'] : 4;
       var c_nom = pHdr['nominal'] !== undefined ? pHdr['nominal'] : 5;
-      var c_kas = pHdr['sumber kas'] !== undefined ? pHdr['sumber kas'] : 6;
+      var c_kas = pHdr['sumberkas'] !== undefined ? pHdr['sumberkas'] : 6;
       var c_cat = pHdr['catatan'] !== undefined ? pHdr['catatan'] : 7;
       for (var i = 1; i < pRows.length; i++) {
         var row = pRows[i];
         if (!row[c_id]) continue;
         if (periodeId && row[c_pid] !== periodeId) continue;
         if (bukuIRIds.indexOf(row[c_jid]) === -1) continue;
+        var trxIdStr = String(row[c_id]);
         var item = {
-          id: String(row[c_id]), periodeId: String(row[c_pid]), jenisId: String(row[c_jid]),
+          id: trxIdStr, periodeId: String(row[c_pid]), jenisId: String(row[c_jid]),
           anggotaId: String(row[c_aid] || ''),
           tanggal: toDateStr_(row[c_tgl]),
           nominal: Number(row[c_nom]) || 0,
@@ -545,8 +557,12 @@ function getBukuIRData() {
           catatan: String(row[c_cat] || ''),
           anggota: anggotaMap[String(row[c_aid])] || null
         };
-        if (dirincikanIds[String(row[c_id])]) sudah.push(item);
-        else belum.push(item);
+        if (rincianMap[trxIdStr]) {
+          item.rincian = rincianMap[trxIdStr]; // sertakan breakdown untuk edit
+          sudah.push(item);
+        } else {
+          belum.push(item);
+        }
       }
     }
 
@@ -584,11 +600,33 @@ function submitRincianIR(data) {
     var cicilan = Number(data.cicilan) || 0;
     var infakDaerah = Number(data.infakDaerah) || 0;
     var index = Number(data.index) || 0;
-    var id = generateID('IR');
-    sheet.appendRow([id, data.transaksiId, data.periodeId, data.anggotaId, toDateStr_(data.tanggal),
-      ir, ir10, cicilan, infakDaerah, index, auth.user.email, toDateStr_(new Date())]);
+
+    // Cek apakah transaksi ini sudah pernah dirincikan → update, bukan tambah baru.
+    // Edit hanya boleh selama periode masih OPEN (getPeriodeAktif memfilter ke periode aktif).
+    var irRows = sheet.getDataRange().getValues();
+    var irH = headerMap_(irRows[0]);
+    var col_trx = irH['transaksiid'] !== undefined ? irH['transaksiid'] : 1;
+    var col_ir = (irH['ir'] !== undefined ? irH['ir'] : 5) + 1;
+    var existingRow = -1;
+    for (var ri = 1; ri < irRows.length; ri++) {
+      if (String(irRows[ri][col_trx]) === String(data.transaksiId)) { existingRow = ri + 1; break; }
+    }
+
+    var id;
+    if (existingRow > 0) {
+      // Update kolom IR..Index pada baris yang ada (5 kolom berurutan)
+      sheet.getRange(existingRow, col_ir, 1, 5).setValues([[ir, ir10, cicilan, infakDaerah, index]]);
+      var col_upd = irH['createdat'] !== undefined ? irH['createdat'] : -1;
+      if (col_upd >= 0) sheet.getRange(existingRow, col_upd + 1).setValue(toDateStr_(new Date()));
+      id = String(irRows[existingRow - 1][irH['id'] !== undefined ? irH['id'] : 0]);
+      logActivity(auth.user.email, 'RINCIAN_EDIT', 'Transaksi: ' + data.transaksiId);
+    } else {
+      id = generateID('IR');
+      sheet.appendRow([id, data.transaksiId, data.periodeId, data.anggotaId, toDateStr_(data.tanggal),
+        ir, ir10, cicilan, infakDaerah, index, auth.user.email, toDateStr_(new Date())]);
+    }
     try { var c = CacheService.getScriptCache(); c.remove('master_trx_data'); c.remove('buku_ir_data'); c.remove('dashboard_saldo'); } catch(e) {}
-    return { success: true, id: id };
+    return { success: true, id: id, updated: existingRow > 0 };
   } catch(e) {
     return { success: false, message: e.message };
   }

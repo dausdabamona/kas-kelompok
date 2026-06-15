@@ -443,7 +443,7 @@ var App = {
     var listSudah = sudah.length === 0
       ? '<div class="text-center text-muted" style="padding:32px;">Belum ada yang dirincikan.</div>'
       : sudah.map(function(item) {
-          return '<div class="card">' +
+          return '<div class="card" style="cursor:pointer;" onclick="App.pageRincianIR(\'' + item.id + '\')">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
               '<div>' +
                 '<div class="font-bold">' + (item.anggota ? item.anggota.nama : item.anggotaId || 'Umum') + '</div>' +
@@ -452,6 +452,7 @@ var App = {
               '<div style="text-align:right;">' +
                 '<div class="font-bold">' + App.formatNumber(item.nominal) + '</div>' +
                 '<span class="status-badge lunas">✓ Dirincikan</span>' +
+                '<div class="text-small" style="color:var(--primary);margin-top:2px;">✎ Ubah</div>' +
               '</div>' +
             '</div>' +
           '</div>';
@@ -476,20 +477,29 @@ var App = {
     this._rincianItem = item;
     var anggota = item.anggota || {};
     var total = item.nominal;
+    var isEdit = !!item.rincian; // sedang mengedit rincian yang sudah ada
+    var r = item.rincian || {};
+    // Jika edit: pakai nilai tersimpan. Jika baru: pakai default dari master anggota.
+    var vIR = isEdit ? r.ir : (anggota.ir || 0);
+    var vIR10 = isEdit ? r.ir10 : (anggota.ir10 || 0);
+    var vCicilan = isEdit ? r.cicilan : 0;
+    var vInfak = isEdit ? r.infakDaerah : (anggota.infakDaerah || 0);
+    var vIndex = isEdit ? r.index : (anggota.index || 0);
 
-    var html = this.pageWrapper('Rincian IR',
+    var html = this.pageWrapper(isEdit ? 'Ubah Rincian IR' : 'Rincian IR',
       '<div class="card">' +
         '<div class="stat-row"><span class="stat-label">Jamaah</span><span class="stat-value">' + (anggota.nama || '-') + '</span></div>' +
         '<div class="stat-row"><span class="stat-label">Total Diterima</span><span class="stat-value text-success">' + this.formatNumber(total) + '</span></div>' +
       '</div>' +
-      '<div class="form-group"><label>IR (Rp)</label><input type="number" id="rIR" value="' + (anggota.ir || 0) + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>1/10 IR (Rp)</label><input type="number" id="rIR10" value="' + (anggota.ir10 || 0) + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Cicilan (Rp)</label><input type="number" id="rCicilan" value="0" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="number" id="rInfakDaerah" value="' + (anggota.infakDaerah || 0) + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Index (Rp)</label><input type="number" id="rIndex" value="' + (anggota.index || 0) + '" oninput="App.cekTotalRincian()"/></div>' +
+      (isEdit ? '<div class="info-box" style="margin-bottom:12px;">✎ Mengubah rincian yang sudah ada. Perubahan dapat dilakukan selama buku belum ditutup.</div>' : '') +
+      '<div class="form-group"><label>IR (Rp)</label><input type="number" id="rIR" value="' + vIR + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>1/10 IR (Rp)</label><input type="number" id="rIR10" value="' + vIR10 + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Cicilan (Rp)</label><input type="number" id="rCicilan" value="' + vCicilan + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="number" id="rInfakDaerah" value="' + vInfak + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Index (Rp)</label><input type="number" id="rIndex" value="' + vIndex + '" oninput="App.cekTotalRincian()"/></div>' +
       '<div id="validasiRincian" class="mb-16"></div>' +
       '<div id="rincianError"></div>' +
-      '<button class="btn btn-primary" onclick="App.submitRincianIR()">Simpan Rincian</button>'
+      '<button class="btn btn-primary" onclick="App.submitRincianIR()">' + (isEdit ? 'Simpan Perubahan' : 'Simpan Rincian') + '</button>'
     );
     document.getElementById('app').innerHTML = html;
     setTimeout(function() { App.cekTotalRincian(); }, 100);
