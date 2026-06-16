@@ -197,6 +197,7 @@ var App = {
         (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '') +
         (!isPenerobos ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '') +
         (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '') +
+        (!isPenerobos ? '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Patungan</span></div>' : '') +
         (isAdmin ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
         '<div class="menu-item" onclick="App.loadDashboard()"><span class="icon">🔄</span><span>Refresh</span></div>' +
       '</div>' +
@@ -1026,6 +1027,344 @@ var App = {
   },
 
   // ─────────────────────────────────────────────────
+  // PATUNGAN / MUSYAWARAH PEMBIAYAAN
+  // ─────────────────────────────────────────────────
+  pagePatungan: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat daftar patungan...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.renderPatunganList(res.data || []);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getPatunganList();
+  },
+
+  renderPatunganList: function(list) {
+    var self = this;
+    var u = App._user || {};
+    var canAdmin = (u.role === 'ADMIN' || u.role === 'BENDAHARA_1');
+
+    var cards = list.map(function(p, idx) {
+      var gc = p.gradeConfig || {};
+      var grades = Object.keys(gc).sort();
+      var gradeInfo = grades.map(function(g) { return 'Grade ' + g + ': ' + App.formatNumber(gc[g]); }).join(' | ');
+      return '<div class="card" style="margin-bottom:12px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+          '<div>' +
+            '<div style="font-weight:bold;font-size:15px;">' + p.nama + '</div>' +
+            '<div style="font-size:12px;color:#555;margin-top:2px;">' + App.formatDate(p.tanggal) + (p.catatan ? ' — ' + p.catatan : '') + '</div>' +
+            '<div style="font-size:11px;color:#888;margin-top:4px;">' + (gradeInfo || 'Belum ada grade') + '</div>' +
+          '</div>' +
+          '<span class="badge" style="background:' + (p.status === 'Aktif' ? '#dcfce7' : '#f3f4f6') + ';color:' + (p.status === 'Aktif' ? '#166534' : '#555') + ';">' + p.status + '</span>' +
+        '</div>' +
+        '<div style="margin-top:10px;display:flex;gap:8px;">' +
+          '<button class="btn btn-outline" style="flex:1;" onclick="App.pageTagihanPatungan(\'' + p.id + '\')">📋 Lihat Tagihan</button>' +
+        '</div>' +
+      '</div>';
+    }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada musyawarah patungan.</div>';
+
+    var html = self.pageWrapper('Patungan / Musyawarah',
+      (canAdmin ? '<button class="btn btn-primary mb-16" onclick="App.showFormPatungan()">+ Buat Musyawarah</button>' : '') +
+      '<div id="patunganModal"></div>' +
+      cards
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  showFormPatungan: function() {
+    var self = this;
+    // Load anggota with grade first
+    self.showLoading('Memuat data jamaah...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self._anggotaForPatungan = res.data || [];
+        self._renderPatunganForm();
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getAnggotaWithGrade();
+  },
+
+  _renderPatunganForm: function() {
+    var anggota = this._anggotaForPatungan || [];
+    // Count per grade
+    var gradeCounts = {};
+    anggota.forEach(function(a) {
+      if (a.status !== 'Aktif') return;
+      var g = (a.grade || '').toUpperCase().trim();
+      if (!g) return;
+      gradeCounts[g] = (gradeCounts[g] || 0) + 1;
+    });
+    var gradeRows = Object.keys(gradeCounts).sort().map(function(g) {
+      return '<div class="stat-row" style="margin-bottom:8px;">' +
+        '<span class="stat-label">Grade ' + g + ' <span style="color:#888;font-size:11px;">(' + gradeCounts[g] + ' jamaah)</span></span>' +
+        '<input type="number" id="grade_' + g + '" placeholder="Nominal/orang" style="width:140px;padding:6px;border:1px solid #d1d5db;border-radius:6px;text-align:right;" oninput="App._hitungTotalPatungan()"/>' +
+      '</div>';
+    }).join('');
+
+    var noGrade = anggota.filter(function(a) { return a.status === 'Aktif' && !a.grade; });
+    var warningGrade = noGrade.length > 0
+      ? '<div class="error-box mb-8">⚠️ ' + noGrade.length + ' jamaah aktif belum punya grade: ' +
+          noGrade.map(function(a){ return a.nama; }).join(', ') +
+          '. <a href="#" onclick="App.pageAturGrade();return false;">Atur grade jamaah</a></div>'
+      : '';
+
+    var html = this.pageWrapper('Buat Musyawarah Patungan',
+      warningGrade +
+      '<div class="card">' +
+        '<div class="form-group"><label>Nama Musyawarah *</label><input type="text" id="patNama" placeholder="mis. Patungan Biaya Perjalanan 2025"/></div>' +
+        '<div class="form-group"><label>Tanggal</label><input type="date" id="patTgl" value="' + new Date().toISOString().slice(0,10) + '"/></div>' +
+        '<div class="form-group"><label>Catatan</label><input type="text" id="patCatatan" placeholder="Opsional"/></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="section-title mb-8">Nominal per Orang berdasarkan Grade</div>' +
+        '<div class="info-box mb-12">Isi nominal yang harus dibayar per orang untuk setiap grade. Sistem akan otomatis membuat tagihan untuk semua jamaah aktif sesuai grade mereka.</div>' +
+        (gradeRows || '<div class="text-muted" style="padding:12px 0;">Belum ada jamaah yang memiliki grade. <a href="#" onclick="App.pageAturGrade();return false;">Atur grade jamaah terlebih dahulu.</a></div>') +
+        '<div class="stat-row" style="margin-top:8px;border-top:1px solid #e5e7eb;padding-top:8px;">' +
+          '<span class="stat-label" style="font-weight:bold;">Estimasi Total Tagihan</span>' +
+          '<span id="patTotal" style="font-weight:bold;color:var(--primary);">Rp 0</span>' +
+        '</div>' +
+      '</div>' +
+      '<div id="patError"></div>' +
+      '<button class="btn btn-primary" onclick="App.submitPatungan()">✅ Buat & Generate Tagihan</button>',
+      { _gradeCounts: gradeCounts }
+    );
+    document.getElementById('app').innerHTML = html;
+    this._patunganGradeCounts = gradeCounts;
+  },
+
+  _hitungTotalPatungan: function() {
+    var counts = this._patunganGradeCounts || {};
+    var total = 0;
+    Object.keys(counts).forEach(function(g) {
+      var el = document.getElementById('grade_' + g);
+      if (el) total += (parseInt(el.value) || 0) * counts[g];
+    });
+    var el = document.getElementById('patTotal');
+    if (el) el.textContent = 'Rp ' + total.toLocaleString('id-ID');
+  },
+
+  submitPatungan: function() {
+    var self = this;
+    var nama = (document.getElementById('patNama') || {}).value || '';
+    if (!nama.trim()) {
+      document.getElementById('patError').innerHTML = '<div class="error-box">Nama musyawarah wajib diisi</div>';
+      return;
+    }
+    var counts = this._patunganGradeCounts || {};
+    var gradeConfig = {};
+    var hasGrade = false;
+    Object.keys(counts).forEach(function(g) {
+      var el = document.getElementById('grade_' + g);
+      var val = parseInt((el || {}).value) || 0;
+      if (val > 0) { gradeConfig[g] = val; hasGrade = true; }
+    });
+    if (!hasGrade) {
+      document.getElementById('patError').innerHTML = '<div class="error-box">Isi minimal satu grade dengan nominal > 0</div>';
+      return;
+    }
+    var data = {
+      nama: nama.trim(),
+      tanggal: (document.getElementById('patTgl') || {}).value || '',
+      catatan: (document.getElementById('patCatatan') || {}).value || '',
+      gradeConfig: gradeConfig
+    };
+    document.getElementById('patError').innerHTML = '<div class="info-box">⏳ Membuat tagihan...</div>';
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) {
+          document.getElementById('patError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+          return;
+        }
+        self.toast('Patungan dibuat! ' + (res.tagihanCount || 0) + ' tagihan, total Rp ' + (res.total || 0).toLocaleString('id-ID'));
+        self.pagePatungan();
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('patError').innerHTML = '<div class="error-box">' + err.message + '</div>';
+      })
+      .addPatungan(data);
+  },
+
+  pageTagihanPatungan: function(patunganId) {
+    this.history.push('patungan');
+    this.showLoading('Memuat tagihan...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.renderTagihanPatungan(res);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getTagihanPatungan(patunganId);
+  },
+
+  renderTagihanPatungan: function(res) {
+    var self = this;
+    var p = res.patungan || {};
+    var tagihan = res.tagihan || [];
+    var u = App._user || {};
+    var canBayar = ['ADMIN','BENDAHARA_1','BENDAHARA_2'].indexOf(u.role) >= 0;
+
+    var summaryCards =
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">' +
+        '<div class="card" style="margin:0;text-align:center;">' +
+          '<div style="font-size:11px;color:#888;">Target</div>' +
+          '<div style="font-weight:bold;color:var(--primary);font-size:14px;">' + App.formatNumber(res.totalTarget) + '</div>' +
+        '</div>' +
+        '<div class="card" style="margin:0;text-align:center;">' +
+          '<div style="font-size:11px;color:#888;">Sudah Bayar</div>' +
+          '<div style="font-weight:bold;color:var(--success);font-size:14px;">' + App.formatNumber(res.totalLunas) + '</div>' +
+        '</div>' +
+        '<div class="card" style="margin:0;text-align:center;">' +
+          '<div style="font-size:11px;color:#888;">Belum Bayar</div>' +
+          '<div style="font-weight:bold;color:var(--danger);font-size:14px;">' + App.formatNumber(res.totalBelum) + '</div>' +
+        '</div>' +
+      '</div>';
+
+    // Group by grade
+    var byGrade = {};
+    tagihan.forEach(function(t) {
+      var g = t.grade || '-';
+      if (!byGrade[g]) byGrade[g] = [];
+      byGrade[g].push(t);
+    });
+
+    var rows = Object.keys(byGrade).sort().map(function(g) {
+      var list = byGrade[g];
+      var header = '<div style="font-weight:bold;background:#f3f4f6;padding:6px 10px;border-radius:6px;margin:10px 0 6px;font-size:12px;">Grade ' + g +
+        ' — Rp ' + App.formatNumber(list[0].nominal) + '/orang</div>';
+      var items = list.map(function(t) {
+        var sudah = t.statusBayar === 'Lunas';
+        return '<div class="stat-row" style="padding:6px 4px;border-bottom:1px solid #f3f4f6;">' +
+          '<div>' +
+            '<div style="font-size:13px;">' + t.anggotaNama + '</div>' +
+            (sudah ? '<div style="font-size:11px;color:#888;">Lunas ' + App.formatDate(t.tanggalBayar) + (t.catatan ? ' — ' + t.catatan : '') + '</div>' : '') +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:6px;">' +
+            '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:' + (sudah ? '#dcfce7' : '#fef3c7') + ';color:' + (sudah ? '#166534' : '#92400e') + ';">' + (sudah ? '✓ Lunas' : '⏳ Belum') + '</span>' +
+            (canBayar && !sudah ? '<button class="btn btn-outline" style="padding:3px 10px;font-size:11px;" onclick="App.konfirmasiBayarPatungan(\'' + t.id + '\',\'' + t.anggotaNama.replace(/'/g,"\\'") + '\')">Bayar</button>' : '') +
+            (canBayar && sudah ? '<button class="btn btn-outline" style="padding:3px 10px;font-size:11px;color:#999;" onclick="App.batalBayarPatungan(\'' + t.id + '\')">Batal</button>' : '') +
+          '</div>' +
+        '</div>';
+      }).join('');
+      return header + items;
+    }).join('');
+
+    var html = self.pageWrapper(p.nama || 'Tagihan Patungan',
+      '<div style="font-size:12px;color:#888;margin-bottom:12px;">' + App.formatDate(p.tanggal) + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
+      summaryCards +
+      '<div class="card">' +
+        '<div id="tagihanModal"></div>' +
+        (rows || '<div class="text-center text-muted" style="padding:24px;">Belum ada tagihan.</div>') +
+      '</div>'
+    );
+    document.getElementById('app').innerHTML = html;
+    this._currentTagihanPatunganId = p.id;
+  },
+
+  konfirmasiBayarPatungan: function(tagihanId, nama) {
+    document.getElementById('tagihanModal').innerHTML =
+      '<div class="modal-overlay" onclick="App.closeModal(event,\'tagihanModal\')">' +
+        '<div class="modal">' +
+          '<div class="modal-title">Konfirmasi Bayar</div>' +
+          '<p style="margin:0 0 12px;">Tandai <strong>' + nama + '</strong> sudah membayar?</p>' +
+          '<div class="form-group"><label>Catatan (opsional)</label><input type="text" id="bayarCatatan" placeholder="mis. Transfer BRI"/></div>' +
+          '<div id="bayarError"></div>' +
+          '<button class="btn btn-primary" onclick="App.submitBayarPatungan(\'' + tagihanId + '\')">✅ Tandai Lunas</button>' +
+          '<button class="btn btn-outline mt-8" onclick="document.getElementById(\'tagihanModal\').innerHTML=\'\'">Batal</button>' +
+        '</div>' +
+      '</div>';
+  },
+
+  submitBayarPatungan: function(tagihanId) {
+    var self = this;
+    var catatan = (document.getElementById('bayarCatatan') || {}).value || '';
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) {
+          document.getElementById('bayarError').innerHTML = '<div class="error-box">' + res.message + '</div>';
+          return;
+        }
+        self.toast('Tagihan ditandai lunas ✓');
+        self.pageTagihanPatungan(self._currentTagihanPatunganId);
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('bayarError').innerHTML = '<div class="error-box">' + err.message + '</div>';
+      })
+      .bayarTagihanPatungan(tagihanId, catatan);
+  },
+
+  batalBayarPatungan: function(tagihanId) {
+    if (!confirm('Batalkan status lunas?')) return;
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.toast(res.message); return; }
+        self.toast('Status dibatalkan');
+        self.pageTagihanPatungan(self._currentTagihanPatunganId);
+      })
+      .withFailureHandler(function(err) { self.toast(err.message); })
+      .batalBayarTagihanPatungan(tagihanId);
+  },
+
+  // ─────────────────────────────────────────────────
+  // ATUR GRADE JAMAAH
+  // ─────────────────────────────────────────────────
+  pageAturGrade: function() {
+    this.history.push('patungan');
+    this.showLoading('Memuat jamaah...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.renderAturGrade(res.data || []);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getAnggotaWithGrade();
+  },
+
+  renderAturGrade: function(anggota) {
+    var self = this;
+    var aktif = anggota.filter(function(a) { return a.status === 'Aktif'; });
+    var rows = aktif.map(function(a) {
+      var grade = (a.grade || '').toUpperCase();
+      return '<div class="stat-row" style="padding:8px 4px;border-bottom:1px solid #f3f4f6;">' +
+        '<span style="font-size:13px;">' + a.nama + '</span>' +
+        '<select onchange="App.simpanGrade(\'' + a.id + '\',this.value)" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">' +
+          '<option value="" ' + (!grade ? 'selected' : '') + '>— Belum —</option>' +
+          ['A','B','C','D','E'].map(function(g) {
+            return '<option value="' + g + '" ' + (grade === g ? 'selected' : '') + '>Grade ' + g + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>';
+    }).join('') || '<div class="text-muted" style="padding:24px 0;">Belum ada jamaah aktif.</div>';
+
+    var html = self.pageWrapper('Atur Grade Jamaah',
+      '<div class="info-box mb-16">Grade menentukan besar tagihan setiap jamaah dalam musyawarah patungan. Grade A = kemampuan tertinggi, dst.</div>' +
+      '<div class="card">' + rows + '</div>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  simpanGrade: function(anggotaId, grade) {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) self.toast('Grade disimpan ✓');
+        else self.toast('Gagal: ' + res.message);
+      })
+      .withFailureHandler(function(err) { self.toast('Error: ' + err.message); })
+      .updateAnggotaGrade(anggotaId, grade);
+  },
+
+  closeModal: function(e, id) {
+    if (e.target === e.currentTarget) document.getElementById(id).innerHTML = '';
+  },
+
+  // ─────────────────────────────────────────────────
   // KELOLA JAMAAH
   // ─────────────────────────────────────────────────
   pageJamaah: function() {
@@ -1447,7 +1786,9 @@ var App = {
       kelolaBuku: 'pageKelolaBuku',
       setting: 'pageSetting',
       jamaah: 'pageJamaah',
-      setoranDesa: 'pageSetoranDesa'
+      setoranDesa: 'pageSetoranDesa',
+      patungan: 'pagePatungan',
+      aturGrade: 'pageAturGrade'
     };
     if (map[prev]) this[map[prev]]();
     else this.loadDashboard();

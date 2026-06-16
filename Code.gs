@@ -18,6 +18,8 @@ const CONFIG = {
     BANK_PENDING: 'Bank Pending',
     SALDO_TUTUP_BUKU: 'Saldo Tutup Buku',
     PEMBELAAN: 'Pembelaan',
+    PATUNGAN: 'Patungan',
+    TAGIHAN_PATUNGAN: 'Tagihan Patungan',
     LOG: 'Activity Log',
   },
   ROLES: {

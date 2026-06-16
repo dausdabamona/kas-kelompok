@@ -560,6 +560,278 @@ function deleteAnggota(id) {
 }
 
 // ──────────────────────────────────────────────────────
+// PATUNGAN / MUSYAWARAH PEMBIAYAAN
+// ──────────────────────────────────────────────────────
+
+function getPatunganList() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PATUNGAN);
+    if (!sheet) return { success: true, data: [] };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var result = [];
+    for (var i = 1; i < rows.length; i++) {
+      if (!hGet_(rows[i], h, 'id', 0)) continue;
+      // load grade config (stored as JSON in GradeConfig column)
+      var gradeStr = String(hGet_(rows[i], h, 'gradeconfig', 5) || '{}');
+      var gradeConfig = {};
+      try { gradeConfig = JSON.parse(gradeStr); } catch(e) {}
+      result.push({
+        id: String(hGet_(rows[i], h, 'id', 0)),
+        nama: String(hGet_(rows[i], h, 'nama', 1) || ''),
+        tanggal: toDateStr_(hGet_(rows[i], h, 'tanggal', 2)),
+        periodeId: String(hGet_(rows[i], h, 'periodeid', 3) || ''),
+        status: String(hGet_(rows[i], h, 'status', 4) || 'Aktif'),
+        gradeConfig: gradeConfig,
+        catatan: String(hGet_(rows[i], h, 'catatan', 6) || ''),
+        createdBy: String(hGet_(rows[i], h, 'createdby', 7) || '')
+      });
+    }
+    return { success: true, data: result };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function addPatungan(data) {
+  try {
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    if (!auth.success) return { success: false, message: auth.message };
+    if (!data.nama) return { success: false, message: 'Nama patungan wajib diisi' };
+    if (!data.gradeConfig || Object.keys(data.gradeConfig).length === 0)
+      return { success: false, message: 'Konfigurasi grade wajib diisi' };
+
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PATUNGAN);
+    if (!sheet) {
+      sheet = ss.insertSheet(CONFIG.SHEETS.PATUNGAN);
+      sheet.appendRow(['ID', 'Nama', 'Tanggal', 'PeriodeID', 'Status', 'GradeConfig', 'Catatan', 'CreatedBy', 'CreatedAt']);
+    }
+    ensureColumns_(sheet, ['ID', 'Nama', 'Tanggal', 'PeriodeID', 'Status', 'GradeConfig', 'Catatan', 'CreatedBy', 'CreatedAt']);
+
+    var periode = getPeriodeAktif();
+    var id = generateID('PAT');
+    var now = new Date();
+    sheet.appendRow([
+      id, data.nama,
+      data.tanggal || toDateStr_(now),
+      periode ? periode.id : '',
+      'Aktif',
+      JSON.stringify(data.gradeConfig),
+      data.catatan || '',
+      auth.user.email,
+      toDateStr_(now)
+    ]);
+
+    // Auto-generate tagihan per anggota berdasarkan grade
+    var result = generateTagihanPatungan_(ss, id, data.gradeConfig, auth.user.email);
+    return { success: true, id: id, tagihanCount: result.count, total: result.total };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function generateTagihanPatungan_(ss, patunganId, gradeConfig, createdBy) {
+  var sheetA = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+  var sheetT = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
+  if (!sheetT) {
+    sheetT = ss.insertSheet(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
+    sheetT.appendRow(['ID', 'PatunganID', 'AnggotaID', 'AnggotaNama', 'Grade', 'Nominal', 'StatusBayar', 'TanggalBayar', 'Catatan', 'CreatedBy', 'CreatedAt']);
+  }
+  ensureColumns_(sheetT, ['ID', 'PatunganID', 'AnggotaID', 'AnggotaNama', 'Grade', 'Nominal', 'StatusBayar', 'TanggalBayar', 'Catatan', 'CreatedBy', 'CreatedAt']);
+
+  var count = 0, total = 0;
+  if (!sheetA) return { count: 0, total: 0 };
+  var rowsA = sheetA.getDataRange().getValues();
+  var hA = headerMap_(rowsA[0]);
+  var now = new Date();
+
+  for (var i = 1; i < rowsA.length; i++) {
+    var aid = String(rowsA[i][0] || '');
+    if (!aid) continue;
+    var status = String(hGet_(rowsA[i], hA, 'status', 4) || 'Aktif');
+    if (status !== 'Aktif') continue;
+    var grade = String(hGet_(rowsA[i], hA, 'grade', 9) || '').toUpperCase().trim();
+    if (!grade || !gradeConfig[grade]) continue;
+    var nominal = Number(gradeConfig[grade]) || 0;
+    if (nominal <= 0) continue;
+    var aNama = String(hGet_(rowsA[i], hA, 'nama', 1) || '');
+    var tid = generateID('TGH');
+    sheetT.appendRow([tid, patunganId, aid, aNama, grade, nominal, 'Belum', '', '', createdBy, toDateStr_(now)]);
+    count++;
+    total += nominal;
+  }
+  return { count: count, total: total };
+}
+
+function getTagihanPatungan(patunganId) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+
+    // Load patungan header
+    var sheetP = ss.getSheetByName(CONFIG.SHEETS.PATUNGAN);
+    var patungan = null;
+    if (sheetP) {
+      var rp = sheetP.getDataRange().getValues();
+      var hp = headerMap_(rp[0]);
+      for (var i = 1; i < rp.length; i++) {
+        if (String(hGet_(rp[i], hp, 'id', 0)) === patunganId) {
+          var gcStr = String(hGet_(rp[i], hp, 'gradeconfig', 5) || '{}');
+          var gc = {}; try { gc = JSON.parse(gcStr); } catch(e) {}
+          patungan = {
+            id: patunganId,
+            nama: String(hGet_(rp[i], hp, 'nama', 1) || ''),
+            tanggal: toDateStr_(hGet_(rp[i], hp, 'tanggal', 2)),
+            status: String(hGet_(rp[i], hp, 'status', 4) || ''),
+            gradeConfig: gc,
+            catatan: String(hGet_(rp[i], hp, 'catatan', 6) || '')
+          };
+          break;
+        }
+      }
+    }
+    if (!patungan) return { success: false, message: 'Patungan tidak ditemukan' };
+
+    var sheetT = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
+    var tagihan = [];
+    var totalTarget = 0, totalLunas = 0, totalBelum = 0;
+    if (sheetT) {
+      var rt = sheetT.getDataRange().getValues();
+      var ht = headerMap_(rt[0]);
+      for (var i = 1; i < rt.length; i++) {
+        if (String(hGet_(rt[i], ht, 'patunganid', 1)) !== patunganId) continue;
+        var nominal = Number(hGet_(rt[i], ht, 'nominal', 5)) || 0;
+        var statusBayar = String(hGet_(rt[i], ht, 'statusbayar', 6) || 'Belum');
+        totalTarget += nominal;
+        if (statusBayar === 'Lunas') totalLunas += nominal;
+        else totalBelum += nominal;
+        tagihan.push({
+          id: String(hGet_(rt[i], ht, 'id', 0)),
+          anggotaId: String(hGet_(rt[i], ht, 'anggotaid', 2) || ''),
+          anggotaNama: String(hGet_(rt[i], ht, 'anggotanama', 3) || ''),
+          grade: String(hGet_(rt[i], ht, 'grade', 4) || ''),
+          nominal: nominal,
+          statusBayar: statusBayar,
+          tanggalBayar: toDateStr_(hGet_(rt[i], ht, 'tanggalbayar', 7)),
+          catatan: String(hGet_(rt[i], ht, 'catatan', 8) || '')
+        });
+      }
+    }
+    tagihan.sort(function(a, b) { return a.grade < b.grade ? -1 : a.grade > b.grade ? 1 : a.anggotaNama.localeCompare(b.anggotaNama); });
+    return { success: true, patungan: patungan, tagihan: tagihan, totalTarget: totalTarget, totalLunas: totalLunas, totalBelum: totalBelum };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function bayarTagihanPatungan(tagihanId, catatan) {
+  try {
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
+    if (!sheet) return { success: false, message: 'Sheet tagihan tidak ditemukan' };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var today = toDateStr_(new Date());
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) === tagihanId) {
+        var colStatus = (h['statusbayar'] !== undefined ? h['statusbayar'] : 6) + 1;
+        var colTgl = (h['tanggalbayar'] !== undefined ? h['tanggalbayar'] : 7) + 1;
+        var colCat = (h['catatan'] !== undefined ? h['catatan'] : 8) + 1;
+        sheet.getRange(i + 1, colStatus).setValue('Lunas');
+        sheet.getRange(i + 1, colTgl).setValue(today);
+        sheet.getRange(i + 1, colCat).setValue(catatan || '');
+        return { success: true };
+      }
+    }
+    return { success: false, message: 'Tagihan tidak ditemukan' };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function batalBayarTagihanPatungan(tagihanId) {
+  try {
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
+    if (!sheet) return { success: false, message: 'Sheet tagihan tidak ditemukan' };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) === tagihanId) {
+        var colStatus = (h['statusbayar'] !== undefined ? h['statusbayar'] : 6) + 1;
+        var colTgl = (h['tanggalbayar'] !== undefined ? h['tanggalbayar'] : 7) + 1;
+        sheet.getRange(i + 1, colStatus).setValue('Belum');
+        sheet.getRange(i + 1, colTgl).setValue('');
+        return { success: true };
+      }
+    }
+    return { success: false, message: 'Tagihan tidak ditemukan' };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function updateAnggotaGrade(anggotaId, grade) {
+  try {
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (!sheet) return { success: false, message: 'Sheet Anggota tidak ditemukan' };
+    ensureColumns_(sheet, ['Grade']);
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var colGrade = (h['grade'] !== undefined ? h['grade'] : -1) + 1;
+    if (colGrade <= 0) return { success: false, message: 'Kolom Grade tidak ditemukan' };
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === anggotaId) {
+        sheet.getRange(i + 1, colGrade).setValue(grade);
+        try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
+        return { success: true };
+      }
+    }
+    return { success: false, message: 'Anggota tidak ditemukan' };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function getAnggotaWithGrade() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (!sheet) return { success: true, data: [] };
+    ensureColumns_(sheet, ['Grade']);
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var result = [];
+    for (var i = 1; i < rows.length; i++) {
+      if (!rows[i][0]) continue;
+      result.push({
+        id: String(rows[i][0]),
+        nama: String(hGet_(rows[i], h, 'nama', 1) || ''),
+        status: String(hGet_(rows[i], h, 'status', 4) || 'Aktif'),
+        grade: String(hGet_(rows[i], h, 'grade', 9) || '')
+      });
+    }
+    return { success: true, data: result };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ──────────────────────────────────────────────────────
 // BUKU IR
 // ──────────────────────────────────────────────────────
 function getBukuIRData() {
