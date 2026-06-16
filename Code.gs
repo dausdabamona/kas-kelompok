@@ -83,14 +83,11 @@ function getSpreadsheetId() {
 }
 
 // ══════════════════════════════════════════════════════
-// SETUP SHEETS — Jalankan SEKALI dari Apps Script Editor
-// Menu: Run → setupSheets
+// Sumber tunggal definisi header semua sheet
+// Dipakai oleh setupSheets() & repairSheetHeaders()
 // ══════════════════════════════════════════════════════
-function setupSheets() {
-  var ss = SpreadsheetApp.openById(getSpreadsheetId());
-  var log = [];
-
-  var SCHEMA = [
+function getSheetSchema_() {
+  return [
     {
       name: CONFIG.SHEETS.KELOMPOK,
       headers: ['ID', 'Nama Kelompok', 'Alamat', 'Ketua', 'Bendahara', 'Tahun Berdiri', 'Keterangan'],
@@ -123,8 +120,8 @@ function setupSheets() {
     },
     {
       name: CONFIG.SHEETS.ANGGOTA,
-      headers: ['ID', 'Nama', 'No Telp', 'Alamat', 'Status', 'IR', '1/10 IR', 'Index', 'Infak Daerah'],
-      note: 'Status: Aktif / Nonaktif | IR s.d. Infak Daerah dalam Rupiah'
+      headers: ['ID', 'Nama', 'No Telp', 'Alamat', 'Status', 'IR', '1/10 IR', 'Index', 'Infak Daerah', 'Grade'],
+      note: 'Status: Aktif / Nonaktif | IR s.d. Infak Daerah dalam Rupiah | Grade: A/B/C/D/E untuk Terobosan Kelompok'
     },
     {
       name: CONFIG.SHEETS.INPUT_PENERIMAAN,
@@ -133,8 +130,8 @@ function setupSheets() {
     },
     {
       name: CONFIG.SHEETS.BUKU_IR,
-      headers: ['ID', 'Transaksi ID', 'Periode ID', 'Anggota ID', 'Tanggal', 'IR', 'IR 1/10', 'Cicilan', 'Infak Daerah', 'Index', 'Total', 'Created By', 'Created At'],
-      note: 'JANGAN edit manual — diisi otomatis dari form Buku IR'
+      headers: ['ID', 'Transaksi ID', 'Periode ID', 'Anggota ID', 'Tanggal', 'IR', 'IR 1/10', 'Cicilan', 'Infak Daerah', 'Index', 'Created By', 'Created At'],
+      note: 'JANGAN edit manual — diisi otomatis dari form Buku IR | Total = derived (dihitung saat baca)'
     },
     {
       name: CONFIG.SHEETS.INPUT_PENGELUARAN,
@@ -177,11 +174,31 @@ function setupSheets() {
       note: 'JANGAN edit manual — diisi saat Tutup Buku'
     },
     {
+      name: CONFIG.SHEETS.PATUNGAN,
+      headers: ['ID', 'Nama', 'Tanggal', 'PeriodeID', 'Status', 'GradeConfig', 'Catatan', 'CreatedBy', 'CreatedAt'],
+      note: 'Terobosan Kelompok — JANGAN edit manual | GradeConfig = JSON nominal per grade'
+    },
+    {
+      name: CONFIG.SHEETS.TAGIHAN_PATUNGAN,
+      headers: ['ID', 'PatunganID', 'AnggotaID', 'AnggotaNama', 'Grade', 'Nominal', 'StatusBayar', 'TanggalBayar', 'Catatan', 'CreatedBy', 'CreatedAt'],
+      note: 'Tagihan Terobosan per jamaah — JANGAN edit manual | StatusBayar: Belum / Lunas'
+    },
+    {
       name: CONFIG.SHEETS.LOG,
       headers: ['Timestamp', 'User', 'Action', 'Detail'],
       note: 'Log otomatis — JANGAN edit manual'
     }
   ];
+}
+
+// ══════════════════════════════════════════════════════
+// SETUP SHEETS — Jalankan SEKALI dari Apps Script Editor
+// Menu: Run → setupSheets
+// ══════════════════════════════════════════════════════
+function setupSheets() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var log = [];
+  var SCHEMA = getSheetSchema_();
 
   for (var i = 0; i < SCHEMA.length; i++) {
     var s = SCHEMA[i];
@@ -350,6 +367,65 @@ function migratePosSetoran() {
   try {
     var ui = SpreadsheetApp.getUi();
     ui.alert('Migrasi Selesai ✅', log.join('\n'), ui.ButtonSet.OK);
+  } catch(e) {}
+  return { success: true, log: log };
+}
+
+// ══════════════════════════════════════════════════════
+// PERBAIKI HEADER TABEL → selaraskan dengan kode (normalisasi)
+// Jalankan SEKALI dari editor: Run → repairSheetHeaders
+// Menimpa baris header (row 1) tiap sheet dengan header kanonik
+// dari getSheetSchema_(). TIDAK menyentuh baris data (row >= 2).
+// Aman karena data sudah berurutan sesuai kode versi sekarang.
+// ══════════════════════════════════════════════════════
+function repairSheetHeaders() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var SCHEMA = getSheetSchema_();
+  var log = [];
+
+  for (var i = 0; i < SCHEMA.length; i++) {
+    var s = SCHEMA[i];
+    var sheet = ss.getSheetByName(s.name);
+    if (!sheet) { log.push('⏭️ TIDAK ADA: ' + s.name); continue; }
+
+    var lastCol = sheet.getLastColumn();
+    var canonN = s.headers.length;
+
+    // Baca header lama untuk perbandingan/log
+    var oldHeader = [];
+    if (lastCol > 0) oldHeader = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var oldStr = oldHeader.join(' | ');
+    var newStr = s.headers.join(' | ');
+
+    // Timpa header kanonik
+    sheet.getRange(1, 1, 1, canonN).setValues([s.headers]);
+
+    // Kosongkan sel header berlebih (mis. kolom usang yang tersisa)
+    if (lastCol > canonN) {
+      sheet.getRange(1, canonN + 1, 1, lastCol - canonN).clearContent();
+    }
+
+    // Format ulang header + freeze + note
+    sheet.getRange(1, 1, 1, canonN)
+      .setFontWeight('bold')
+      .setBackground('#1E40AF')
+      .setFontColor('#FFFFFF')
+      .setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    if (s.note) sheet.getRange(1, 1).setNote(s.note);
+
+    if (oldStr === newStr) {
+      log.push('✓ OK: ' + s.name);
+    } else {
+      log.push('🔧 DIPERBAIKI: ' + s.name + '\n    lama: ' + oldStr + '\n    baru: ' + newStr);
+    }
+  }
+
+  try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
+  Logger.log('=== PERBAIKI HEADER SELESAI ===\n' + log.join('\n'));
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.alert('Perbaiki Header Selesai ✅', log.join('\n'), ui.ButtonSet.OK);
   } catch(e) {}
   return { success: true, log: log };
 }

@@ -1048,8 +1048,6 @@ function getRekapitulasiData() {
         var jenisId = String(hGet_(dp[i], dpH, 'jenisid', 2) || '');
         var anggotaId = String(hGet_(dp[i], dpH, 'anggotaid', 3) || '');
         var catatan = String(hGet_(dp[i], dpH, 'catatan', 7) || '');
-        // catatan fallback: jika catatan kosong atau berisi email, abaikan
-        if (!catatan || catatan.indexOf('@') >= 0) catatan = '';
         pemasukan.push({
           id: String(hGet_(dp[i], dpH, 'id', 0)),
           jenis: masterPMap[jenisId] || jenisId,
@@ -1073,7 +1071,6 @@ function getRekapitulasiData() {
         var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
         var jenisId = String(hGet_(dpk[i], dpkH, 'jenisid', 2) || '');
         var catatan = String(hGet_(dpk[i], dpkH, 'catatan', 6) || '');
-        if (!catatan || catatan.indexOf('@') >= 0) catatan = '';
         pengeluaran.push({
           id: String(hGet_(dpk[i], dpkH, 'id', 0)),
           jenis: masterPKMap[jenisId] || jenisId,
