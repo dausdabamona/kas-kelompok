@@ -1677,6 +1677,22 @@ function generatePDF(periodeId) {
     if (!auth.success) return { success: false, message: auth.message };
     var rekap = getRekapitulasiData();
     if (!rekap.success) return rekap;
+
+    // Lampirkan data tambahan (best-effort; jika gagal, section dilewati)
+    try { var ls = getLaporanSetoran(); if (ls && ls.success) rekap.setoran = ls; } catch(e) {}
+    try { var pb = getPembelaanData(); if (pb && pb.success) rekap.pembelaan = pb; } catch(e) {}
+    try {
+      var pl = getPatunganList();
+      if (pl && pl.success) {
+        var terobosan = [];
+        (pl.data || []).forEach(function(pat) {
+          var t = getTagihanPatungan(pat.id);
+          if (t && t.success) terobosan.push(t);
+        });
+        rekap.terobosan = terobosan;
+      }
+    } catch(e) {}
+
     var html = buildPDFHTML(rekap);
     // Kirim HTML string ke client — browser akan render langsung via window.open
     return { success: true, html: html };
@@ -1818,6 +1834,114 @@ function buildPDFHTML(data) {
     '<tr><td style="' + S.cfSaldo + '">Saldo Akhir Tunai / Bank</td><td style="' + S.cfSaldoR + '">' + fmtRp(saldoAkhirTunai) + '</td><td style="' + S.cfSaldoR + '">' + fmtRp(saldoAkhirBank) + '</td></tr>' +
     '<tr><td style="' + S.cfTotal + '">TOTAL KAS</td><td style="' + S.cfTotalR + '" colspan="2">' + fmtRp(grandTotal) + '</td></tr>' +
     '</table>';
+
+  // ── D. Setoran ke Desa ──
+  if (data.setoran && data.setoran.data) {
+    var sd = data.setoran;
+    var sdRows = sd.data || [];
+    html += '<h2 style="' + S.h2 + '">D. Setoran ke Desa</h2>';
+    html += '<table style="' + S.tbl + '"><tr>' +
+      '<th style="' + S.th + '">#</th>' +
+      '<th style="' + S.th + '">Pos / Jenis</th>' +
+      '<th style="' + S.thR + '">Kewajiban</th>' +
+      '<th style="' + S.thR + '">Sudah Setor</th>' +
+      '<th style="' + S.thR + '">Sisa</th>' +
+      '<th style="' + S.th + '">Status</th>' +
+      '</tr>';
+    sdRows.forEach(function(row, idx) {
+      var bg = idx % 2 === 0 ? '' : 'background:#f9fafb;';
+      var td = 'padding:4px 8px;border:1px solid #d1d5db;vertical-align:top;' + bg;
+      var tdR = 'padding:4px 8px;border:1px solid #d1d5db;text-align:right;vertical-align:top;' + bg;
+      html += '<tr>' +
+        '<td style="' + td + '">' + (idx+1) + '</td>' +
+        '<td style="' + td + '">' + esc_(row.nama) + '</td>' +
+        '<td style="' + tdR + '">' + fmtRp(row.kewajiban) + '</td>' +
+        '<td style="' + tdR + '">' + fmtRp(row.sudahSetor) + '</td>' +
+        '<td style="' + tdR + '">' + fmtRp(row.sisa) + '</td>' +
+        '<td style="' + td + '">' + esc_(row.status) + '</td>' +
+        '</tr>';
+    });
+    if (sdRows.length === 0) html += '<tr><td colspan="6" style="' + S.tdE + '">Belum ada data setoran desa</td></tr>';
+    var sm = sd.summary || {};
+    html += '<tr><td colspan="2" style="' + S.tot + '">TOTAL</td>' +
+      '<td style="' + S.totR + '">' + fmtRp(sm.totalTarget) + '</td>' +
+      '<td style="' + S.totR + '">' + fmtRp(sm.totalSudahSetor) + '</td>' +
+      '<td style="' + S.totR + '">' + fmtRp(sm.totalSisa) + '</td>' +
+      '<td style="' + S.tot + '"></td></tr>';
+    html += '</table>';
+  }
+
+  // ── E. Target Pembelaan ──
+  if (data.pembelaan) {
+    var pb = data.pembelaan;
+    var belum = pb.belum || [];
+    var lunas = pb.lunas || [];
+    var all = lunas.concat(belum);
+    html += '<h2 style="' + S.h2 + '">E. Target Pembelaan</h2>';
+    html += '<table style="' + S.tbl + '"><tr>' +
+      '<th style="' + S.th + '">#</th>' +
+      '<th style="' + S.th + '">Jamaah</th>' +
+      '<th style="' + S.thR + '">Nominal</th>' +
+      '<th style="' + S.th + '">Tgl Janji</th>' +
+      '<th style="' + S.th + '">Status</th>' +
+      '</tr>';
+    var totPbLunas = 0, totPbBelum = 0;
+    all.forEach(function(row, idx) {
+      var bg = idx % 2 === 0 ? '' : 'background:#f9fafb;';
+      var td = 'padding:4px 8px;border:1px solid #d1d5db;vertical-align:top;' + bg;
+      var tdR = 'padding:4px 8px;border:1px solid #d1d5db;text-align:right;vertical-align:top;' + bg;
+      var isLunas = row.status === 'Lunas';
+      if (isLunas) totPbLunas += Number(row.nominal) || 0;
+      else totPbBelum += Number(row.nominal) || 0;
+      html += '<tr>' +
+        '<td style="' + td + '">' + (idx+1) + '</td>' +
+        '<td style="' + td + '">' + esc_(row.anggotaNama) + '</td>' +
+        '<td style="' + tdR + '">' + fmtRp(row.nominal) + '</td>' +
+        '<td style="' + td + '">' + (row.tanggalJanji ? fmtTanggal(row.tanggalJanji) : '-') + '</td>' +
+        '<td style="' + td + '">' + esc_(row.status) + '</td>' +
+        '</tr>';
+    });
+    if (all.length === 0) html += '<tr><td colspan="5" style="' + S.tdE + '">Belum ada data pembelaan</td></tr>';
+    html += '<tr><td colspan="2" style="' + S.tot + '">Sudah Lunas</td><td style="' + S.totR + '">' + fmtRp(totPbLunas) + '</td><td colspan="2" style="' + S.tot + '"></td></tr>';
+    html += '<tr><td colspan="2" style="' + S.tot + '">Belum Lunas</td><td style="' + S.totR + '">' + fmtRp(totPbBelum) + '</td><td colspan="2" style="' + S.tot + '"></td></tr>';
+    html += '<tr><td colspan="2" style="' + S.tot + '">TOTAL TARGET</td><td style="' + S.totR + '">' + fmtRp(totPbLunas + totPbBelum) + '</td><td colspan="2" style="' + S.tot + '"></td></tr>';
+    html += '</table>';
+  }
+
+  // ── F. Hasil Musyawarah / Terobosan Kelompok ──
+  if (data.terobosan && data.terobosan.length > 0) {
+    html += '<h2 style="' + S.h2 + '">F. Hasil Musyawarah / Terobosan Kelompok</h2>';
+    data.terobosan.forEach(function(t) {
+      var pat = t.patungan || {};
+      var tag = t.tagihan || [];
+      html += '<div style="font-weight:bold;font-size:12px;margin:12px 0 4px;">' + esc_(pat.nama) +
+        ' <span style="font-weight:normal;color:#666;">(' + (pat.tanggal ? fmtTanggal(pat.tanggal) : '-') + ')</span></div>';
+      html += '<table style="' + S.tbl + '"><tr>' +
+        '<th style="' + S.th + '">#</th>' +
+        '<th style="' + S.th + '">Jamaah</th>' +
+        '<th style="' + S.th + '">Grade</th>' +
+        '<th style="' + S.thR + '">Nominal</th>' +
+        '<th style="' + S.th + '">Status</th>' +
+        '</tr>';
+      tag.forEach(function(row, idx) {
+        var bg = idx % 2 === 0 ? '' : 'background:#f9fafb;';
+        var td = 'padding:4px 8px;border:1px solid #d1d5db;vertical-align:top;' + bg;
+        var tdR = 'padding:4px 8px;border:1px solid #d1d5db;text-align:right;vertical-align:top;' + bg;
+        html += '<tr>' +
+          '<td style="' + td + '">' + (idx+1) + '</td>' +
+          '<td style="' + td + '">' + esc_(row.anggotaNama) + '</td>' +
+          '<td style="' + td + '">' + esc_(row.grade) + '</td>' +
+          '<td style="' + tdR + '">' + fmtRp(row.nominal) + '</td>' +
+          '<td style="' + td + '">' + (row.statusBayar === 'Lunas' ? 'Lunas' : 'Belum') + '</td>' +
+          '</tr>';
+      });
+      if (tag.length === 0) html += '<tr><td colspan="5" style="' + S.tdE + '">Belum ada tagihan</td></tr>';
+      html += '<tr><td colspan="3" style="' + S.tot + '">Target</td><td style="' + S.totR + '">' + fmtRp(t.totalTarget) + '</td><td style="' + S.tot + '"></td></tr>';
+      html += '<tr><td colspan="3" style="' + S.tot + '">Sudah Bayar</td><td style="' + S.totR + '">' + fmtRp(t.totalLunas) + '</td><td style="' + S.tot + '"></td></tr>';
+      html += '<tr><td colspan="3" style="' + S.tot + '">Belum Bayar</td><td style="' + S.totR + '">' + fmtRp(t.totalBelum) + '</td><td style="' + S.tot + '"></td></tr>';
+      html += '</table>';
+    });
+  }
 
   html += '<div style="' + S.foot + '">Laporan ini dibuat otomatis oleh sistem Kas Kelompok pada ' + cetakTgl + '.</div>';
   html += '</body></html>';
