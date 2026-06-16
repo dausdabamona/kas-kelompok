@@ -197,7 +197,7 @@ var App = {
         (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '') +
         (!isPenerobos ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '') +
         (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '') +
-        '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Patungan</span></div>' +
+        '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Terobosan Kelompok</span></div>' +
         (isAdmin ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
         '<div class="menu-item" onclick="App.loadDashboard()"><span class="icon">🔄</span><span>Refresh</span></div>' +
       '</div>' +
@@ -1066,8 +1066,8 @@ var App = {
       '</div>';
     }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada musyawarah patungan.</div>';
 
-    var html = self.pageWrapper('Patungan / Musyawarah',
-      (canAdmin ? '<button class="btn btn-primary mb-16" onclick="App.showFormPatungan()">+ Buat Musyawarah</button>' : '') +
+    var html = self.pageWrapper('Terobosan Kelompok',
+      (canAdmin ? '<button class="btn btn-primary mb-16" onclick="App.showFormPatungan()">+ Buat Terobosan</button>' : '') +
       '<div id="patunganModal"></div>' +
       cards
     );
@@ -1112,10 +1112,10 @@ var App = {
           '. <a href="#" onclick="App.pageAturGrade();return false;">Atur grade jamaah</a></div>'
       : '';
 
-    var html = this.pageWrapper('Buat Musyawarah Patungan',
+    var html = this.pageWrapper('Buat Terobosan Kelompok',
       warningGrade +
       '<div class="card">' +
-        '<div class="form-group"><label>Nama Musyawarah *</label><input type="text" id="patNama" placeholder="mis. Patungan Biaya Perjalanan 2025"/></div>' +
+        '<div class="form-group"><label>Nama Musyawarah *</label><input type="text" id="patNama" placeholder="mis. Terobosan Biaya Perjalanan 2025"/></div>' +
         '<div class="form-group"><label>Tanggal</label><input type="date" id="patTgl" value="' + new Date().toISOString().slice(0,10) + '"/></div>' +
         '<div class="form-group"><label>Catatan</label><input type="text" id="patCatatan" placeholder="Opsional"/></div>' +
       '</div>' +
@@ -1129,7 +1129,7 @@ var App = {
         '</div>' +
       '</div>' +
       '<div id="patError"></div>' +
-      '<button class="btn btn-primary" onclick="App.submitPatungan()">✅ Buat & Generate Tagihan</button>',
+      '<button class="btn btn-primary" onclick="App.submitPatungan()">✅ Buat & Generate Tagihan Terobosan</button>',
       { _gradeCounts: gradeCounts }
     );
     document.getElementById('app').innerHTML = html;
@@ -1179,7 +1179,7 @@ var App = {
           document.getElementById('patError').innerHTML = '<div class="error-box">' + res.message + '</div>';
           return;
         }
-        self.toast('Patungan dibuat! ' + (res.tagihanCount || 0) + ' tagihan, total Rp ' + (res.total || 0).toLocaleString('id-ID'));
+        self.toast('Terobosan Kelompok dibuat! ' + (res.tagihanCount || 0) + ' tagihan, total Rp ' + (res.total || 0).toLocaleString('id-ID'));
         self.pagePatungan();
       })
       .withFailureHandler(function(err) {
@@ -1254,7 +1254,7 @@ var App = {
       return header + items;
     }).join('');
 
-    var html = self.pageWrapper(p.nama || 'Tagihan Patungan',
+    var html = self.pageWrapper(p.nama || 'Tagihan Terobosan',
       '<div style="font-size:12px;color:#888;margin-bottom:12px;">' + App.formatDate(p.tanggal) + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
       summaryCards +
       '<div class="card">' +
