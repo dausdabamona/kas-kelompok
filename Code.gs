@@ -65,7 +65,8 @@ function getCapabilities_() {
     { code: 'bank.manage', label: 'Kelola Bank (rekon/pending/daily)', grup: 'edit' },
     { code: 'setoran.realisasi', label: 'Realisasi Setoran Desa', grup: 'edit' },
     { code: 'pembelaan.manage', label: 'Kelola Pembelaan', grup: 'edit' },
-    { code: 'master.manage', label: 'Kelola Master (Pos/Musyawaroh)', grup: 'edit' }
+    { code: 'master.manage', label: 'Kelola Master (Pos/Musyawaroh)', grup: 'edit' },
+    { code: 'user.manage', label: 'Kelola User', grup: 'edit' }
   ];
 }
 
@@ -100,7 +101,8 @@ function getDefaultPermMatrix_() {
     'bank.manage': [R.ADMIN, R.BENDAHARA_1],
     'setoran.realisasi': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'pembelaan.manage': allRoles,
-    'master.manage': [R.ADMIN]
+    'master.manage': [R.ADMIN],
+    'user.manage': [R.ADMIN]
   };
   // bentuk matriks { role: { cap: bool } }
   var matrix = {};

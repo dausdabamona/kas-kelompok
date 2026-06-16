@@ -80,9 +80,16 @@ function getUserList_() {
   var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
   if (!sheet) return [];
   var rows = sheet.getDataRange().getValues();
+  var h = headerMap_(rows[0]);
   var list = [];
   for (var i = 1; i < rows.length; i++) {
-    if (rows[i][0]) list.push({ email: rows[i][0], nama: rows[i][1], role: rows[i][2] });
+    if (rows[i][0]) list.push({
+      email: String(hGet_(rows[i], h, 'email', 0) || ''),
+      nama: String(hGet_(rows[i], h, 'nama', 1) || ''),
+      role: String(hGet_(rows[i], h, 'role', 2) || ''),
+      status: String(hGet_(rows[i], h, 'status', 3) || 'Aktif'),
+      created: toDateStr_(hGet_(rows[i], h, 'created', 4))
+    });
   }
   try { cache.put('user_list', JSON.stringify(list), 300); } catch(e) {}
   return list;
@@ -96,6 +103,9 @@ function loginWithEmail(email) {
     for (var i = 0; i < users.length; i++) {
       if (users[i].email.toLowerCase().trim() === emailNorm) {
         var user = users[i];
+        if (String(user.status || 'Aktif').toLowerCase() === 'nonaktif') {
+          return { success: false, message: 'Akun nonaktif. Hubungi Admin.' };
+        }
         var props = PropertiesService.getUserProperties();
         props.setProperty('userEmail', user.email);
         props.setProperty('userName', user.nama);
@@ -176,6 +186,144 @@ function savePermMatrix(matrix) {
 
     try { CacheService.getScriptCache().remove('perm_matrix'); } catch(e) {}
     logActivity(auth.user.email, 'HAK_AKSES', 'Update matriks hak akses');
+    return { success: true };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ── KELOLA USER (CRUD) ──────────────────────────────────
+function getUserListAdmin() {
+  var auth = requirePerm('user.manage');
+  if (!auth.success) return auth;
+  try { CacheService.getScriptCache().remove('user_list'); } catch(e) {}
+  return { success: true, data: getUserList_(), roles: getAllRoles_() };
+}
+
+function countActiveAdmins_() {
+  var users = getUserList_();
+  var n = 0;
+  for (var i = 0; i < users.length; i++) {
+    if (users[i].role === CONFIG.ROLES.ADMIN && String(users[i].status || 'Aktif').toLowerCase() !== 'nonaktif') n++;
+  }
+  return n;
+}
+
+function findUserRow_(sheet, email) {
+  var rows = sheet.getDataRange().getValues();
+  var emailNorm = String(email).toLowerCase().trim();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).toLowerCase().trim() === emailNorm) return { rowIndex: i + 1, row: rows[i] };
+  }
+  return null;
+}
+
+function addUser(data) {
+  var auth = requirePerm('user.manage');
+  if (!auth.success) return auth;
+  try {
+    var email = String((data && data.email) || '').trim();
+    if (!email) return { success: false, message: 'Email wajib diisi' };
+    if (email.indexOf('@') < 0) return { success: false, message: 'Format email tidak valid' };
+    var role = String((data && data.role) || '').trim();
+    if (getAllRoles_().indexOf(role) < 0) return { success: false, message: 'Role tidak valid' };
+    var users = getUserList_();
+    for (var i = 0; i < users.length; i++) {
+      if (users[i].email.toLowerCase().trim() === email.toLowerCase()) {
+        return { success: false, message: 'Email sudah terdaftar' };
+      }
+    }
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
+    if (!sheet) return { success: false, message: 'Sheet Master User tidak ditemukan' };
+    var status = (String((data && data.status) || 'Aktif').toLowerCase() === 'nonaktif') ? 'Nonaktif' : 'Aktif';
+    sheet.appendRow([email, String((data && data.nama) || ''), role, status, new Date()]);
+    try { CacheService.getScriptCache().remove('user_list'); } catch(e) {}
+    logActivity(auth.user.email, 'USER', 'Tambah user: ' + email);
+    return { success: true };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function updateUser(data) {
+  var auth = requirePerm('user.manage');
+  if (!auth.success) return auth;
+  try {
+    var email = String((data && data.email) || '').trim();
+    if (!email) return { success: false, message: 'Email wajib diisi' };
+    var role = String((data && data.role) || '').trim();
+    if (getAllRoles_().indexOf(role) < 0) return { success: false, message: 'Role tidak valid' };
+    var status = (String((data && data.status) || 'Aktif').toLowerCase() === 'nonaktif') ? 'Nonaktif' : 'Aktif';
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
+    if (!sheet) return { success: false, message: 'Sheet Master User tidak ditemukan' };
+    var found = findUserRow_(sheet, email);
+    if (!found) return { success: false, message: 'User tidak ditemukan' };
+
+    var wasActiveAdmin = (String(found.row[2]) === CONFIG.ROLES.ADMIN && String(found.row[3] || 'Aktif').toLowerCase() !== 'nonaktif');
+    var willBeActiveAdmin = (role === CONFIG.ROLES.ADMIN && status === 'Aktif');
+    if (wasActiveAdmin && !willBeActiveAdmin && countActiveAdmins_() <= 1) {
+      return { success: false, message: 'Tidak bisa: harus ada minimal 1 ADMIN aktif' };
+    }
+
+    var h = headerMap_(sheet.getDataRange().getValues()[0]);
+    sheet.getRange(found.rowIndex, (h['nama'] !== undefined ? h['nama'] : 1) + 1).setValue(String((data && data.nama) || ''));
+    sheet.getRange(found.rowIndex, (h['role'] !== undefined ? h['role'] : 2) + 1).setValue(role);
+    sheet.getRange(found.rowIndex, (h['status'] !== undefined ? h['status'] : 3) + 1).setValue(status);
+    try { CacheService.getScriptCache().remove('user_list'); } catch(e) {}
+    logActivity(auth.user.email, 'USER', 'Update user: ' + email);
+    return { success: true };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function setUserStatus(email, status) {
+  var auth = requirePerm('user.manage');
+  if (!auth.success) return auth;
+  try {
+    email = String(email || '').trim();
+    var st = (String(status).toLowerCase() === 'nonaktif') ? 'Nonaktif' : 'Aktif';
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
+    if (!sheet) return { success: false, message: 'Sheet Master User tidak ditemukan' };
+    var found = findUserRow_(sheet, email);
+    if (!found) return { success: false, message: 'User tidak ditemukan' };
+    if (st === 'Nonaktif' && String(found.row[2]) === CONFIG.ROLES.ADMIN && countActiveAdmins_() <= 1) {
+      return { success: false, message: 'Tidak bisa: harus ada minimal 1 ADMIN aktif' };
+    }
+    var h = headerMap_(sheet.getDataRange().getValues()[0]);
+    sheet.getRange(found.rowIndex, (h['status'] !== undefined ? h['status'] : 3) + 1).setValue(st);
+    try { CacheService.getScriptCache().remove('user_list'); } catch(e) {}
+    logActivity(auth.user.email, 'USER', 'Set status ' + email + ' = ' + st);
+    return { success: true };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function deleteUser(email) {
+  var auth = requirePerm('user.manage');
+  if (!auth.success) return auth;
+  try {
+    email = String(email || '').trim();
+    if (email.toLowerCase() === String(auth.user.email).toLowerCase()) {
+      return { success: false, message: 'Tidak bisa menghapus akun sendiri' };
+    }
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
+    if (!sheet) return { success: false, message: 'Sheet Master User tidak ditemukan' };
+    var found = findUserRow_(sheet, email);
+    if (!found) return { success: false, message: 'User tidak ditemukan' };
+    var isActiveAdmin = (String(found.row[2]) === CONFIG.ROLES.ADMIN && String(found.row[3] || 'Aktif').toLowerCase() !== 'nonaktif');
+    if (isActiveAdmin && countActiveAdmins_() <= 1) {
+      return { success: false, message: 'Tidak bisa: harus ada minimal 1 ADMIN aktif' };
+    }
+    sheet.deleteRow(found.rowIndex);
+    try { CacheService.getScriptCache().remove('user_list'); } catch(e) {}
+    logActivity(auth.user.email, 'USER', 'Hapus user: ' + email);
     return { success: true };
   } catch(e) {
     return { success: false, message: e.message };

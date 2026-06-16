@@ -1632,7 +1632,11 @@ var App = {
       '<div class="kelola-menu-item" onclick="App.pageHakAkses()">' +
         '<div class="kelola-menu-icon">🔐</div>' +
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Kelola Hak Akses</div><div class="kelola-menu-desc">Atur hak akses tiap role</div></div><span>›</span>' +
-      '</div>'
+      '</div>' +
+      (App.can('user.manage') ? '<div class="kelola-menu-item" onclick="App.pageKelolaUser()">' +
+        '<div class="kelola-menu-icon">👤</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Kelola User</div><div class="kelola-menu-desc">Tambah, edit, aktif/nonaktif user</div></div><span>›</span>' +
+      '</div>' : '')
     );
     document.getElementById('app').innerHTML = html;
   },
@@ -1716,6 +1720,135 @@ var App = {
         document.getElementById('hakAksesError').innerHTML = '<div class="error-box">' + err.message + '</div>';
       })
       .savePermMatrix(matrix);
+  },
+
+  // ─────────────────────────────────────────────────
+  // KELOLA USER
+  // ─────────────────────────────────────────────────
+  pageKelolaUser: function() {
+    this.history.push('setting');
+    this.showLoading('Memuat user...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self._userRoles = res.roles || [];
+        self.renderKelolaUser(res.data || []);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getUserListAdmin();
+  },
+
+  renderKelolaUser: function(users) {
+    var self = this;
+    var myEmail = (App.currentUser && App.currentUser.email || '').toLowerCase();
+    var cards = users.map(function(u) {
+      var aktif = String(u.status || 'Aktif').toLowerCase() !== 'nonaktif';
+      var isSelf = String(u.email).toLowerCase() === myEmail;
+      var ujson = JSON.stringify(u).replace(/'/g, '&#39;');
+      return '<div class="card" style="margin-bottom:10px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+          '<div>' +
+            '<div style="font-weight:bold;">' + (u.nama || '-') + (isSelf ? ' <span style="font-size:10px;color:#888;">(Anda)</span>' : '') + '</div>' +
+            '<div style="font-size:12px;color:#555;">' + u.email + '</div>' +
+            '<div style="margin-top:4px;">' +
+              '<span class="badge" style="background:#e0e7ff;color:#3730a3;">' + (u.role || '-') + '</span> ' +
+              '<span class="badge" style="background:' + (aktif ? '#dcfce7' : '#f3f4f6') + ';color:' + (aktif ? '#166534' : '#888') + ';">' + (aktif ? 'Aktif' : 'Nonaktif') + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px;margin-top:10px;">' +
+          '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;" onclick="App.showFormUser(' + ujson + ')">✏️ Edit</button>' +
+          '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;" onclick="App.toggleUserStatus(\'' + u.email + '\',\'' + (aktif ? 'Nonaktif' : 'Aktif') + '\')">' + (aktif ? '🚫 Nonaktif' : '✅ Aktifkan') + '</button>' +
+          (isSelf ? '' : '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;color:#dc2626;" onclick="App.hapusUser(\'' + u.email + '\')">🗑️ Hapus</button>') +
+        '</div>' +
+      '</div>';
+    }).join('') || '<div class="text-center text-muted" style="padding:24px;">Belum ada user.</div>';
+
+    var html = self.pageWrapper('Kelola User',
+      '<button class="btn btn-primary mb-16" onclick="App.showFormUser(null)">+ Tambah User</button>' +
+      '<div id="userModal"></div>' +
+      cards
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  showFormUser: function(item) {
+    var isEdit = !!item;
+    var roles = this._userRoles || ['ADMIN','BENDAHARA_1','BENDAHARA_2','PENULIS','PENEROBOS'];
+    var u = item || { email: '', nama: '', role: roles[0], status: 'Aktif' };
+    var roleOpts = roles.map(function(r) {
+      return '<option value="' + r + '"' + (u.role === r ? ' selected' : '') + '>' + r + '</option>';
+    }).join('');
+    var aktif = String(u.status || 'Aktif').toLowerCase() !== 'nonaktif';
+    var html =
+      '<div class="modal-overlay" onclick="App.closeModal(event,\'userModal\')">' +
+        '<div class="modal">' +
+          '<div class="modal-title">' + (isEdit ? 'Edit User' : 'Tambah User') + '</div>' +
+          '<div class="form-group"><label>Email *</label><input type="text" id="uEmail" value="' + (u.email || '') + '"' + (isEdit ? ' disabled' : '') + ' placeholder="email@contoh.com"/></div>' +
+          '<div class="form-group"><label>Nama</label><input type="text" id="uNama" value="' + (u.nama || '') + '"/></div>' +
+          '<div class="form-group"><label>Role</label><select id="uRole">' + roleOpts + '</select></div>' +
+          '<div class="form-group"><label>Status</label><select id="uStatus">' +
+            '<option value="Aktif"' + (aktif ? ' selected' : '') + '>Aktif</option>' +
+            '<option value="Nonaktif"' + (!aktif ? ' selected' : '') + '>Nonaktif</option>' +
+          '</select></div>' +
+          '<div id="userFormError"></div>' +
+          '<button class="btn btn-primary" onclick="App.submitUser(' + isEdit + ')">💾 Simpan</button>' +
+          '<button class="btn btn-outline mt-8" onclick="document.getElementById(\'userModal\').innerHTML=\'\'">Batal</button>' +
+        '</div>' +
+      '</div>';
+    document.getElementById('userModal').innerHTML = html;
+  },
+
+  submitUser: function(isEdit) {
+    var self = this;
+    var data = {
+      email: (document.getElementById('uEmail') || {}).value || '',
+      nama: (document.getElementById('uNama') || {}).value || '',
+      role: (document.getElementById('uRole') || {}).value || '',
+      status: (document.getElementById('uStatus') || {}).value || 'Aktif'
+    };
+    if (!data.email.trim()) {
+      document.getElementById('userFormError').innerHTML = '<div class="error-box">Email wajib diisi</div>';
+      return;
+    }
+    document.getElementById('userFormError').innerHTML = '<div class="info-box">⏳ Menyimpan...</div>';
+    var fn = isEdit ? 'updateUser' : 'addUser';
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { document.getElementById('userFormError').innerHTML = '<div class="error-box">' + res.message + '</div>'; return; }
+        self.toast('User tersimpan ✓');
+        self.pageKelolaUser();
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('userFormError').innerHTML = '<div class="error-box">' + err.message + '</div>';
+      })
+      [fn](data);
+  },
+
+  toggleUserStatus: function(email, statusBaru) {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.toast(res.message); return; }
+        self.toast('Status diubah ✓');
+        self.pageKelolaUser();
+      })
+      .withFailureHandler(function(err) { self.toast(err.message); })
+      .setUserStatus(email, statusBaru);
+  },
+
+  hapusUser: function(email) {
+    if (!confirm('Hapus user ' + email + '?')) return;
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.toast(res.message); return; }
+        self.toast('User dihapus');
+        self.pageKelolaUser();
+      })
+      .withFailureHandler(function(err) { self.toast(err.message); })
+      .deleteUser(email);
   },
 
   pagePosPemasukan: function() {
