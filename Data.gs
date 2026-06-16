@@ -66,7 +66,7 @@ function getPeriodeAktif() {
     for (var c = 0; c < header.length; c++) {
       var h = String(header[c]).toLowerCase().trim();
       if (h === 'status') colStatus = c;
-      else if (h.indexOf('nama') !== -1 || h.indexOf('periode') !== -1) { if (colNama < 0) colNama = c; }
+      else if (h.indexOf('nama') !== -1) { if (colNama < 0) colNama = c; }
       else if (h.indexOf('mulai') !== -1) colTglMulai = c;
       else if (h.indexOf('tutup') !== -1) colTglTutup = c;
       else if (h.indexOf('tunai') !== -1) colSaldoTunai = c;
