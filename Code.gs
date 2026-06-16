@@ -78,10 +78,10 @@ function getDefaultPermMatrix_() {
   var def = {
     'view.bukuIR': nonPenerobos,
     'view.kelolaBuku': nonPenerobos,
-    'view.setoranDesa': nonPenerobos,
-    'view.jamaah': allRoles,
+    'view.setoranDesa': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
+    'view.jamaah': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
     'view.laporanSetoran': nonPenerobos,
-    'view.pemeriksaanSaldo': nonPenerobos,
+    'view.pemeriksaanSaldo': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'view.laporanPDF': nonPenerobos,
     'view.terobosan': allRoles,
     'view.setting': [R.ADMIN],
