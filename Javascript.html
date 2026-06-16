@@ -992,7 +992,7 @@ var App = {
       '</div>' +
       '<div class="card">' +
         '<div class="section-title mb-8">Buat Laporan</div>' +
-        '<p style="font-size:13px;color:#555;margin-bottom:16px;">Klik tombol di bawah untuk membuat laporan dan membukanya di tab baru. File HTML akan tersimpan di Google Drive Anda.</p>' +
+        '<p style="font-size:13px;color:#555;margin-bottom:16px;">Klik tombol di bawah untuk membuat laporan. Laporan akan terbuka di tab baru dan siap dicetak (Ctrl+P).</p>' +
         '<div id="laporanPDFError"></div>' +
         '<div id="laporanPDFResult" style="display:none;" class="info-box mb-12"></div>' +
         '<button class="btn btn-primary" id="btnLaporanPDF" onclick="App.buatLaporanPDF()">📄 Buat &amp; Unduh Laporan</button>' +
@@ -1008,22 +1008,41 @@ var App = {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Membuat laporan...'; }
     errEl.innerHTML = '';
     resEl.style.display = 'none';
+    // Buka tab baru dulu (sebelum async call) agar tidak diblokir popup blocker
+    var win = window.open('', '_blank');
+    if (win) win.document.write('<html><body style="font-family:Arial;padding:24px;color:#555;">⏳ Menyiapkan laporan...</body></html>');
     google.script.run
       .withSuccessHandler(function(res) {
         if (btn) { btn.disabled = false; btn.textContent = '📄 Buat & Unduh Laporan'; }
         if (!res.success) {
+          if (win) win.close();
           errEl.innerHTML = '<div class="error-box">' + (res.message || 'Gagal membuat laporan') + '</div>';
           return;
         }
-        resEl.style.display = 'block';
-        resEl.innerHTML = '✅ Laporan berhasil dibuat! <a href="' + res.url + '" target="_blank" style="font-weight:bold;">Klik di sini untuk membuka laporan</a>';
-        window.open(res.url, '_blank');
+        // Tulis HTML langsung ke tab yang sudah dibuka — render di browser
+        if (win) {
+          win.document.open();
+          win.document.write(res.html);
+          win.document.close();
+        } else {
+          // Fallback: popup diblokir, tampilkan link manual
+          resEl.style.display = 'block';
+          resEl.innerHTML = '⚠️ Popup diblokir. <a href="#" onclick="App._openLaporanManual();return false;">Klik di sini untuk buka laporan</a>';
+          App._laporanHtml = res.html;
+        }
       })
       .withFailureHandler(function(err) {
         if (btn) { btn.disabled = false; btn.textContent = '📄 Buat & Unduh Laporan'; }
+        if (win) win.close();
         errEl.innerHTML = '<div class="error-box">' + err.message + '</div>';
       })
       .generatePDF();
+  },
+
+  _openLaporanManual: function() {
+    if (!this._laporanHtml) return;
+    var win = window.open('', '_blank');
+    if (win) { win.document.open(); win.document.write(this._laporanHtml); win.document.close(); }
   },
 
   // ─────────────────────────────────────────────────

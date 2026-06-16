@@ -1681,13 +1681,8 @@ function generatePDF(periodeId) {
     var rekap = getRekapitulasiData();
     if (!rekap.success) return rekap;
     var html = buildPDFHTML(rekap);
-    var blob = Utilities.newBlob(html, 'text/html', 'laporan.html');
-    var folder = DriveApp.getRootFolder();
-    var file = folder.createFile(blob);
-    var periodeName = rekap.periode ? rekap.periode.nama : '';
-    var isFinal = rekap.periode && rekap.periode.status === 'Tutup';
-    file.setName('Laporan Kas ' + periodeName + (isFinal ? ' (Final)' : ' (Interim)') + '.html');
-    return { success: true, url: file.getUrl(), id: file.getId() };
+    // Kirim HTML string ke client — browser akan render langsung via window.open
+    return { success: true, html: html };
   } catch(e) {
     return { success: false, message: e.message };
   }
