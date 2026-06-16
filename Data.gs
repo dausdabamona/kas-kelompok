@@ -1027,6 +1027,16 @@ function getRekapitulasiData() {
     var pemasukan = [], pengeluaran = [];
     var totalPTunai = 0, totalPBank = 0, totalPKTunai = 0, totalPKBank = 0;
 
+    // Build anggota name map for display
+    var anggotaNameMap = {};
+    var sheetAng = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (sheetAng) {
+      var angRows = sheetAng.getDataRange().getValues();
+      for (var i = 1; i < angRows.length; i++) {
+        if (angRows[i][0]) anggotaNameMap[String(angRows[i][0])] = String(angRows[i][1] || '');
+      }
+    }
+
     if (sheetP && sheetP.getLastRow() > 1) {
       var dp = sheetP.getDataRange().getValues();
       var dpH = headerMap_(dp[0]);
@@ -1036,12 +1046,17 @@ function getRekapitulasiData() {
         var nominal = Number(hGet_(dp[i], dpH, 'nominal', 5)) || 0;
         var sumber  = String(hGet_(dp[i], dpH, 'sumberkas', 6) || '');
         var jenisId = String(hGet_(dp[i], dpH, 'jenisid', 2) || '');
+        var anggotaId = String(hGet_(dp[i], dpH, 'anggotaid', 3) || '');
+        var catatan = String(hGet_(dp[i], dpH, 'catatan', 7) || '');
+        // catatan fallback: jika catatan kosong atau berisi email, abaikan
+        if (!catatan || catatan.indexOf('@') >= 0) catatan = '';
         pemasukan.push({
           id: String(hGet_(dp[i], dpH, 'id', 0)),
           jenis: masterPMap[jenisId] || jenisId,
           tanggal: toDateStr_(hGet_(dp[i], dpH, 'tanggal', 4)),
           nominal: nominal, sumber: sumber,
-          catatan: String(hGet_(dp[i], dpH, 'catatan', 7) || '')
+          anggota: anggotaNameMap[anggotaId] || '',
+          catatan: catatan
         });
         if (sumber === 'Tunai') totalPTunai += nominal;
         else if (sumber === 'Bank') totalPBank += nominal;
@@ -1057,12 +1072,14 @@ function getRekapitulasiData() {
         var nominal = Number(hGet_(dpk[i], dpkH, 'nominal', 4)) || 0;
         var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
         var jenisId = String(hGet_(dpk[i], dpkH, 'jenisid', 2) || '');
+        var catatan = String(hGet_(dpk[i], dpkH, 'catatan', 6) || '');
+        if (!catatan || catatan.indexOf('@') >= 0) catatan = '';
         pengeluaran.push({
           id: String(hGet_(dpk[i], dpkH, 'id', 0)),
           jenis: masterPKMap[jenisId] || jenisId,
           tanggal: toDateStr_(hGet_(dpk[i], dpkH, 'tanggal', 3)),
           nominal: nominal, sumber: sumber,
-          catatan: String(hGet_(dpk[i], dpkH, 'catatan', 6) || '')
+          catatan: catatan
         });
         if (sumber === 'Tunai') totalPKTunai += nominal;
         else if (sumber === 'Bank') totalPKBank += nominal;
@@ -1681,97 +1698,136 @@ function buildPDFHTML(data) {
   var isFinal = p.status === 'Tutup';
   var statusLabel = isFinal ? 'LAPORAN FINAL' : 'LAPORAN INTERIM';
   var statusColor = isFinal ? '#166534' : '#92400e';
-  var statusBg = isFinal ? '#dcfce7' : '#fef3c7';
+  var statusBg   = isFinal ? '#dcfce7' : '#fef3c7';
   var cetakTgl = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd MMMM yyyy HH:mm');
 
-  var css = '<style>' +
-    'body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:24px;}' +
-    'h1{font-size:18px;margin:0 0 4px;}' +
-    '.subtitle{color:#555;font-size:12px;margin-bottom:16px;}' +
-    '.badge{display:inline-block;padding:3px 10px;border-radius:4px;font-weight:bold;font-size:11px;background:' + statusBg + ';color:' + statusColor + ';}' +
-    'h2{font-size:14px;margin:20px 0 6px;border-bottom:2px solid #333;padding-bottom:4px;}' +
-    'table{border-collapse:collapse;width:100%;margin-bottom:8px;}' +
-    'th{background:#f3f4f6;text-align:left;padding:5px 8px;border:1px solid #d1d5db;font-size:11px;}' +
-    'td{padding:4px 8px;border:1px solid #d1d5db;font-size:11px;}' +
-    'tr:nth-child(even){background:#f9fafb;}' +
-    '.num{text-align:right;}' +
-    '.total-row td{font-weight:bold;background:#e5e7eb;}' +
-    '.cf-label{padding:5px 8px;font-weight:bold;}' +
-    '.cf-val{text-align:right;padding:5px 8px;font-weight:bold;}' +
-    '.cf-table{width:100%;border-collapse:collapse;margin-bottom:16px;}' +
-    '.cf-table td{border:1px solid #d1d5db;padding:4px 8px;}' +
-    '.cf-section{background:#f3f4f6;font-weight:bold;}' +
-    '.cf-saldo{background:#dbeafe;font-weight:bold;}' +
-    '.cf-total{background:#1e3a5f;color:#fff;font-weight:bold;}' +
-    '@media print{button,a.btn{display:none!important;}}' +
-    '</style>';
+  // Semua style inline — Google Drive viewer memblokir <style> tag
+  var S = {
+    body:    'font-family:Arial,sans-serif;font-size:12px;color:#111;margin:24px;',
+    h1:      'font-size:18px;margin:0 0 4px;',
+    h2:      'font-size:14px;margin:20px 0 6px;border-bottom:2px solid #333;padding-bottom:4px;',
+    sub:     'color:#555;font-size:12px;margin-bottom:16px;',
+    badge:   'display:inline-block;padding:3px 10px;border-radius:4px;font-weight:bold;font-size:11px;background:' + statusBg + ';color:' + statusColor + ';',
+    tbl:     'border-collapse:collapse;width:100%;margin-bottom:8px;font-size:11px;',
+    th:      'background:#f3f4f6;text-align:left;padding:5px 8px;border:1px solid #d1d5db;font-size:11px;',
+    thR:     'background:#f3f4f6;text-align:right;padding:5px 8px;border:1px solid #d1d5db;font-size:11px;',
+    td:      'padding:4px 8px;border:1px solid #d1d5db;vertical-align:top;',
+    tdR:     'padding:4px 8px;border:1px solid #d1d5db;text-align:right;vertical-align:top;',
+    tdE:     'padding:4px 8px;border:1px solid #d1d5db;text-align:center;color:#888;',
+    tot:     'padding:4px 8px;border:1px solid #d1d5db;font-weight:bold;background:#e5e7eb;',
+    totR:    'padding:4px 8px;border:1px solid #d1d5db;font-weight:bold;background:#e5e7eb;text-align:right;',
+    cfSec:   'padding:5px 8px;border:1px solid #d1d5db;background:#f3f4f6;font-weight:bold;',
+    cfInd:   'padding:4px 8px 4px 24px;border:1px solid #d1d5db;',
+    cfIndR:  'padding:4px 8px;border:1px solid #d1d5db;text-align:right;',
+    cfSaldo: 'padding:5px 8px;border:1px solid #d1d5db;background:#dbeafe;font-weight:bold;',
+    cfSaldoR:'padding:5px 8px;border:1px solid #d1d5db;background:#dbeafe;font-weight:bold;text-align:right;',
+    cfTotal: 'padding:5px 8px;border:1px solid #d1d5db;background:#1e3a5f;color:#fff;font-weight:bold;',
+    cfTotalR:'padding:5px 8px;border:1px solid #d1d5db;background:#1e3a5f;color:#fff;font-weight:bold;text-align:right;',
+    foot:    'margin-top:32px;font-size:11px;color:#888;'
+  };
 
-  var html = '<html><head><meta charset="UTF-8">' + css + '</head><body>';
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Laporan Kas</title></head><body style="' + S.body + '">';
 
   // Header
   html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">' +
-    '<div><h1>Laporan Keuangan Kas Kelompok</h1>' +
-    '<div class="subtitle">Periode: <strong>' + (p.nama || '-') + '</strong> &nbsp;|&nbsp; Dicetak: ' + cetakTgl + '</div></div>' +
-    '<div><span class="badge">' + statusLabel + '</span></div>' +
+    '<div><h1 style="' + S.h1 + '">Laporan Keuangan Kas Kelompok</h1>' +
+    '<div style="' + S.sub + '">Periode: <strong>' + esc_(p.nama || '-') + '</strong> &nbsp;|&nbsp; Dicetak: ' + cetakTgl + '</div></div>' +
+    '<div><span style="' + S.badge + '">' + statusLabel + '</span></div>' +
     '</div>';
 
-  // ── Pemasukan ──
-  var pemasukanRows = (data.pemasukan || []).slice().sort(function(a, b) {
-    return (a.tanggal || '') < (b.tanggal || '') ? -1 : 1;
-  });
-  html += '<h2>A. Pemasukan</h2>';
-  html += '<table><tr><th>#</th><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Sumber Kas</th><th class="num">Nominal</th></tr>';
+  // ── A. Pemasukan ──
+  var pRows = (data.pemasukan || []).slice().sort(function(a, b) { return (a.tanggal||'') < (b.tanggal||'') ? -1 : 1; });
+  html += '<h2 style="' + S.h2 + '">A. Pemasukan</h2>';
+  html += '<table style="' + S.tbl + '"><tr>' +
+    '<th style="' + S.th + '">#</th>' +
+    '<th style="' + S.th + '">Tanggal</th>' +
+    '<th style="' + S.th + '">Jenis</th>' +
+    '<th style="' + S.th + '">Anggota</th>' +
+    '<th style="' + S.th + '">Keterangan</th>' +
+    '<th style="' + S.th + '">Sumber Kas</th>' +
+    '<th style="' + S.thR + '">Nominal</th>' +
+    '</tr>';
   var totalPTunai = 0, totalPBank = 0;
-  pemasukanRows.forEach(function(row, idx) {
-    html += '<tr><td>' + (idx + 1) + '</td><td>' + fmtTanggal(row.tanggal) + '</td><td>' + esc_(row.jenis) + '</td><td>' + esc_(row.catatan) + '</td><td>' + esc_(row.sumber) + '</td><td class="num">' + fmtRp(row.nominal) + '</td></tr>';
+  pRows.forEach(function(row, idx) {
+    var bg = idx % 2 === 0 ? '' : 'background:#f9fafb;';
+    var td = 'padding:4px 8px;border:1px solid #d1d5db;vertical-align:top;' + bg;
+    var tdR = 'padding:4px 8px;border:1px solid #d1d5db;text-align:right;vertical-align:top;' + bg;
+    html += '<tr>' +
+      '<td style="' + td + '">' + (idx+1) + '</td>' +
+      '<td style="' + td + '">' + fmtTanggal(row.tanggal) + '</td>' +
+      '<td style="' + td + '">' + esc_(row.jenis) + '</td>' +
+      '<td style="' + td + '">' + esc_(row.anggota || '') + '</td>' +
+      '<td style="' + td + '">' + esc_(row.catatan || '') + '</td>' +
+      '<td style="' + td + '">' + esc_(row.sumber) + '</td>' +
+      '<td style="' + tdR + '">' + fmtRp(row.nominal) + '</td>' +
+      '</tr>';
     if (row.sumber === 'Tunai') totalPTunai += row.nominal;
     else if (row.sumber === 'Bank') totalPBank += row.nominal;
   });
-  if (pemasukanRows.length === 0) html += '<tr><td colspan="6" style="text-align:center;color:#888;">Belum ada data pemasukan</td></tr>';
-  html += '<tr class="total-row"><td colspan="4"></td><td>Subtotal Tunai</td><td class="num">' + fmtRp(totalPTunai) + '</td></tr>';
-  html += '<tr class="total-row"><td colspan="4"></td><td>Subtotal Bank</td><td class="num">' + fmtRp(totalPBank) + '</td></tr>';
-  html += '<tr class="total-row"><td colspan="4"></td><td>TOTAL PEMASUKAN</td><td class="num">' + fmtRp(totalPTunai + totalPBank) + '</td></tr>';
+  if (pRows.length === 0) html += '<tr><td colspan="7" style="' + S.tdE + '">Belum ada data pemasukan</td></tr>';
+  html += '<tr><td colspan="5" style="' + S.tot + '"></td><td style="' + S.tot + '">Subtotal Tunai</td><td style="' + S.totR + '">' + fmtRp(totalPTunai) + '</td></tr>';
+  html += '<tr><td colspan="5" style="' + S.tot + '"></td><td style="' + S.tot + '">Subtotal Bank</td><td style="' + S.totR + '">' + fmtRp(totalPBank) + '</td></tr>';
+  html += '<tr><td colspan="5" style="' + S.tot + '"></td><td style="' + S.tot + '">TOTAL PEMASUKAN</td><td style="' + S.totR + '">' + fmtRp(totalPTunai + totalPBank) + '</td></tr>';
   html += '</table>';
 
-  // ── Pengeluaran ──
-  var pengeluaranRows = (data.pengeluaran || []).slice().sort(function(a, b) {
-    return (a.tanggal || '') < (b.tanggal || '') ? -1 : 1;
-  });
-  html += '<h2>B. Pengeluaran</h2>';
-  html += '<table><tr><th>#</th><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Sumber Kas</th><th class="num">Nominal</th></tr>';
+  // ── B. Pengeluaran ──
+  var pkRows = (data.pengeluaran || []).slice().sort(function(a, b) { return (a.tanggal||'') < (b.tanggal||'') ? -1 : 1; });
+  html += '<h2 style="' + S.h2 + '">B. Pengeluaran</h2>';
+  html += '<table style="' + S.tbl + '"><tr>' +
+    '<th style="' + S.th + '">#</th>' +
+    '<th style="' + S.th + '">Tanggal</th>' +
+    '<th style="' + S.th + '">Jenis</th>' +
+    '<th style="' + S.th + '">Keterangan</th>' +
+    '<th style="' + S.th + '">Sumber Kas</th>' +
+    '<th style="' + S.thR + '">Nominal</th>' +
+    '</tr>';
   var totalPKTunai = 0, totalPKBank = 0;
-  pengeluaranRows.forEach(function(row, idx) {
-    html += '<tr><td>' + (idx + 1) + '</td><td>' + fmtTanggal(row.tanggal) + '</td><td>' + esc_(row.jenis) + '</td><td>' + esc_(row.catatan) + '</td><td>' + esc_(row.sumber) + '</td><td class="num">' + fmtRp(row.nominal) + '</td></tr>';
+  pkRows.forEach(function(row, idx) {
+    var bg = idx % 2 === 0 ? '' : 'background:#f9fafb;';
+    var td = 'padding:4px 8px;border:1px solid #d1d5db;vertical-align:top;' + bg;
+    var tdR = 'padding:4px 8px;border:1px solid #d1d5db;text-align:right;vertical-align:top;' + bg;
+    html += '<tr>' +
+      '<td style="' + td + '">' + (idx+1) + '</td>' +
+      '<td style="' + td + '">' + fmtTanggal(row.tanggal) + '</td>' +
+      '<td style="' + td + '">' + esc_(row.jenis) + '</td>' +
+      '<td style="' + td + '">' + esc_(row.catatan || '') + '</td>' +
+      '<td style="' + td + '">' + esc_(row.sumber) + '</td>' +
+      '<td style="' + tdR + '">' + fmtRp(row.nominal) + '</td>' +
+      '</tr>';
     if (row.sumber === 'Tunai') totalPKTunai += row.nominal;
     else if (row.sumber === 'Bank') totalPKBank += row.nominal;
   });
-  if (pengeluaranRows.length === 0) html += '<tr><td colspan="6" style="text-align:center;color:#888;">Belum ada data pengeluaran</td></tr>';
-  html += '<tr class="total-row"><td colspan="4"></td><td>Subtotal Tunai</td><td class="num">' + fmtRp(totalPKTunai) + '</td></tr>';
-  html += '<tr class="total-row"><td colspan="4"></td><td>Subtotal Bank</td><td class="num">' + fmtRp(totalPKBank) + '</td></tr>';
-  html += '<tr class="total-row"><td colspan="4"></td><td>TOTAL PENGELUARAN</td><td class="num">' + fmtRp(totalPKTunai + totalPKBank) + '</td></tr>';
+  if (pkRows.length === 0) html += '<tr><td colspan="6" style="' + S.tdE + '">Belum ada data pengeluaran</td></tr>';
+  html += '<tr><td colspan="4" style="' + S.tot + '"></td><td style="' + S.tot + '">Subtotal Tunai</td><td style="' + S.totR + '">' + fmtRp(totalPKTunai) + '</td></tr>';
+  html += '<tr><td colspan="4" style="' + S.tot + '"></td><td style="' + S.tot + '">Subtotal Bank</td><td style="' + S.totR + '">' + fmtRp(totalPKBank) + '</td></tr>';
+  html += '<tr><td colspan="4" style="' + S.tot + '"></td><td style="' + S.tot + '">TOTAL PENGELUARAN</td><td style="' + S.totR + '">' + fmtRp(totalPKTunai + totalPKBank) + '</td></tr>';
   html += '</table>';
 
-  // ── Cash Flow ──
-  var saldoAwalTunai = Number(p.saldoAwalTunai) || 0;
-  var saldoAwalBank  = Number(p.saldoAwalBank)  || 0;
+  // ── C. Cash Flow ──
+  var saldoAwalTunai  = Number(p.saldoAwalTunai) || 0;
+  var saldoAwalBank   = Number(p.saldoAwalBank)  || 0;
   var saldoAkhirTunai = saldoAwalTunai + totalPTunai - totalPKTunai;
   var saldoAkhirBank  = saldoAwalBank  + totalPBank  - totalPKBank;
   var grandTotal = saldoAkhirTunai + saldoAkhirBank;
 
-  html += '<h2>C. Arus Kas (Cash Flow)</h2>';
-  html += '<table class="cf-table">';
-  html += '<tr><th style="width:60%">Keterangan</th><th class="num" style="width:20%">Tunai</th><th class="num" style="width:20%">Bank</th></tr>';
-  html += '<tr class="cf-section"><td colspan="3">Saldo Awal Periode</td></tr>';
-  html += '<tr><td style="padding-left:24px;">Saldo Awal</td><td class="num">' + fmtRp(saldoAwalTunai) + '</td><td class="num">' + fmtRp(saldoAwalBank) + '</td></tr>';
-  html += '<tr class="cf-section"><td colspan="3">(+) Pemasukan</td></tr>';
-  html += '<tr><td style="padding-left:24px;">Total Pemasukan</td><td class="num">' + fmtRp(totalPTunai) + '</td><td class="num">' + fmtRp(totalPBank) + '</td></tr>';
-  html += '<tr class="cf-section"><td colspan="3">(-) Pengeluaran</td></tr>';
-  html += '<tr><td style="padding-left:24px;">Total Pengeluaran</td><td class="num">(' + fmtRp(totalPKTunai) + ')</td><td class="num">(' + fmtRp(totalPKBank) + ')</td></tr>';
-  html += '<tr class="cf-saldo"><td>Saldo Akhir Tunai / Bank</td><td class="num">' + fmtRp(saldoAkhirTunai) + '</td><td class="num">' + fmtRp(saldoAkhirBank) + '</td></tr>';
-  html += '<tr class="cf-total"><td>TOTAL KAS</td><td class="num" colspan="2">' + fmtRp(grandTotal) + '</td></tr>';
-  html += '</table>';
+  html += '<h2 style="' + S.h2 + '">C. Arus Kas (Cash Flow)</h2>';
+  html += '<table style="' + S.tbl + '">' +
+    '<tr><th style="' + S.th + 'width:60%">Keterangan</th><th style="' + S.thR + 'width:20%">Tunai</th><th style="' + S.thR + 'width:20%">Bank</th></tr>' +
 
-  html += '<div style="margin-top:32px;font-size:11px;color:#888;">Laporan ini dibuat otomatis oleh sistem Kas Kelompok pada ' + cetakTgl + '.</div>';
+    '<tr><td colspan="3" style="' + S.cfSec + '">Saldo Awal Periode</td></tr>' +
+    '<tr><td style="' + S.cfInd + '">Saldo Awal</td><td style="' + S.cfIndR + '">' + fmtRp(saldoAwalTunai) + '</td><td style="' + S.cfIndR + '">' + fmtRp(saldoAwalBank) + '</td></tr>' +
+
+    '<tr><td colspan="3" style="' + S.cfSec + '">(+) Pemasukan</td></tr>' +
+    '<tr><td style="' + S.cfInd + '">Total Pemasukan</td><td style="' + S.cfIndR + '">' + fmtRp(totalPTunai) + '</td><td style="' + S.cfIndR + '">' + fmtRp(totalPBank) + '</td></tr>' +
+
+    '<tr><td colspan="3" style="' + S.cfSec + '">(-) Pengeluaran</td></tr>' +
+    '<tr><td style="' + S.cfInd + '">Total Pengeluaran</td><td style="' + S.cfIndR + '">(' + fmtRp(totalPKTunai) + ')</td><td style="' + S.cfIndR + '">(' + fmtRp(totalPKBank) + ')</td></tr>' +
+
+    '<tr><td style="' + S.cfSaldo + '">Saldo Akhir Tunai / Bank</td><td style="' + S.cfSaldoR + '">' + fmtRp(saldoAkhirTunai) + '</td><td style="' + S.cfSaldoR + '">' + fmtRp(saldoAkhirBank) + '</td></tr>' +
+    '<tr><td style="' + S.cfTotal + '">TOTAL KAS</td><td style="' + S.cfTotalR + '" colspan="2">' + fmtRp(grandTotal) + '</td></tr>' +
+    '</table>';
+
+  html += '<div style="' + S.foot + '">Laporan ini dibuat otomatis oleh sistem Kas Kelompok pada ' + cetakTgl + '.</div>';
   html += '</body></html>';
   return html;
 }
