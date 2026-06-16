@@ -1117,10 +1117,19 @@ var App = {
       if (!g) return;
       gradeCounts[g] = (gradeCounts[g] || 0) + 1;
     });
-    var gradeRows = Object.keys(gradeCounts).sort().map(function(g) {
+    var gradeKeys = Object.keys(gradeCounts).sort();
+    var gradeRows = gradeKeys.map(function(g) {
       return '<div class="stat-row" style="margin-bottom:8px;">' +
         '<span class="stat-label">Grade ' + g + ' <span style="color:#888;font-size:11px;">(' + gradeCounts[g] + ' jamaah)</span></span>' +
         '<input type="number" id="grade_' + g + '" placeholder="Nominal/orang" style="width:140px;padding:6px;border:1px solid #d1d5db;border-radius:6px;text-align:right;" oninput="App._hitungTotalPatungan()"/>' +
+      '</div>';
+    }).join('');
+
+    // Baris bobot untuk mode target
+    var bobotRows = gradeKeys.map(function(g) {
+      return '<div class="stat-row" style="margin-bottom:8px;">' +
+        '<span class="stat-label">Bobot Grade ' + g + ' <span style="color:#888;font-size:11px;">(' + gradeCounts[g] + ' jamaah)</span></span>' +
+        '<input type="number" id="bobot_' + g + '" placeholder="mis. ' + (g==='A'?'4':g==='B'?'2':'1') + '" style="width:140px;padding:6px;border:1px solid #d1d5db;border-radius:6px;text-align:right;"/>' +
       '</div>';
     }).join('');
 
@@ -1138,9 +1147,17 @@ var App = {
         '<div class="form-group"><label>Tanggal</label><input type="date" id="patTgl" value="' + new Date().toISOString().slice(0,10) + '"/></div>' +
         '<div class="form-group"><label>Catatan</label><input type="text" id="patCatatan" placeholder="Opsional"/></div>' +
       '</div>' +
+      (gradeKeys.length > 0 ?
+      '<div class="card" style="border:1px dashed var(--primary);">' +
+        '<div class="section-title mb-8">⚡ Bagi Otomatis dari Target (opsional)</div>' +
+        '<div class="info-box mb-12">Masukkan total target & bobot tiap grade, lalu klik "Bagi Otomatis". Sistem akan menghitung nominal per orang sehingga totalnya mendekati target. Bobot menentukan proporsi (mis. A=4 berarti grade A bayar 4× grade berbobot 1).</div>' +
+        '<div class="form-group"><label>Target Total (Rp)</label><input type="number" id="patTarget" placeholder="mis. 11000000" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;text-align:right;"/></div>' +
+        bobotRows +
+        '<button class="btn btn-outline" style="margin-top:8px;" onclick="App._bagiTargetPatungan()">⚡ Bagi Otomatis ke Grade</button>' +
+      '</div>' : '') +
       '<div class="card">' +
         '<div class="section-title mb-8">Nominal per Orang berdasarkan Grade</div>' +
-        '<div class="info-box mb-12">Isi nominal yang harus dibayar per orang untuk setiap grade. Sistem akan otomatis membuat tagihan untuk semua jamaah aktif sesuai grade mereka.</div>' +
+        '<div class="info-box mb-12">Isi nominal yang harus dibayar per orang untuk setiap grade (atau pakai "Bagi Otomatis" di atas). Sistem membuat tagihan untuk semua jamaah aktif sesuai grade mereka.</div>' +
         (gradeRows || '<div class="text-muted" style="padding:12px 0;">Belum ada jamaah yang memiliki grade. <a href="#" onclick="App.pageAturGrade();return false;">Atur grade jamaah terlebih dahulu.</a></div>') +
         '<div class="stat-row" style="margin-top:8px;border-top:1px solid #e5e7eb;padding-top:8px;">' +
           '<span class="stat-label" style="font-weight:bold;">Estimasi Total Tagihan</span>' +
@@ -1155,6 +1172,38 @@ var App = {
     this._patunganGradeCounts = gradeCounts;
   },
 
+  _bagiTargetPatungan: function() {
+    var counts = this._patunganGradeCounts || {};
+    var keys = Object.keys(counts);
+    var target = parseInt((document.getElementById('patTarget') || {}).value) || 0;
+    if (target <= 0) {
+      document.getElementById('patError').innerHTML = '<div class="error-box">Isi Target Total dulu (mis. 11000000)</div>';
+      return;
+    }
+    // Hitung total unit bobot = Σ (bobot_g × jumlah_jamaah_g)
+    var totalUnit = 0;
+    var bobot = {};
+    keys.forEach(function(g) {
+      var w = parseFloat((document.getElementById('bobot_' + g) || {}).value);
+      if (isNaN(w) || w < 0) w = 1; // default bobot 1 jika kosong
+      bobot[g] = w;
+      totalUnit += w * counts[g];
+    });
+    if (totalUnit <= 0) {
+      document.getElementById('patError').innerHTML = '<div class="error-box">Total bobot × jamaah harus > 0</div>';
+      return;
+    }
+    var perUnit = target / totalUnit;
+    // Nominal per orang grade g = perUnit × bobot_g, dibulatkan ke ribuan terdekat
+    keys.forEach(function(g) {
+      var nominal = Math.round((perUnit * bobot[g]) / 1000) * 1000;
+      var el = document.getElementById('grade_' + g);
+      if (el) el.value = nominal;
+    });
+    document.getElementById('patError').innerHTML = '';
+    this._hitungTotalPatungan();
+  },
+
   _hitungTotalPatungan: function() {
     var counts = this._patunganGradeCounts || {};
     var total = 0;
@@ -1163,7 +1212,17 @@ var App = {
       if (el) total += (parseInt(el.value) || 0) * counts[g];
     });
     var el = document.getElementById('patTotal');
-    if (el) el.textContent = 'Rp ' + total.toLocaleString('id-ID');
+    if (el) {
+      var txt = 'Rp ' + total.toLocaleString('id-ID');
+      var tgtEl = document.getElementById('patTarget');
+      var target = tgtEl ? (parseInt(tgtEl.value) || 0) : 0;
+      if (target > 0) {
+        var selisih = total - target;
+        if (selisih === 0) txt += ' ✅ (pas target)';
+        else txt += (selisih > 0 ? ' (+' : ' (−') + Math.abs(selisih).toLocaleString('id-ID') + ' dari target)';
+      }
+      el.textContent = txt;
+    }
   },
 
   submitPatungan: function() {
