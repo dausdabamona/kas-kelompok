@@ -1086,7 +1086,10 @@ var App = {
     }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada musyawarah patungan.</div>';
 
     var html = self.pageWrapper('Terobosan Kelompok',
-      (canAdmin ? '<button class="btn btn-primary mb-16" onclick="App.showFormPatungan()">+ Buat Terobosan</button>' : '') +
+      '<div style="display:flex;gap:8px;margin-bottom:16px;">' +
+        (canAdmin ? '<button class="btn btn-primary" style="flex:1;" onclick="App.showFormPatungan()">+ Buat Terobosan</button>' : '') +
+        '<button class="btn btn-outline" style="flex:1;" onclick="App.pageAturGrade()">⚙️ Atur Grade Jamaah</button>' +
+      '</div>' +
       '<div id="patunganModal"></div>' +
       cards
     );
