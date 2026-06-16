@@ -368,10 +368,10 @@
 
   input, select, textarea {
     width: 100%;
-    padding: 11px 13px;
+    padding: 12px 13px;
     border: 1.5px solid var(--border);
     border-radius: 9px;
-    font-size: 15px;
+    font-size: 16px; /* >=16px: cegah auto-zoom iOS saat fokus */
     outline: none;
     transition: border-color 0.2s, box-shadow 0.2s;
     background: white;
@@ -874,4 +874,47 @@
 
   .valid-indicator.ok { background: #ECFDF5; color: #065F46; }
   .valid-indicator.error { background: #FEF2F2; color: #DC2626; }
+
+  /* ───────── Kenyamanan di HP (mobile) ───────── */
+  html { -webkit-text-size-adjust: 100%; }
+  body { overscroll-behavior-y: none; }
+
+  /* Scroll mulus + hilangkan highlight ketuk biru */
+  #app { -webkit-overflow-scrolling: touch; }
+  a, button, .menu-item, .kelola-menu-item, .card, .tab-btn,
+  .jamaah-card, .pos-card, .trx-item {
+    -webkit-tap-highlight-color: rgba(37,99,235,0.12);
+    touch-action: manipulation;
+  }
+
+  /* Target sentuh nyaman (min 44px) */
+  .btn { min-height: 48px; }
+  .btn-sm { min-height: 38px; }
+  .btn-back, .btn-home, .btn-logout { width: 40px; height: 40px; }
+  input, select, textarea { min-height: 46px; }
+  select { -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2364748B' d='M6 8 0 0h12z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center; padding-right: 34px; }
+
+  /* Aman dari notch / home-indicator */
+  .page-header { padding-top: calc(14px + env(safe-area-inset-top)); }
+  .app-footer { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+
+  /* Tabel lebar (laporan) bisa digeser horizontal tanpa merusak layout */
+  .table-scroll, .cf-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Ruang ekstra bawah agar konten terakhir tidak mepet */
+  .page-content { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
+
+  /* Layar sangat kecil: rapatkan grid menu & perbesar keterbacaan */
+  @media (max-width: 360px) {
+    .menu-grid { gap: 8px; }
+    .menu-item { padding: 14px 6px; }
+    .menu-item .icon { font-size: 24px; }
+    .menu-item span { font-size: 11px; }
+  }
+
+  /* Modal: jangan melebihi layar, bisa di-scroll, jarak aman bawah */
+  .modal { max-height: 88vh; overflow-y: auto;
+    margin-bottom: env(safe-area-inset-bottom); }
 </style>

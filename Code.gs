@@ -48,7 +48,6 @@ function getCapabilities_() {
     { code: 'view.pemeriksaanSaldo', label: 'Lihat: Pemeriksaan Saldo', grup: 'lihat' },
     { code: 'view.laporanPDF', label: 'Lihat: Laporan PDF', grup: 'lihat' },
     { code: 'view.terobosan', label: 'Lihat: Terobosan Kelompok', grup: 'lihat' },
-    { code: 'view.penerobosanInfak', label: 'Lihat: Penerobosan Infak', grup: 'lihat' },
     { code: 'view.setting', label: 'Lihat: Setting', grup: 'lihat' },
     // Edit/Aksi (server-enforced)
     { code: 'trx.input', label: 'Input Transaksi', grup: 'edit' },
@@ -85,7 +84,6 @@ function getDefaultPermMatrix_() {
     'view.pemeriksaanSaldo': nonPenerobos,
     'view.laporanPDF': nonPenerobos,
     'view.terobosan': allRoles,
-    'view.penerobosanInfak': [R.PENEROBOS],
     'view.setting': [R.ADMIN],
     'trx.input': allRoles,
     'bukuIR.input': allRoles,
