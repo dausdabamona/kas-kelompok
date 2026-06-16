@@ -5,8 +5,45 @@ var App = {
   // ─────────────────────────────────────────────────
   // INIT & AUTH
   // ─────────────────────────────────────────────────
+  // Baca nilai angka dari input (buang pemisah ribuan/titik). Terima id (string) atau elemen.
+  num: function(x) {
+    var el = (typeof x === 'string') ? document.getElementById(x) : x;
+    if (!el) return 0;
+    return parseInt(String(el.value).replace(/[^0-9]/g, ''), 10) || 0;
+  },
+
+  // Format input angka dengan pemisah ribuan (id-ID), pertahankan posisi kursor.
+  _formatTsep: function(el) {
+    var raw = String(el.value).replace(/[^0-9]/g, '');
+    var pos = el.selectionStart || 0;
+    var digitsBefore = String(el.value).slice(0, pos).replace(/[^0-9]/g, '').length;
+    var formatted = raw === '' ? '' : Number(raw).toLocaleString('id-ID');
+    if (formatted === el.value) return;
+    el.value = formatted;
+    var newPos = 0, seen = 0;
+    while (newPos < formatted.length && seen < digitsBefore) {
+      if (/[0-9]/.test(formatted.charAt(newPos))) seen++;
+      newPos++;
+    }
+    try { el.setSelectionRange(newPos, newPos); } catch(e) {}
+  },
+
   init: function() {
     var self = this;
+    // Pasang pemisah ribuan otomatis untuk semua input bertanda data-tsep (capture phase
+    // agar memformat sebelum handler oninput lain membaca nilainya).
+    if (!this._tsepBound) {
+      document.addEventListener('input', function(e) {
+        var t = e.target;
+        if (t && t.matches && t.matches('[data-tsep]')) self._formatTsep(t);
+      }, true);
+      // Format nilai prefilled (form edit) begitu field difokus
+      document.addEventListener('focusin', function(e) {
+        var t = e.target;
+        if (t && t.matches && t.matches('[data-tsep]')) self._formatTsep(t);
+      }, true);
+      this._tsepBound = true;
+    }
     google.script.run
       .withSuccessHandler(function(user) {
         if (user) {
@@ -259,7 +296,7 @@ var App = {
         '<div id="jamaahGroup" style="display:none;" class="form-group"><label id="jamaahLabel">Jamaah</label>' +
         '<select id="trxAnggota">' + angOpts + '</select></div>' +
         '<div class="form-group"><label>Nominal (Rp)</label>' +
-        '<input type="number" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
+        '<input type="text" inputmode="numeric" data-tsep="1" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
         '<div id="previewNominal"></div></div>' +
         '<div class="form-group"><label>Sumber Kas</label>' +
         '<select id="trxSumber"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>' +
@@ -278,7 +315,7 @@ var App = {
       formHtml =
         '<div class="form-group"><label>Jenis Pengeluaran</label><select id="trxJenis">' + opts + '</select></div>' +
         '<div class="form-group"><label>Nominal (Rp)</label>' +
-        '<input type="number" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
+        '<input type="text" inputmode="numeric" data-tsep="1" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
         '<div id="previewNominal"></div></div>' +
         '<div class="form-group"><label>Sumber Kas</label>' +
         '<select id="trxSumber"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>' +
@@ -289,7 +326,7 @@ var App = {
         '<div class="form-group"><label>Arah Mutasi</label>' +
         '<select id="trxArah"><option value="setor">Setor (Tunai → Bank)</option><option value="tarik">Tarik (Bank → Tunai)</option></select></div>' +
         '<div class="form-group"><label>Nominal (Rp)</label>' +
-        '<input type="number" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
+        '<input type="text" inputmode="numeric" data-tsep="1" id="trxNominal" placeholder="0" oninput="App.onNominalInput()" min="0"/>' +
         '<div id="previewNominal"></div></div>' +
         '<div class="form-group"><label>Tanggal</label><input type="date" id="trxTanggal" value="' + today + '"/></div>';
     }
@@ -333,7 +370,7 @@ var App = {
   },
 
   onNominalInput: function() {
-    var val = parseInt(document.getElementById('trxNominal').value) || 0;
+    var val = App.num('trxNominal');
     var el = document.getElementById('previewNominal');
     if (el && val > 0) {
       el.innerHTML = '<div class="preview-box"><span class="preview-amount">' + this.formatNumber(val) + '</span></div>';
@@ -344,7 +381,7 @@ var App = {
 
   submitTransaksi: function() {
     var tipe = this._tipeTransaksi;
-    var nominal = parseInt(document.getElementById('trxNominal').value) || 0;
+    var nominal = App.num('trxNominal');
     var tanggal = document.getElementById('trxTanggal').value;
     if (nominal <= 0) {
       document.getElementById('trxError').innerHTML = '<div class="error-box">Nominal harus lebih dari 0.</div>';
@@ -498,11 +535,11 @@ var App = {
         '<div class="stat-row"><span class="stat-label">Total Diterima</span><span class="stat-value text-success">' + this.formatNumber(total) + '</span></div>' +
       '</div>' +
       (isEdit ? '<div class="info-box" style="margin-bottom:12px;">✎ Mengubah rincian yang sudah ada. Perubahan dapat dilakukan selama buku belum ditutup.</div>' : '') +
-      '<div class="form-group"><label>IR (Rp)</label><input type="number" id="rIR" value="' + vIR + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>1/10 IR (Rp)</label><input type="number" id="rIR10" value="' + vIR10 + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Cicilan (Rp)</label><input type="number" id="rCicilan" value="' + vCicilan + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="number" id="rInfakDaerah" value="' + vInfak + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Index (Rp)</label><input type="number" id="rIndex" value="' + vIndex + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>IR (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rIR" value="' + vIR + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>1/10 IR (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rIR10" value="' + vIR10 + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Cicilan (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rCicilan" value="' + vCicilan + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rInfakDaerah" value="' + vInfak + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Index (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rIndex" value="' + vIndex + '" oninput="App.cekTotalRincian()"/></div>' +
       '<div id="validasiRincian" class="mb-16"></div>' +
       '<div id="rincianError"></div>' +
       '<button class="btn btn-primary" onclick="App.submitRincianIR()">' + (isEdit ? 'Simpan Perubahan' : 'Simpan Rincian') + '</button>'
@@ -512,11 +549,11 @@ var App = {
   },
 
   cekTotalRincian: function() {
-    var ir = parseInt(document.getElementById('rIR').value) || 0;
-    var ir10 = parseInt(document.getElementById('rIR10').value) || 0;
-    var cicilan = parseInt(document.getElementById('rCicilan').value) || 0;
-    var infak = parseInt(document.getElementById('rInfakDaerah').value) || 0;
-    var index = parseInt(document.getElementById('rIndex').value) || 0;
+    var ir = App.num('rIR');
+    var ir10 = App.num('rIR10');
+    var cicilan = App.num('rCicilan');
+    var infak = App.num('rInfakDaerah');
+    var index = App.num('rIndex');
     var totalRincian = ir + ir10 + cicilan + infak + index;
     var totalTrx = this._rincianItem ? this._rincianItem.nominal : 0;
     var el = document.getElementById('validasiRincian');
@@ -537,11 +574,11 @@ var App = {
     var data = {
       transaksiId: item.id, periodeId: item.periodeId, anggotaId: item.anggotaId,
       tanggal: item.tanggal,
-      ir: parseInt(document.getElementById('rIR').value) || 0,
-      ir10: parseInt(document.getElementById('rIR10').value) || 0,
-      cicilan: parseInt(document.getElementById('rCicilan').value) || 0,
-      infakDaerah: parseInt(document.getElementById('rInfakDaerah').value) || 0,
-      index: parseInt(document.getElementById('rIndex').value) || 0,
+      ir: App.num('rIR'),
+      ir10: App.num('rIR10'),
+      cicilan: App.num('rCicilan'),
+      infakDaerah: App.num('rInfakDaerah'),
+      index: App.num('rIndex'),
       total: item.nominal,
       anggotaNama: item.anggota ? item.anggota.nama : ''
     };
@@ -802,7 +839,7 @@ var App = {
     this._editSetoranItem = item;
     var targetRow = item.isAuto
       ? '<div class="pos-card-row" style="margin-bottom:8px;"><span class="pos-card-label">' + (item.sumberKet || 'Otomatis') + '</span><span class="pos-card-value">' + App.formatNumber(item.target) + '</span></div>'
-      : '<div class="form-group"><label>Target (Rp)</label><input type="number" id="sTarget" value="' + item.target + '"/></div>';
+      : '<div class="form-group"><label>Target (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="sTarget" value="' + item.target + '"/></div>';
     var kas = item.sumberKas || 'Tunai';
     var kasRow = '<div class="form-group"><label>Sumber Kas (uang keluar dari)</label>' +
       '<select id="sSumberKas"><option value="Tunai"' + (kas !== 'Bank' ? ' selected' : '') + '>Tunai</option><option value="Bank"' + (kas === 'Bank' ? ' selected' : '') + '>Bank</option></select></div>';
@@ -814,7 +851,7 @@ var App = {
         '<div class="modal">' +
           '<div class="modal-title">Update Setoran: ' + item.nama + '</div>' +
           targetRow +
-          '<div class="form-group"><label>Jumlah Disetor (Rp)</label><input type="number" id="sRealisasi" value="' + item.realisasi + '"/></div>' +
+          '<div class="form-group"><label>Jumlah Disetor (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="sRealisasi" value="' + item.realisasi + '"/></div>' +
           kasRow +
           pkInfo +
           '<div class="form-group"><label>Catatan</label><input type="text" id="sCatatan" value="' + (item.catatan || '') + '"/></div>' +
@@ -840,8 +877,8 @@ var App = {
     var kasEl = document.getElementById('sSumberKas');
     var data = {
       posId: item.id,
-      target: sTargetEl ? (parseInt(sTargetEl.value) || 0) : item.target,
-      realisasi: parseInt(document.getElementById('sRealisasi').value) || 0,
+      target: sTargetEl ? (App.num(sTargetEl)) : item.target,
+      realisasi: App.num('sRealisasi'),
       sumberKas: kasEl ? kasEl.value : 'Tunai',
       catatan: document.getElementById('sCatatan').value
     };
@@ -903,9 +940,9 @@ var App = {
       '<div class="card">' +
         '<div class="section-title mb-8">Saldo Aktual (Hasil Hitung Fisik)</div>' +
         '<div class="form-group"><label>🪙 Kas Tunai Aktual (Rp)</label>' +
-          '<input type="number" id="psTunai" value="' + defTunai + '" oninput="App.cekSelisihSaldo()"/></div>' +
+          '<input type="text" inputmode="numeric" data-tsep="1" id="psTunai" value="' + defTunai + '" oninput="App.cekSelisihSaldo()"/></div>' +
         '<div class="form-group"><label>🏦 Kas Bank Aktual (Rp)</label>' +
-          '<input type="number" id="psBank" value="' + defBank + '" oninput="App.cekSelisihSaldo()"/></div>' +
+          '<input type="text" inputmode="numeric" data-tsep="1" id="psBank" value="' + defBank + '" oninput="App.cekSelisihSaldo()"/></div>' +
         '<div id="selisihBox" class="mb-16"></div>' +
         '<div class="form-group"><label>Catatan</label><textarea id="psCatatan" placeholder="Opsional — alasan selisih, dll"></textarea></div>' +
         '<div id="psError"></div>' +
@@ -924,8 +961,8 @@ var App = {
     var res = this._pemeriksaanData;
     if (!res) return;
     var sis = res.saldoSistem || { tunai: 0, bank: 0 };
-    var aktTunai = parseInt(document.getElementById('psTunai').value) || 0;
-    var aktBank = parseInt(document.getElementById('psBank').value) || 0;
+    var aktTunai = App.num('psTunai');
+    var aktBank = App.num('psBank');
     var selTunai = aktTunai - sis.tunai;
     var selBank = aktBank - sis.bank;
     var selTotal = selTunai + selBank;
@@ -951,8 +988,8 @@ var App = {
 
   submitPemeriksaanSaldo: function(tutup) {
     var data = {
-      saldoTunaiAktual: parseInt(document.getElementById('psTunai').value) || 0,
-      saldoBankAktual: parseInt(document.getElementById('psBank').value) || 0,
+      saldoTunaiAktual: App.num('psTunai'),
+      saldoBankAktual: App.num('psBank'),
       catatan: document.getElementById('psCatatan').value,
       tutup: !!tutup
     };
@@ -1124,7 +1161,7 @@ var App = {
     var gradeRows = gradeKeys.map(function(g) {
       return '<div class="stat-row" style="margin-bottom:8px;">' +
         '<span class="stat-label">Grade ' + g + ' <span style="color:#888;font-size:11px;">(' + gradeCounts[g] + ' jamaah)</span></span>' +
-        '<input type="number" id="grade_' + g + '" placeholder="Nominal/orang" style="width:140px;padding:6px;border:1px solid #d1d5db;border-radius:6px;text-align:right;" oninput="App._hitungTotalPatungan()"/>' +
+        '<input type="text" inputmode="numeric" data-tsep="1" id="grade_' + g + '" placeholder="Nominal/orang" style="width:140px;padding:6px;border:1px solid #d1d5db;border-radius:6px;text-align:right;" oninput="App._hitungTotalPatungan()"/>' +
       '</div>';
     }).join('');
 
@@ -1132,7 +1169,7 @@ var App = {
     var bobotRows = gradeKeys.map(function(g) {
       return '<div class="stat-row" style="margin-bottom:8px;">' +
         '<span class="stat-label">Bobot Grade ' + g + ' <span style="color:#888;font-size:11px;">(' + gradeCounts[g] + ' jamaah)</span></span>' +
-        '<input type="number" id="bobot_' + g + '" placeholder="mis. ' + (g==='A'?'4':g==='B'?'2':'1') + '" style="width:140px;padding:6px;border:1px solid #d1d5db;border-radius:6px;text-align:right;"/>' +
+        '<input type="text" inputmode="numeric" data-tsep="1" id="bobot_' + g + '" placeholder="mis. ' + (g==='A'?'4':g==='B'?'2':'1') + '" style="width:140px;padding:6px;border:1px solid #d1d5db;border-radius:6px;text-align:right;"/>' +
       '</div>';
     }).join('');
 
@@ -1154,7 +1191,7 @@ var App = {
       '<div class="card" style="border:1px dashed var(--primary);">' +
         '<div class="section-title mb-8">⚡ Bagi Otomatis dari Target (opsional)</div>' +
         '<div class="info-box mb-12">Masukkan total target & bobot tiap grade, lalu klik "Bagi Otomatis". Sistem akan menghitung nominal per orang sehingga totalnya mendekati target. Bobot menentukan proporsi (mis. A=4 berarti grade A bayar 4× grade berbobot 1).</div>' +
-        '<div class="form-group"><label>Target Total (Rp)</label><input type="number" id="patTarget" placeholder="mis. 11000000" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;text-align:right;"/></div>' +
+        '<div class="form-group"><label>Target Total (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="patTarget" placeholder="mis. 11000000" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;text-align:right;"/></div>' +
         bobotRows +
         '<button class="btn btn-outline" style="margin-top:8px;" onclick="App._bagiTargetPatungan()">⚡ Bagi Otomatis ke Grade</button>' +
       '</div>' : '') +
@@ -1178,7 +1215,7 @@ var App = {
   _bagiTargetPatungan: function() {
     var counts = this._patunganGradeCounts || {};
     var keys = Object.keys(counts);
-    var target = parseInt((document.getElementById('patTarget') || {}).value) || 0;
+    var target = App.num('patTarget');
     if (target <= 0) {
       document.getElementById('patError').innerHTML = '<div class="error-box">Isi Target Total dulu (mis. 11000000)</div>';
       return;
@@ -1197,11 +1234,11 @@ var App = {
       return;
     }
     var perUnit = target / totalUnit;
-    // Nominal per orang grade g = perUnit × bobot_g, dibulatkan ke ribuan terdekat
+    // Nominal per orang grade g = perUnit × bobot_g, dibulatkan ke 10.000 terdekat
     keys.forEach(function(g) {
-      var nominal = Math.round((perUnit * bobot[g]) / 1000) * 1000;
+      var nominal = Math.round((perUnit * bobot[g]) / 10000) * 10000;
       var el = document.getElementById('grade_' + g);
-      if (el) el.value = nominal;
+      if (el) { el.value = nominal; App._formatTsep(el); }
     });
     document.getElementById('patError').innerHTML = '';
     this._hitungTotalPatungan();
@@ -1212,13 +1249,13 @@ var App = {
     var total = 0;
     Object.keys(counts).forEach(function(g) {
       var el = document.getElementById('grade_' + g);
-      if (el) total += (parseInt(el.value) || 0) * counts[g];
+      if (el) total += (App.num(el)) * counts[g];
     });
     var el = document.getElementById('patTotal');
     if (el) {
       var txt = 'Rp ' + total.toLocaleString('id-ID');
       var tgtEl = document.getElementById('patTarget');
-      var target = tgtEl ? (parseInt(tgtEl.value) || 0) : 0;
+      var target = tgtEl ? (App.num(tgtEl)) : 0;
       if (target > 0) {
         var selisih = total - target;
         if (selisih === 0) txt += ' ✅ (pas target)';
@@ -1240,7 +1277,7 @@ var App = {
     var hasGrade = false;
     Object.keys(counts).forEach(function(g) {
       var el = document.getElementById('grade_' + g);
-      var val = parseInt((el || {}).value) || 0;
+      var val = App.num(el);
       if (val > 0) { gradeConfig[g] = val; hasGrade = true; }
     });
     if (!hasGrade) {
@@ -1499,10 +1536,10 @@ var App = {
           '<div class="form-group"><label>No. Telepon</label><input type="tel" id="jTelp" value="' + (v.noTelp || '') + '"/></div>' +
           '<div class="form-group"><label>Alamat</label><input type="text" id="jAlamat" value="' + (v.alamat || '') + '"/></div>' +
           '<div class="form-group"><label>Status</label><select id="jStatus"><option value="Aktif"' + (v.status === 'Aktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>' +
-          '<div class="form-group"><label>IR (Rp)</label><input type="number" id="jIR" value="' + (v.ir || 0) + '"/></div>' +
-          '<div class="form-group"><label>1/10 IR (Rp)</label><input type="number" id="jIR10" value="' + (v.ir10 || 0) + '"/></div>' +
-          '<div class="form-group"><label>Index (Rp)</label><input type="number" id="jIndex" value="' + (v.index || 0) + '"/></div>' +
-          '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="number" id="jInfak" value="' + (v.infakDaerah || 0) + '"/></div>' +
+          '<div class="form-group"><label>IR (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="jIR" value="' + (v.ir || 0) + '"/></div>' +
+          '<div class="form-group"><label>1/10 IR (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="jIR10" value="' + (v.ir10 || 0) + '"/></div>' +
+          '<div class="form-group"><label>Index (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="jIndex" value="' + (v.index || 0) + '"/></div>' +
+          '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="jInfak" value="' + (v.infakDaerah || 0) + '"/></div>' +
           '<div id="jamaahFormError"></div>' +
           '<button class="btn btn-primary" onclick="App.submitJamaah()">Simpan</button>' +
           '<button class="btn btn-outline mt-8" onclick="App.closeModalJamaahDirect()">Batal</button>' +
@@ -1530,10 +1567,10 @@ var App = {
       noTelp: document.getElementById('jTelp').value,
       alamat: document.getElementById('jAlamat').value,
       status: document.getElementById('jStatus').value,
-      ir: parseInt(document.getElementById('jIR').value) || 0,
-      ir10: parseInt(document.getElementById('jIR10').value) || 0,
-      index: parseInt(document.getElementById('jIndex').value) || 0,
-      infakDaerah: parseInt(document.getElementById('jInfak').value) || 0
+      ir: App.num('jIR'),
+      ir10: App.num('jIR10'),
+      index: App.num('jIndex'),
+      infakDaerah: App.num('jInfak')
     };
     var isEdit = !!this._editJamaah;
     if (isEdit) data.id = this._editJamaah.id;
@@ -1699,13 +1736,13 @@ var App = {
         '</select></div>' +
         '<div class="form-group" id="grpRefBukuIR" style="display:' + (st === 'bukuir' ? 'block' : 'none') + ';"><label>Kolom Buku IR</label><select id="sRefBukuIR">' + irOpts + '</select></div>' +
         '<div class="form-group" id="grpRefPemasukan" style="display:' + (st === 'pemasukan' ? 'block' : 'none') + ';"><label>Jenis Pemasukan</label><select id="sRefPemasukan"><option value="">-- Pilih --</option>' + pmOpts + '</select></div>' +
-        '<div class="form-group" id="grpTarget" style="display:' + (st === 'manual' ? 'block' : 'none') + ';"><label>Target (Rp)</label><input type="number" id="sTarget" value="' + (v.target || 0) + '"/></div>' +
+        '<div class="form-group" id="grpTarget" style="display:' + (st === 'manual' ? 'block' : 'none') + ';"><label>Target (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="sTarget" value="' + (v.target || 0) + '"/></div>' +
         '<div class="form-group"><label>Catat Realisasi sebagai Pengeluaran</label><select id="sPengeluaranRef">' + pkOpts + '</select>' +
           '<div class="text-small text-muted" style="margin-top:4px;">Saat realisasi setoran diinput, uang keluar dicatat otomatis ke pos pengeluaran ini agar saldo kas berkurang.</div></div>' +
         '<div class="form-group"><label>Status</label><select id="sStatus"><option value="Aktif"' + (v.status !== 'Nonaktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>';
     } else if (mode === 'musyawaroh') {
       fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
-        '<div class="form-group"><label>Nilai (Rp)</label><input type="number" id="sNilai" value="' + (v.nilai || 0) + '"/></div>' +
+        '<div class="form-group"><label>Nilai (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="sNilai" value="' + (v.nilai || 0) + '"/></div>' +
         '<div class="form-group"><label>Keterangan</label><input type="text" id="sKet" value="' + (v.keterangan || '') + '"/></div>';
     }
 
@@ -1760,7 +1797,7 @@ var App = {
       if (st === 'bukuir') data.sumberRef = document.getElementById('sRefBukuIR').value;
       else if (st === 'pemasukan') data.sumberRef = document.getElementById('sRefPemasukan').value;
       else data.sumberRef = '';
-      data.target = st === 'manual' ? (parseInt(document.getElementById('sTarget').value) || 0) : 0;
+      data.target = st === 'manual' ? (App.num('sTarget')) : 0;
       data.pengeluaranRef = document.getElementById('sPengeluaranRef').value;
       data.status = document.getElementById('sStatus').value;
       if (st === 'pemasukan' && !data.sumberRef) {
@@ -1768,7 +1805,7 @@ var App = {
         return;
       }
     } else if (mode === 'musyawaroh') {
-      data.nilai = parseInt(document.getElementById('sNilai').value) || 0;
+      data.nilai = App.num('sNilai');
       data.keterangan = document.getElementById('sKet').value;
     }
 
@@ -1949,10 +1986,10 @@ var App = {
       '<div class="card">' +
         '<div class="section-title mb-8">Input Saldo Harian</div>' +
         '<div class="form-group"><label>Tanggal</label><input type="date" id="rekonTgl" value="' + today + '"/></div>' +
-        '<div class="form-group"><label>Saldo Awal (Rp)</label><input type="number" id="rekonSaldoAwal" value="' + (data.saldoBankAktual || 0) + '" min="0"/></div>' +
-        '<div class="form-group"><label>Pemasukan Bank (Rp)</label><input type="number" id="rekonMasuk" value="0" min="0"/></div>' +
-        '<div class="form-group"><label>Pengeluaran Bank (Rp)</label><input type="number" id="rekonKeluar" value="0" min="0"/></div>' +
-        '<div class="form-group"><label>Saldo Akhir Aktual (Rp)</label><input type="number" id="rekonSaldoAkhir" value="0" min="0"/></div>' +
+        '<div class="form-group"><label>Saldo Awal (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rekonSaldoAwal" value="' + (data.saldoBankAktual || 0) + '" min="0"/></div>' +
+        '<div class="form-group"><label>Pemasukan Bank (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rekonMasuk" value="0" min="0"/></div>' +
+        '<div class="form-group"><label>Pengeluaran Bank (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rekonKeluar" value="0" min="0"/></div>' +
+        '<div class="form-group"><label>Saldo Akhir Aktual (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rekonSaldoAkhir" value="0" min="0"/></div>' +
         '<div class="form-group"><label>Catatan</label><input type="text" id="rekonCatatan"/></div>' +
         '<div id="rekonError"></div>' +
         '<button class="btn btn-primary" onclick="App.submitRekonsiliasi()">Simpan Rekonsiliasi</button>' +
@@ -1977,10 +2014,10 @@ var App = {
     var data = {
       periodeId: periodeId,
       tanggal: document.getElementById('rekonTgl').value,
-      saldoAwal: parseInt(document.getElementById('rekonSaldoAwal').value) || 0,
-      pemasukan: parseInt(document.getElementById('rekonMasuk').value) || 0,
-      pengeluaran: parseInt(document.getElementById('rekonKeluar').value) || 0,
-      saldoAkhirActual: parseInt(document.getElementById('rekonSaldoAkhir').value) || 0,
+      saldoAwal: App.num('rekonSaldoAwal'),
+      pemasukan: App.num('rekonMasuk'),
+      pengeluaran: App.num('rekonKeluar'),
+      saldoAkhirActual: App.num('rekonSaldoAkhir'),
       catatan: document.getElementById('rekonCatatan').value
     };
     document.getElementById('rekonError').innerHTML = '<div class="info-box">Menyimpan...</div>';
@@ -2008,7 +2045,7 @@ var App = {
           '<div class="modal-title">Tambah Transaksi Pending</div>' +
           '<div class="form-group"><label>Tanggal</label><input type="date" id="pTgl" value="' + today + '"/></div>' +
           '<div class="form-group"><label>Keterangan *</label><input type="text" id="pKet" placeholder="Deskripsi transaksi..."/></div>' +
-          '<div class="form-group"><label>Nominal (Rp)</label><input type="number" id="pNominal" min="0" value="0"/></div>' +
+          '<div class="form-group"><label>Nominal (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="pNominal" min="0" value="0"/></div>' +
           '<div class="form-group"><label>Sumber</label>' +
             '<select id="pSumber"><option value="Desa">Desa</option><option value="Daerah">Daerah</option><option value="Jamaah">Jamaah</option><option value="Bank">Bank</option><option value="Manual">Manual</option></select>' +
           '</div>' +
@@ -2038,7 +2075,7 @@ var App = {
     var data = {
       tanggal: document.getElementById('pTgl').value,
       keterangan: ket,
-      nominal: parseInt(document.getElementById('pNominal').value) || 0,
+      nominal: App.num('pNominal'),
       sumber: document.getElementById('pSumber').value,
       catatan: document.getElementById('pCatatan').value
     };
@@ -2154,7 +2191,7 @@ var App = {
           '<div class="info-box" style="margin-bottom:10px;font-size:12px;">Jatah dari pemasukan: <b>' + App.formatNumber(item.jatahDesa) + '</b>' +
             (item.topUpKas > 0 ? '<br>Perlu tambahan dari kas: <b>' + App.formatNumber(item.topUpKas) + '</b>' : '') +
             '<br>Kewajiban setor: <b>' + App.formatNumber(item.kewajiban) + '</b></div>' +
-          '<div class="form-group"><label>Jumlah Disetor (Rp)</label><input type="number" id="sdRealisasi" value="' + saran + '"/></div>' +
+          '<div class="form-group"><label>Jumlah Disetor (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="sdRealisasi" value="' + saran + '"/></div>' +
           '<div class="form-group"><label>Catatan</label><input type="text" id="sdCatatan" placeholder="opsional"/></div>' +
           '<div id="setoranDesaError"></div>' +
           '<button class="btn btn-primary" onclick="App.submitSetoranDesa()">Simpan Setoran</button>' +
@@ -2176,7 +2213,7 @@ var App = {
     var item = this._editSetoranDesaItem;
     var data = {
       posId: item.id, // disimpan sebagai referensi jenis pemasukan
-      realisasi: parseInt(document.getElementById('sdRealisasi').value) || 0,
+      realisasi: App.num('sdRealisasi'),
       catatan: document.getElementById('sdCatatan').value
     };
     document.getElementById('setoranDesaError').innerHTML = '<div class="info-box">Menyimpan...</div>';
@@ -2420,7 +2457,7 @@ var App = {
     return '<div class="card" style="margin-bottom:12px;">' +
         '<div class="section-title mb-8">+ Input Kesanggupan Baru</div>' +
         '<div class="form-group"><label>Jamaah</label><select id="pbAnggota">' + angOpts + '</select></div>' +
-        '<div class="form-group"><label>Nominal Sanggup (Rp)</label><input type="number" id="pbNominal" placeholder="0" min="0"/></div>' +
+        '<div class="form-group"><label>Nominal Sanggup (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="pbNominal" placeholder="0" min="0"/></div>' +
         '<div class="form-group"><label>Janji Bayar</label><input type="date" id="pbTanggal" value="' + today + '"/></div>' +
         '<div class="form-group"><label>Catatan</label><input type="text" id="pbCatatan" placeholder="Opsional..."/></div>' +
         '<div id="pbError"></div>' +
@@ -2434,7 +2471,7 @@ var App = {
 
   submitPembelaan: function() {
     var anggotaId = (document.getElementById('pbAnggota') || {}).value || '';
-    var nominal = parseInt((document.getElementById('pbNominal') || {}).value) || 0;
+    var nominal = App.num('pbNominal');
     var tanggalJanji = (document.getElementById('pbTanggal') || {}).value || '';
     var catatan = (document.getElementById('pbCatatan') || {}).value || '';
     var errEl = document.getElementById('pbError');
