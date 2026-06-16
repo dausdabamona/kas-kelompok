@@ -502,7 +502,7 @@ function getAnggota() {
 
 function addAnggota(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENULIS, CONFIG.ROLES.PENEROBOS]);
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
@@ -522,7 +522,7 @@ function addAnggota(data) {
 
 function updateAnggota(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENULIS, CONFIG.ROLES.PENEROBOS]);
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
@@ -598,7 +598,7 @@ function getPatunganList() {
 
 function addPatungan(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENULIS]);
     if (!auth.success) return { success: false, message: auth.message };
     if (!data.nama) return { success: false, message: 'Nama patungan wajib diisi' };
     if (!data.gradeConfig || Object.keys(data.gradeConfig).length === 0)
@@ -731,7 +731,7 @@ function getTagihanPatungan(patunganId) {
 
 function bayarTagihanPatungan(tagihanId, catatan) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2, CONFIG.ROLES.PENULIS, CONFIG.ROLES.PENEROBOS]);
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
@@ -758,7 +758,7 @@ function bayarTagihanPatungan(tagihanId, catatan) {
 
 function batalBayarTagihanPatungan(tagihanId) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENEROBOS]);
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
@@ -782,7 +782,7 @@ function batalBayarTagihanPatungan(tagihanId) {
 
 function updateAnggotaGrade(anggotaId, grade) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENULIS, CONFIG.ROLES.PENEROBOS]);
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);

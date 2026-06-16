@@ -197,7 +197,7 @@ var App = {
         (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '') +
         (!isPenerobos ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '') +
         (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '') +
-        (!isPenerobos ? '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Patungan</span></div>' : '') +
+        '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Patungan</span></div>' +
         (isAdmin ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
         '<div class="menu-item" onclick="App.loadDashboard()"><span class="icon">🔄</span><span>Refresh</span></div>' +
       '</div>' +
@@ -1045,7 +1045,7 @@ var App = {
   renderPatunganList: function(list) {
     var self = this;
     var u = App._user || {};
-    var canAdmin = (u.role === 'ADMIN' || u.role === 'BENDAHARA_1');
+    var canAdmin = ['ADMIN','BENDAHARA_1','PENULIS'].indexOf(u.role) >= 0;
 
     var cards = list.map(function(p, idx) {
       var gc = p.gradeConfig || {};
@@ -1206,7 +1206,8 @@ var App = {
     var p = res.patungan || {};
     var tagihan = res.tagihan || [];
     var u = App._user || {};
-    var canBayar = ['ADMIN','BENDAHARA_1','BENDAHARA_2'].indexOf(u.role) >= 0;
+    var canBayar = ['ADMIN','BENDAHARA_1','BENDAHARA_2','PENULIS','PENEROBOS'].indexOf(u.role) >= 0;
+    var canBatal = ['ADMIN','BENDAHARA_1','PENEROBOS'].indexOf(u.role) >= 0;
 
     var summaryCards =
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">' +
@@ -1246,7 +1247,7 @@ var App = {
           '<div style="display:flex;align-items:center;gap:6px;">' +
             '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:' + (sudah ? '#dcfce7' : '#fef3c7') + ';color:' + (sudah ? '#166534' : '#92400e') + ';">' + (sudah ? '✓ Lunas' : '⏳ Belum') + '</span>' +
             (canBayar && !sudah ? '<button class="btn btn-outline" style="padding:3px 10px;font-size:11px;" onclick="App.konfirmasiBayarPatungan(\'' + t.id + '\',\'' + t.anggotaNama.replace(/'/g,"\\'") + '\')">Bayar</button>' : '') +
-            (canBayar && sudah ? '<button class="btn btn-outline" style="padding:3px 10px;font-size:11px;color:#999;" onclick="App.batalBayarPatungan(\'' + t.id + '\')">Batal</button>' : '') +
+            (canBatal && sudah ? '<button class="btn btn-outline" style="padding:3px 10px;font-size:11px;color:#999;" onclick="App.batalBayarPatungan(\'' + t.id + '\')">Batal</button>' : '') +
           '</div>' +
         '</div>';
       }).join('');
@@ -1375,6 +1376,9 @@ var App = {
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var data = res.data || [];
+        var u2 = App._user || {};
+        var canEditJamaah = ['ADMIN','BENDAHARA_1','PENULIS','PENEROBOS'].indexOf(u2.role) >= 0;
+        var canHapusJamaah = u2.role === 'ADMIN';
         var list = data.map(function(a) {
           var inisial = (a.nama || 'J').charAt(0).toUpperCase();
           return '<div class="jamaah-card">' +
@@ -1385,14 +1389,14 @@ var App = {
               '<div class="jamaah-detail">' + (a.noTelp || '-') + ' · ' + (a.status || '') + '</div>' +
             '</div>' +
             '<div style="display:flex;flex-direction:column;gap:6px;">' +
-              '<button class="action-btn-sm edit" onclick="App.showFormJamaah(' + JSON.stringify(a).replace(/'/g, '&#39;') + ')">Edit</button>' +
-              '<button class="action-btn-sm hapus" onclick="App.deleteJamaah(\'' + a.id + '\')">Hapus</button>' +
+              (canEditJamaah ? '<button class="action-btn-sm edit" onclick="App.showFormJamaah(' + JSON.stringify(a).replace(/'/g, '&#39;') + ')">Edit</button>' : '') +
+              (canHapusJamaah ? '<button class="action-btn-sm hapus" onclick="App.deleteJamaah(\'' + a.id + '\')">Hapus</button>' : '') +
             '</div>' +
           '</div>';
         }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada jamaah.</div>';
 
         var html = self.pageWrapper('Kelola Jamaah',
-          '<button class="btn btn-primary mb-16" onclick="App.showFormJamaah(null)">+ Tambah Jamaah</button>' +
+          (canEditJamaah ? '<button class="btn btn-primary mb-16" onclick="App.showFormJamaah(null)">+ Tambah Jamaah</button>' : '') +
           list +
           '<div id="jamaahModal"></div>'
         );
