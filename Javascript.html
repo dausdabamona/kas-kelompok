@@ -196,6 +196,7 @@ var App = {
         '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' +
         (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '') +
         (!isPenerobos ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '') +
+        (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '') +
         (isAdmin ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
         '<div class="menu-item" onclick="App.loadDashboard()"><span class="icon">🔄</span><span>Refresh</span></div>' +
       '</div>' +
@@ -975,6 +976,53 @@ var App = {
     if (confirm('Tutup buku akan mencatat saldo akhir periode ini sebagai final. Pastikan saldo aktual sudah benar. Lanjutkan?')) {
       this.submitPemeriksaanSaldo(true);
     }
+  },
+
+  // ─────────────────────────────────────────────────
+  // LAPORAN PDF
+  // ─────────────────────────────────────────────────
+  pageLaporanPDF: function() {
+    this.history.push('dashboard');
+    var html = this.pageWrapper('Laporan PDF',
+      '<div class="info-box mb-16">' +
+        '<strong>Laporan Keuangan Lengkap</strong><br>' +
+        'Laporan tersedia kapan saja. Sebelum Tutup Buku akan menghasilkan laporan <strong>INTERIM</strong>; sesudah Tutup Buku menghasilkan laporan <strong>FINAL</strong>.<br>' +
+        'Laporan mencakup: semua pemasukan, semua pengeluaran, dan arus kas (cash flow) lengkap per sumber kas (Tunai/Bank).' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="section-title mb-8">Buat Laporan</div>' +
+        '<p style="font-size:13px;color:#555;margin-bottom:16px;">Klik tombol di bawah untuk membuat laporan dan membukanya di tab baru. File HTML akan tersimpan di Google Drive Anda.</p>' +
+        '<div id="laporanPDFError"></div>' +
+        '<div id="laporanPDFResult" style="display:none;" class="info-box mb-12"></div>' +
+        '<button class="btn btn-primary" id="btnLaporanPDF" onclick="App.buatLaporanPDF()">📄 Buat &amp; Unduh Laporan</button>' +
+      '</div>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  buatLaporanPDF: function() {
+    var btn = document.getElementById('btnLaporanPDF');
+    var errEl = document.getElementById('laporanPDFError');
+    var resEl = document.getElementById('laporanPDFResult');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Membuat laporan...'; }
+    errEl.innerHTML = '';
+    resEl.style.display = 'none';
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) { btn.disabled = false; btn.textContent = '📄 Buat & Unduh Laporan'; }
+        if (!res.success) {
+          errEl.innerHTML = '<div class="error-box">' + (res.message || 'Gagal membuat laporan') + '</div>';
+          return;
+        }
+        resEl.style.display = 'block';
+        resEl.innerHTML = '✅ Laporan berhasil dibuat! <a href="' + res.url + '" target="_blank" style="font-weight:bold;">Klik di sini untuk membuka laporan</a>';
+        window.open(res.url, '_blank');
+      })
+      .withFailureHandler(function(err) {
+        if (btn) { btn.disabled = false; btn.textContent = '📄 Buat & Unduh Laporan'; }
+        errEl.innerHTML = '<div class="error-box">' + err.message + '</div>';
+      })
+      .generatePDF();
   },
 
   // ─────────────────────────────────────────────────
