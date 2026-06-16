@@ -1063,7 +1063,7 @@ var App = {
 
   renderPatunganList: function(list) {
     var self = this;
-    var u = App._user || {};
+    var u = App.currentUser || {};
     var canAdmin = ['ADMIN','BENDAHARA_1','PENULIS'].indexOf(u.role) >= 0;
 
     var cards = list.map(function(p, idx) {
@@ -1286,7 +1286,7 @@ var App = {
     var self = this;
     var p = res.patungan || {};
     var tagihan = res.tagihan || [];
-    var u = App._user || {};
+    var u = App.currentUser || {};
     var canBayar = ['ADMIN','BENDAHARA_1','BENDAHARA_2','PENULIS','PENEROBOS'].indexOf(u.role) >= 0;
     var canBatal = ['ADMIN','BENDAHARA_1','PENEROBOS'].indexOf(u.role) >= 0;
 
@@ -1457,7 +1457,7 @@ var App = {
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var data = res.data || [];
-        var u2 = App._user || {};
+        var u2 = App.currentUser || {};
         var canEditJamaah = ['ADMIN','BENDAHARA_1','PENULIS','PENEROBOS'].indexOf(u2.role) >= 0;
         var canHapusJamaah = u2.role === 'ADMIN';
         var list = data.map(function(a) {
