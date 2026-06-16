@@ -297,6 +297,97 @@ function submitPemeriksaanSaldo(data) {
   }
 }
 
+function tutupBuku(data) {
+  try {
+    var auth = requirePerm('periode.manage');
+    if (!auth.success) return { success: false, message: auth.message };
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif yang bisa ditutup' };
+
+    var ss = getSS_();
+    var now = new Date();
+    var saldoTunai = Number(data.saldoTunaiAktual) || 0;
+    var saldoBank  = Number(data.saldoBankAktual)  || 0;
+    var total = saldoTunai + saldoBank;
+
+    // Catat ke Saldo Tutup Buku
+    var sheetSaldo = ss.getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+    if (!sheetSaldo) {
+      sheetSaldo = ss.insertSheet(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+      sheetSaldo.appendRow(['ID', 'Periode ID', 'Tanggal Tutup', 'Saldo Tunai Akhir', 'Saldo Bank Akhir', 'Total Kas', 'Status', 'Catatan', 'Created By', 'Created At']);
+    }
+    var sldId = generateID('SLD');
+    sheetSaldo.appendRow([sldId, periode.id, toDateStr_(now), saldoTunai, saldoBank, total, 'Tutup', data.catatan || '', auth.user.email, toDateStr_(now)]);
+
+    // Update Master Period: ubah Status → CLOSED, isi Tgl Tutup
+    var sheetPeriod = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+    if (sheetPeriod && sheetPeriod.getLastRow() > 1) {
+      var pRows = sheetPeriod.getDataRange().getValues();
+      var pH = headerMap_(pRows[0]);
+      var colStatus   = (pH['status']   !== undefined ? pH['status']   : 4) + 1;
+      var colTglTutup = (pH['tgltutup'] !== undefined ? pH['tgltutup'] : 3) + 1;
+      for (var i = 1; i < pRows.length; i++) {
+        if (String(pRows[i][0]) === String(periode.id)) {
+          sheetPeriod.getRange(i + 1, colStatus).setValue(CONFIG.STATUS.CLOSED);
+          sheetPeriod.getRange(i + 1, colTglTutup).setValue(toDateStr_(now));
+          break;
+        }
+      }
+    }
+
+    try {
+      var c = CacheService.getScriptCache();
+      c.remove('dashboard_saldo');
+      c.remove('master_trx_data');
+    } catch(e) {}
+
+    logActivity(auth.user.email, 'TUTUP_BUKU', 'Periode: ' + periode.nama + ' | Tunai: ' + saldoTunai + ' Bank: ' + saldoBank);
+    return { success: true, id: sldId };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function bukaPeriode(data) {
+  try {
+    var auth = requirePerm('periode.manage');
+    if (!auth.success) return { success: false, message: auth.message };
+    if (!data.nama) return { success: false, message: 'Nama periode wajib diisi' };
+    if (!data.tglMulai) return { success: false, message: 'Tanggal mulai wajib diisi' };
+
+    var ss = getSS_();
+    var sheetPeriod = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+    if (!sheetPeriod) return { success: false, message: 'Sheet Master Period tidak ditemukan' };
+
+    // Validasi: tidak boleh ada periode OPEN lain
+    var pRows = sheetPeriod.getDataRange().getValues();
+    var pH = headerMap_(pRows[0]);
+    for (var i = 1; i < pRows.length; i++) {
+      if (String(hGet_(pRows[i], pH, 'status', 4)).trim() === CONFIG.STATUS.OPEN) {
+        return { success: false, message: 'Masih ada periode OPEN. Tutup periode aktif terlebih dahulu.' };
+      }
+    }
+
+    var id = generateID('PER');
+    sheetPeriod.appendRow([
+      id,
+      data.nama,
+      toDateStr_(new Date(data.tglMulai)),
+      '',
+      CONFIG.STATUS.OPEN,
+      Number(data.saldoAwalTunai) || 0,
+      Number(data.saldoAwalBank)  || 0,
+      data.catatan || ''
+    ]);
+
+    try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+    logActivity(auth.user.email, 'BUKA_PERIODE', 'Periode: ' + data.nama);
+    return { success: true, id: id };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 // ──────────────────────────────────────────────────────
 // TRANSAKSI
 // ──────────────────────────────────────────────────────

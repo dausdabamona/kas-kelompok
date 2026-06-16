@@ -67,7 +67,8 @@ function getCapabilities_() {
     { code: 'master.manage', label: 'Kelola Master (Pos/Musyawaroh)', grup: 'edit' },
     { code: 'user.manage', label: 'Kelola User', grup: 'edit' },
     { code: 'trx.edit.tunai', label: 'Edit/Hapus Transaksi Tunai', grup: 'edit' },
-    { code: 'trx.edit.bank', label: 'Edit/Hapus Transaksi Bank', grup: 'edit' }
+    { code: 'trx.edit.bank', label: 'Edit/Hapus Transaksi Bank', grup: 'edit' },
+    { code: 'periode.manage', label: 'Kelola Periode (Tutup/Buka)', grup: 'edit' }
   ];
 }
 
@@ -104,7 +105,8 @@ function getDefaultPermMatrix_() {
     'master.manage': [R.ADMIN],
     'user.manage': [R.ADMIN],
     'trx.edit.tunai': [R.ADMIN, R.BENDAHARA_1],
-    'trx.edit.bank': [R.ADMIN, R.BENDAHARA_2]
+    'trx.edit.bank': [R.ADMIN, R.BENDAHARA_2],
+    'periode.manage': [R.ADMIN]
   };
   // bentuk matriks { role: { cap: bool } }
   var matrix = {};

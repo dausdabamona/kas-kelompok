@@ -729,11 +729,18 @@ var App = {
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Rekonsiliasi Bank</div><div class="kelola-menu-desc">Cocokkan saldo sistem dengan buku bank</div></div>' +
         '<span>›</span>' +
       '</div>' +
-      '<div class="kelola-menu-item" onclick="App.pageTutupBuku()">' +
-        '<div class="kelola-menu-icon">📚</div>' +
-        '<div class="kelola-menu-text"><div class="kelola-menu-title">Tutup Buku</div><div class="kelola-menu-desc">Tutup periode & buka periode baru</div></div>' +
-        '<span>›</span>' +
-      '</div>'
+      (App.can('periode.manage') ?
+        '<div class="kelola-menu-item" onclick="App.pageTutupBuku()">' +
+          '<div class="kelola-menu-icon">📚</div>' +
+          '<div class="kelola-menu-text"><div class="kelola-menu-title">Tutup Buku</div><div class="kelola-menu-desc">Catat saldo akhir & tutup periode</div></div>' +
+          '<span>›</span>' +
+        '</div>' +
+        '<div class="kelola-menu-item" onclick="App.pageBukaPeriode()">' +
+          '<div class="kelola-menu-icon">📅</div>' +
+          '<div class="kelola-menu-text"><div class="kelola-menu-title">Buka Periode Baru</div><div class="kelola-menu-desc">Buat periode baru dengan saldo awal</div></div>' +
+          '<span>›</span>' +
+        '</div>'
+      : '')
     );
     document.getElementById('app').innerHTML = html;
   },
@@ -903,10 +910,145 @@ var App = {
 
   pageTutupBuku: function() {
     this.history.push('kelolaBuku');
-    var html = this.pageWrapper('Tutup Buku',
-      '<div class="info-box" style="margin-top:20px;">🚧 Fitur Tutup Buku sedang dalam pengembangan.<br><br>Akan segera hadir di versi berikutnya.</div>'
+    if (!App.can('periode.manage')) {
+      document.getElementById('app').innerHTML = this.pageWrapper('Tutup Buku',
+        '<div class="info-box" style="margin-top:20px;">⛔ Anda tidak memiliki izin untuk menutup buku. Hubungi Admin.</div>'
+      );
+      return;
+    }
+    this.showLoading('Memuat data saldo...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        var periode = res.periode;
+        var sis = res.saldoSistem || {};
+        var html = self.pageWrapper('Tutup Buku',
+          '<div class="card">' +
+            '<div class="stat-row"><span class="stat-label">Periode Aktif</span><span class="stat-value">' + (periode ? periode.nama : '-') + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Tgl Mulai</span><span class="stat-value">' + (periode ? App.formatDate(periode.tanggalMulai) : '-') + '</span></div>' +
+          '</div>' +
+          '<div class="section-header"><span class="section-title">Saldo Sistem</span></div>' +
+          '<div class="card">' +
+            '<div class="stat-row"><span class="stat-label">Kas Tunai</span><span class="stat-value text-warning">' + App.formatNumber(sis.tunai || 0) + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Kas Bank</span><span class="stat-value" style="color:var(--bank);">' + App.formatNumber(sis.bank || 0) + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Total Kas</span><span class="stat-value font-bold">' + App.formatNumber(sis.total || 0) + '</span></div>' +
+          '</div>' +
+          '<div class="section-header"><span class="section-title">Saldo Aktual (Fisik)</span></div>' +
+          '<div class="card">' +
+            '<div class="form-group"><label>Kas Tunai Aktual</label>' +
+              '<input type="text" id="tbTunaiAktual" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0" value="' + (sis.tunai || 0) + '">' +
+            '</div>' +
+            '<div class="form-group"><label>Kas Bank Aktual</label>' +
+              '<input type="text" id="tbBankAktual" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0" value="' + (sis.bank || 0) + '">' +
+            '</div>' +
+            '<div class="form-group"><label>Catatan</label>' +
+              '<input type="text" id="tbCatatan" class="form-control" placeholder="Opsional">' +
+            '</div>' +
+          '</div>' +
+          '<div class="info-box" style="margin-top:16px;background:#fff8dc;border-color:#f0c040;color:#7a6000;">' +
+            '⚠️ Menutup buku akan mengubah status periode menjadi <strong>CLOSED</strong>. Transaksi baru tidak bisa ditambahkan setelah periode ditutup.' +
+          '</div>' +
+          '<button class="btn btn-danger mt-8" style="width:100%;" onclick="App.konfirmasiTutupBuku()">🔒 Tutup Buku Periode Ini</button>' +
+          '<div class="section-header" style="margin-top:24px;"><span class="section-title">Setelah Tutup Buku</span></div>' +
+          '<div class="kelola-menu-item" onclick="App.pageBukaPeriode()" style="background:#fff;">' +
+            '<div class="kelola-menu-icon">📅</div>' +
+            '<div class="kelola-menu-text"><div class="kelola-menu-title">Buka Periode Baru</div><div class="kelola-menu-desc">Buat periode baru dengan saldo awal</div></div>' +
+            '<span>›</span>' +
+          '</div>'
+        );
+        document.getElementById('app').innerHTML = html;
+        // format tsep
+        ['tbTunaiAktual','tbBankAktual'].forEach(function(id) {
+          var el = document.getElementById(id); if (el) App._formatTsep(el);
+        });
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getPemeriksaanSaldo();
+  },
+
+  konfirmasiTutupBuku: function() {
+    var saldoTunai = App.num('tbTunaiAktual');
+    var saldoBank  = App.num('tbBankAktual');
+    var catatan    = (document.getElementById('tbCatatan') || {}).value || '';
+    if (!confirm('Tutup buku periode ini?\n\nSaldo Akhir:\n• Tunai: ' + App.formatNumber(saldoTunai) + '\n• Bank: ' + App.formatNumber(saldoBank) + '\n\nStatus periode akan diubah ke CLOSED. Lanjutkan?')) return;
+    var self = this;
+    self.showLoading('Menutup buku...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        document.getElementById('app').innerHTML = self.pageWrapper('Tutup Buku',
+          '<div class="info-box" style="background:#d4edda;border-color:#28a745;color:#155724;margin-top:20px;">' +
+            '✅ Buku berhasil ditutup!<br><br>Periode telah diubah ke status <strong>CLOSED</strong>. Silakan buka periode baru untuk melanjutkan transaksi.' +
+          '</div>' +
+          '<div class="kelola-menu-item" onclick="App.pageBukaPeriode()" style="background:#fff;margin-top:16px;">' +
+            '<div class="kelola-menu-icon">📅</div>' +
+            '<div class="kelola-menu-text"><div class="kelola-menu-title">Buka Periode Baru</div><div class="kelola-menu-desc">Buat periode baru dengan saldo awal</div></div>' +
+            '<span>›</span>' +
+          '</div>'
+        );
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .tutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan });
+  },
+
+  pageBukaPeriode: function() {
+    this.history.push('kelolaBuku');
+    if (!App.can('periode.manage')) {
+      document.getElementById('app').innerHTML = this.pageWrapper('Buka Periode',
+        '<div class="info-box" style="margin-top:20px;">⛔ Anda tidak memiliki izin.</div>'
+      );
+      return;
+    }
+    var today = new Date().toISOString().split('T')[0];
+    var html = this.pageWrapper('Buka Periode Baru',
+      '<div class="card">' +
+        '<div class="form-group"><label>Nama Periode <span class="text-danger">*</span></label>' +
+          '<input type="text" id="bpNama" class="form-control" placeholder="Contoh: Periode Juli 2026">' +
+        '</div>' +
+        '<div class="form-group"><label>Tanggal Mulai <span class="text-danger">*</span></label>' +
+          '<input type="date" id="bpTglMulai" class="form-control" value="' + today + '">' +
+        '</div>' +
+        '<div class="form-group"><label>Saldo Awal Tunai</label>' +
+          '<input type="text" id="bpTunai" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0">' +
+        '</div>' +
+        '<div class="form-group"><label>Saldo Awal Bank</label>' +
+          '<input type="text" id="bpBank" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0">' +
+        '</div>' +
+        '<div class="form-group"><label>Catatan</label>' +
+          '<input type="text" id="bpCatatan" class="form-control" placeholder="Opsional">' +
+        '</div>' +
+        '<button class="btn btn-primary mt-8" style="width:100%;" onclick="App.submitBukaPeriode()">📅 Buka Periode</button>' +
+      '</div>'
     );
     document.getElementById('app').innerHTML = html;
+    ['bpTunai','bpBank'].forEach(function(id) {
+      var el = document.getElementById(id); if (el) App._formatTsep(el);
+    });
+  },
+
+  submitBukaPeriode: function() {
+    var nama     = (document.getElementById('bpNama') || {}).value || '';
+    var tglMulai = (document.getElementById('bpTglMulai') || {}).value || '';
+    var catatan  = (document.getElementById('bpCatatan') || {}).value || '';
+    if (!nama) { alert('Nama periode wajib diisi'); return; }
+    if (!tglMulai) { alert('Tanggal mulai wajib diisi'); return; }
+    var self = this;
+    self.showLoading('Membuka periode...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.showToast('Periode baru berhasil dibuka!');
+        self.loadDashboard();
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .bukaPeriode({
+        nama: nama,
+        tglMulai: tglMulai,
+        saldoAwalTunai: App.num('bpTunai'),
+        saldoAwalBank: App.num('bpBank'),
+        catatan: catatan
+      });
   },
 
   // ─────────────────────────────────────────────────
