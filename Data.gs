@@ -353,6 +353,102 @@ function submitTransaksi(data) {
   }
 }
 
+function updateTransaksi(data) {
+  try {
+    var cap = (data.sumberKas === 'Tunai') ? 'trx.edit.tunai' : 'trx.edit.bank';
+    var auth = requirePerm(cap);
+    if (!auth.success) return { success: false, message: auth.message };
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+    if (periode.status !== CONFIG.STATUS.OPEN) return { success: false, message: 'Periode sudah ditutup, tidak bisa mengedit transaksi' };
+
+    var ss = getSS_();
+    var tgl = toDateStr_(data.tanggal ? new Date(data.tanggal) : new Date());
+
+    if (data.tipe === 'masuk') {
+      var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+      if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
+      var rows = sheet.getDataRange().getValues();
+      var h = headerMap_(rows[0]);
+      for (var i = 1; i < rows.length; i++) {
+        if (String(hGet_(rows[i], h, 'id', 0)) === String(data.id)) {
+          var colJenis   = (h['jenisid']    !== undefined ? h['jenisid']    : 2) + 1;
+          var colAnggota = (h['anggotaid']  !== undefined ? h['anggotaid']  : 3) + 1;
+          var colTgl     = (h['tanggal']    !== undefined ? h['tanggal']    : 4) + 1;
+          var colNom     = (h['nominal']    !== undefined ? h['nominal']    : 5) + 1;
+          var colSumber  = (h['sumberkas']  !== undefined ? h['sumberkas']  : 6) + 1;
+          var colCat     = (h['catatan']    !== undefined ? h['catatan']    : 7) + 1;
+          sheet.getRange(i + 1, colJenis).setValue(data.jenisId);
+          sheet.getRange(i + 1, colAnggota).setValue(data.anggotaId || '');
+          sheet.getRange(i + 1, colTgl).setValue(tgl);
+          sheet.getRange(i + 1, colNom).setValue(Number(data.nominal) || 0);
+          sheet.getRange(i + 1, colSumber).setValue(data.sumberKas);
+          sheet.getRange(i + 1, colCat).setValue(data.catatan || '');
+          try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+          logActivity(auth.user.email, 'EDIT_PEMASUKAN', 'ID: ' + data.id);
+          return { success: true };
+        }
+      }
+      return { success: false, message: 'Transaksi tidak ditemukan' };
+    } else if (data.tipe === 'keluar') {
+      var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+      if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
+      var rows = sheet.getDataRange().getValues();
+      var h = headerMap_(rows[0]);
+      for (var i = 1; i < rows.length; i++) {
+        if (String(hGet_(rows[i], h, 'id', 0)) === String(data.id)) {
+          var colJenis  = (h['jenisid']   !== undefined ? h['jenisid']   : 2) + 1;
+          var colTgl    = (h['tanggal']   !== undefined ? h['tanggal']   : 3) + 1;
+          var colNom    = (h['nominal']   !== undefined ? h['nominal']   : 4) + 1;
+          var colSumber = (h['sumberkas'] !== undefined ? h['sumberkas'] : 5) + 1;
+          var colCat    = (h['catatan']   !== undefined ? h['catatan']   : 6) + 1;
+          sheet.getRange(i + 1, colJenis).setValue(data.jenisId);
+          sheet.getRange(i + 1, colTgl).setValue(tgl);
+          sheet.getRange(i + 1, colNom).setValue(Number(data.nominal) || 0);
+          sheet.getRange(i + 1, colSumber).setValue(data.sumberKas);
+          sheet.getRange(i + 1, colCat).setValue(data.catatan || '');
+          try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+          logActivity(auth.user.email, 'EDIT_PENGELUARAN', 'ID: ' + data.id);
+          return { success: true };
+        }
+      }
+      return { success: false, message: 'Transaksi tidak ditemukan' };
+    }
+    return { success: false, message: 'Tipe transaksi tidak valid' };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function deleteTransaksi(data) {
+  try {
+    var cap = (data.sumberKas === 'Tunai') ? 'trx.edit.tunai' : 'trx.edit.bank';
+    var auth = requirePerm(cap);
+    if (!auth.success) return { success: false, message: auth.message };
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+    if (periode.status !== CONFIG.STATUS.OPEN) return { success: false, message: 'Periode sudah ditutup, tidak bisa menghapus transaksi' };
+
+    var ss = getSS_();
+    var sheetName = (data.tipe === 'masuk') ? CONFIG.SHEETS.INPUT_PENERIMAAN : CONFIG.SHEETS.INPUT_PENGELUARAN;
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) === String(data.id)) {
+        sheet.deleteRow(i + 1);
+        try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+        logActivity(auth.user.email, 'HAPUS_' + (data.tipe === 'masuk' ? 'PEMASUKAN' : 'PENGELUARAN'), 'ID: ' + data.id);
+        return { success: true };
+      }
+    }
+    return { success: false, message: 'Transaksi tidak ditemukan' };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 // ──────────────────────────────────────────────────────
 // MASTER DATA
 // ──────────────────────────────────────────────────────
@@ -1050,9 +1146,11 @@ function getRekapitulasiData() {
         var catatan = String(hGet_(dp[i], dpH, 'catatan', 7) || '');
         pemasukan.push({
           id: String(hGet_(dp[i], dpH, 'id', 0)),
+          jenisId: jenisId,
           jenis: masterPMap[jenisId] || jenisId,
           tanggal: toDateStr_(hGet_(dp[i], dpH, 'tanggal', 4)),
           nominal: nominal, sumber: sumber,
+          anggotaId: anggotaId,
           anggota: anggotaNameMap[anggotaId] || '',
           catatan: catatan
         });
@@ -1073,6 +1171,7 @@ function getRekapitulasiData() {
         var catatan = String(hGet_(dpk[i], dpkH, 'catatan', 6) || '');
         pengeluaran.push({
           id: String(hGet_(dpk[i], dpkH, 'id', 0)),
+          jenisId: jenisId,
           jenis: masterPKMap[jenisId] || jenisId,
           tanggal: toDateStr_(hGet_(dpk[i], dpkH, 'tanggal', 3)),
           nominal: nominal, sumber: sumber,

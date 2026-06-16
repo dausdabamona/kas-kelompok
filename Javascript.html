@@ -745,7 +745,24 @@ var App = {
     google.script.run
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        // Card list — tidak perlu horizontal scroll
+        var periodeOpen = res.periode && res.periode.status === 'OPEN';
+        var canEditTunai = periodeOpen && App.can('trx.edit.tunai');
+        var canEditBank  = periodeOpen && App.can('trx.edit.bank');
+
+        // store items for edit lookup
+        App._editTrxMap = {};
+        (res.pemasukan || []).forEach(function(p) { App._editTrxMap[p.id] = { tipe: 'masuk', sumber: p.sumber, jenisId: p.jenisId, jenis: p.jenis, anggotaId: p.anggotaId || '', tanggal: p.tanggal, nominal: p.nominal, catatan: p.catatan }; });
+        (res.pengeluaran || []).forEach(function(p) { App._editTrxMap[p.id] = { tipe: 'keluar', sumber: p.sumber, jenisId: p.jenisId, jenis: p.jenis, anggotaId: '', tanggal: p.tanggal, nominal: p.nominal, catatan: p.catatan }; });
+
+        function trxActions(id, sumber) {
+          var canEdit = (sumber === 'Tunai' && canEditTunai) || (sumber === 'Bank' && canEditBank);
+          if (!canEdit) return '';
+          return '<div style="display:flex;gap:6px;margin-top:6px;">' +
+            '<button class="btn btn-sm btn-warning" onclick="App.editTrx(\'' + id + '\')">Edit</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="App.hapusTrx(\'' + id + '\')">Hapus</button>' +
+            '</div>';
+        }
+
         var cardsP = (res.pemasukan || []).map(function(p) {
           return '<div class="trx-item">' +
             '<div class="trx-item-top">' +
@@ -753,6 +770,7 @@ var App = {
               '<span class="trx-item-nominal text-success">' + App.formatNumber(p.nominal) + '</span>' +
             '</div>' +
             '<div class="trx-item-meta">' + App.formatDate(p.tanggal) + ' · ' + (p.sumber || '-') + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
+            trxActions(p.id, p.sumber) +
           '</div>';
         }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
 
@@ -763,6 +781,7 @@ var App = {
               '<span class="trx-item-nominal text-danger">' + App.formatNumber(p.nominal) + '</span>' +
             '</div>' +
             '<div class="trx-item-meta">' + App.formatDate(p.tanggal) + ' · ' + (p.sumber || '-') + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
+            trxActions(p.id, p.sumber) +
           '</div>';
         }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
 
@@ -787,6 +806,99 @@ var App = {
       })
       .withFailureHandler(function(err) { self.showError(err.message); })
       .getRekapitulasiData();
+  },
+
+  editTrx: function(id) {
+    var trx = (App._editTrxMap || {})[id];
+    if (!trx) { this.showError('Data transaksi tidak ditemukan'); return; }
+    trx.id = id;
+    var self = this;
+    self.showLoading('Memuat data...');
+    var masterFn = trx.tipe === 'masuk' ? 'getMasterPemasukan' : 'getMasterPengeluaran';
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self._renderEditTrxModal(trx, res.data || []);
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      [masterFn]();
+  },
+
+  _renderEditTrxModal: function(trx, masterList) {
+    var jenisopts = masterList.map(function(m) {
+      return '<option value="' + m.id + '"' + (m.id === trx.jenisId ? ' selected' : '') + '>' + m.nama + '</option>';
+    }).join('');
+    var label = trx.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran';
+    var anggotaField = '';
+    // For 'masuk' (pemasukan) show anggota ID field only if needed — kept simple as text
+    var modal = '<div class="modal-overlay" id="editTrxOverlay" onclick="if(event.target===this)this.remove()">' +
+      '<div class="modal">' +
+        '<h3 class="modal-title">Edit ' + label + '</h3>' +
+        '<div class="form-group"><label>Jenis</label>' +
+          '<select id="etJenisId" class="form-control"><option value="">-- Pilih --</option>' + jenisopts + '</select>' +
+        '</div>' +
+        '<div class="form-group"><label>Tanggal</label>' +
+          '<input type="date" id="etTanggal" class="form-control" value="' + (trx.tanggal || '') + '">' +
+        '</div>' +
+        '<div class="form-group"><label>Nominal</label>' +
+          '<input type="text" id="etNominal" class="form-control" inputmode="numeric" data-tsep="1" value="' + trx.nominal + '">' +
+        '</div>' +
+        '<div class="form-group"><label>Sumber Kas</label>' +
+          '<input type="text" id="etSumber" class="form-control" value="' + trx.sumber + '" readonly style="background:#f5f5f5;">' +
+        '</div>' +
+        '<div class="form-group"><label>Catatan</label>' +
+          '<input type="text" id="etCatatan" class="form-control" value="' + (trx.catatan || '') + '">' +
+        '</div>' +
+        '<input type="hidden" id="etId" value="' + trx.id + '">' +
+        '<input type="hidden" id="etTipe" value="' + trx.tipe + '">' +
+        '<input type="hidden" id="etAnggotaId" value="' + (trx.anggotaId || '') + '">' +
+        '<div class="btn-group" style="margin-top:16px;">' +
+          '<button class="btn btn-secondary" onclick="document.getElementById(\'editTrxOverlay\').remove()">Batal</button>' +
+          '<button class="btn btn-primary" onclick="App.submitEditTrx()">Simpan</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', modal);
+    var nomEl = document.getElementById('etNominal');
+    if (nomEl) App._formatTsep(nomEl);
+  },
+
+  submitEditTrx: function() {
+    var id      = document.getElementById('etId').value;
+    var tipe    = document.getElementById('etTipe').value;
+    var jenisId = document.getElementById('etJenisId').value;
+    var tanggal = document.getElementById('etTanggal').value;
+    var nominal = App.num('etNominal');
+    var sumberKas = document.getElementById('etSumber').value;
+    var catatan = document.getElementById('etCatatan').value;
+    var anggotaId = document.getElementById('etAnggotaId').value;
+    if (!jenisId) { alert('Pilih jenis terlebih dahulu'); return; }
+    if (!nominal) { alert('Nominal tidak boleh 0'); return; }
+    var self = this;
+    self.showLoading('Menyimpan...');
+    document.getElementById('editTrxOverlay').remove();
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.pageRekapitulasi();
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .updateTransaksi({ id: id, tipe: tipe, jenisId: jenisId, tanggal: tanggal, nominal: nominal, sumberKas: sumberKas, catatan: catatan, anggotaId: anggotaId });
+  },
+
+  hapusTrx: function(id) {
+    var trx = (App._editTrxMap || {})[id];
+    if (!trx) { this.showError('Data tidak ditemukan'); return; }
+    if (!confirm('Hapus transaksi ini? Tindakan tidak dapat diurungkan.')) return;
+    var self = this;
+    self.showLoading('Menghapus...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.pageRekapitulasi();
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .deleteTransaksi({ id: id, tipe: trx.tipe, sumberKas: trx.sumber });
   },
 
   pageTutupBuku: function() {
