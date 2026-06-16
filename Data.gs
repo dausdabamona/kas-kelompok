@@ -735,7 +735,7 @@ function bayarTagihanPatungan(tagihanId, catatan) {
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
-    if (!sheet) return { success: false, message: 'Sheet tagihan tidak ditemukan' };
+    if (!sheet) return { success: false, message: 'Sheet penerobosan tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
     var h = headerMap_(rows[0]);
     var today = toDateStr_(new Date());
@@ -750,7 +750,7 @@ function bayarTagihanPatungan(tagihanId, catatan) {
         return { success: true };
       }
     }
-    return { success: false, message: 'Tagihan tidak ditemukan' };
+    return { success: false, message: 'Penerobosan tidak ditemukan' };
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -762,7 +762,7 @@ function batalBayarTagihanPatungan(tagihanId) {
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
-    if (!sheet) return { success: false, message: 'Sheet tagihan tidak ditemukan' };
+    if (!sheet) return { success: false, message: 'Sheet penerobosan tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
     var h = headerMap_(rows[0]);
     for (var i = 1; i < rows.length; i++) {
@@ -774,7 +774,7 @@ function batalBayarTagihanPatungan(tagihanId) {
         return { success: true };
       }
     }
-    return { success: false, message: 'Tagihan tidak ditemukan' };
+    return { success: false, message: 'Penerobosan tidak ditemukan' };
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -1935,7 +1935,7 @@ function buildPDFHTML(data) {
           '<td style="' + td + '">' + (row.statusBayar === 'Lunas' ? 'Lunas' : 'Belum') + '</td>' +
           '</tr>';
       });
-      if (tag.length === 0) html += '<tr><td colspan="5" style="' + S.tdE + '">Belum ada tagihan</td></tr>';
+      if (tag.length === 0) html += '<tr><td colspan="5" style="' + S.tdE + '">Belum ada penerobosan</td></tr>';
       html += '<tr><td colspan="3" style="' + S.tot + '">Target</td><td style="' + S.totR + '">' + fmtRp(t.totalTarget) + '</td><td style="' + S.tot + '"></td></tr>';
       html += '<tr><td colspan="3" style="' + S.tot + '">Sudah Bayar</td><td style="' + S.totR + '">' + fmtRp(t.totalLunas) + '</td><td style="' + S.tot + '"></td></tr>';
       html += '<tr><td colspan="3" style="' + S.tot + '">Belum Bayar</td><td style="' + S.totR + '">' + fmtRp(t.totalBelum) + '</td><td style="' + S.tot + '"></td></tr>';

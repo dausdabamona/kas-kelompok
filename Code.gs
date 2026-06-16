@@ -19,7 +19,7 @@ const CONFIG = {
     SALDO_TUTUP_BUKU: 'Saldo Tutup Buku',
     PEMBELAAN: 'Pembelaan',
     PATUNGAN: 'Terobosan Kelompok',
-    TAGIHAN_PATUNGAN: 'Tagihan Terobosan',
+    TAGIHAN_PATUNGAN: 'Penerobosan',
     LOG: 'Activity Log',
   },
   ROLES: {
@@ -181,7 +181,7 @@ function getSheetSchema_() {
     {
       name: CONFIG.SHEETS.TAGIHAN_PATUNGAN,
       headers: ['ID', 'PatunganID', 'AnggotaID', 'AnggotaNama', 'Grade', 'Nominal', 'StatusBayar', 'TanggalBayar', 'Catatan', 'CreatedBy', 'CreatedAt'],
-      note: 'Tagihan Terobosan per jamaah — JANGAN edit manual | StatusBayar: Belum / Lunas'
+      note: 'Penerobosan per jamaah — JANGAN edit manual | StatusBayar: Belum / Lunas'
     },
     {
       name: CONFIG.SHEETS.LOG,

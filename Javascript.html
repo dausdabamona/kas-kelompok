@@ -187,7 +187,7 @@ var App = {
       '<div class="section-title mb-8">Menu</div>' +
       '<div class="menu-grid">' +
         (isPenerobos
-          ? '<div class="menu-item" style="border:2px solid var(--primary);background:#EFF6FF;" onclick="App.pagePenerobos()"><span class="icon">📋</span><span>Tagihan Infak</span></div>'
+          ? '<div class="menu-item" style="border:2px solid var(--primary);background:#EFF6FF;" onclick="App.pagePenerobos()"><span class="icon">📋</span><span>Penerobosan Infak</span></div>'
           : '<div class="menu-item' + (data.belumDirincikanCount > 0 ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()">' +
               '<span class="icon">📖</span><span>Buku IR' + (data.belumDirincikanCount > 0 ? ' <span class="menu-badge">' + data.belumDirincikanCount + '</span>' : '') + '</span>' +
             '</div>') +
@@ -1080,7 +1080,7 @@ var App = {
           '<span class="badge" style="background:' + (p.status === 'Aktif' ? '#dcfce7' : '#f3f4f6') + ';color:' + (p.status === 'Aktif' ? '#166534' : '#555') + ';">' + p.status + '</span>' +
         '</div>' +
         '<div style="margin-top:10px;display:flex;gap:8px;">' +
-          '<button class="btn btn-outline" style="flex:1;" onclick="App.pageTagihanPatungan(\'' + p.id + '\')">📋 Lihat Tagihan</button>' +
+          '<button class="btn btn-outline" style="flex:1;" onclick="App.pageTagihanPatungan(\'' + p.id + '\')">📋 Lihat Penerobosan</button>' +
         '</div>' +
       '</div>';
     }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada musyawarah patungan.</div>';
@@ -1160,15 +1160,15 @@ var App = {
       '</div>' : '') +
       '<div class="card">' +
         '<div class="section-title mb-8">Nominal per Orang berdasarkan Grade</div>' +
-        '<div class="info-box mb-12">Isi nominal yang harus dibayar per orang untuk setiap grade (atau pakai "Bagi Otomatis" di atas). Sistem membuat tagihan untuk semua jamaah aktif sesuai grade mereka.</div>' +
+        '<div class="info-box mb-12">Isi nominal yang harus dibayar per orang untuk setiap grade (atau pakai "Bagi Otomatis" di atas). Sistem membuat penerobosan untuk semua jamaah aktif sesuai grade mereka.</div>' +
         (gradeRows || '<div class="text-muted" style="padding:12px 0;">Belum ada jamaah yang memiliki grade. <a href="#" onclick="App.pageAturGrade();return false;">Atur grade jamaah terlebih dahulu.</a></div>') +
         '<div class="stat-row" style="margin-top:8px;border-top:1px solid #e5e7eb;padding-top:8px;">' +
-          '<span class="stat-label" style="font-weight:bold;">Estimasi Total Tagihan</span>' +
+          '<span class="stat-label" style="font-weight:bold;">Estimasi Total Penerobosan</span>' +
           '<span id="patTotal" style="font-weight:bold;color:var(--primary);">Rp 0</span>' +
         '</div>' +
       '</div>' +
       '<div id="patError"></div>' +
-      '<button class="btn btn-primary" onclick="App.submitPatungan()">✅ Buat & Generate Tagihan Terobosan</button>',
+      '<button class="btn btn-primary" onclick="App.submitPatungan()">✅ Buat & Generate Penerobosan</button>',
       { _gradeCounts: gradeCounts }
     );
     document.getElementById('app').innerHTML = html;
@@ -1253,14 +1253,14 @@ var App = {
       catatan: (document.getElementById('patCatatan') || {}).value || '',
       gradeConfig: gradeConfig
     };
-    document.getElementById('patError').innerHTML = '<div class="info-box">⏳ Membuat tagihan...</div>';
+    document.getElementById('patError').innerHTML = '<div class="info-box">⏳ Membuat penerobosan...</div>';
     google.script.run
       .withSuccessHandler(function(res) {
         if (!res.success) {
           document.getElementById('patError').innerHTML = '<div class="error-box">' + res.message + '</div>';
           return;
         }
-        self.toast('Terobosan Kelompok dibuat! ' + (res.tagihanCount || 0) + ' tagihan, total Rp ' + (res.total || 0).toLocaleString('id-ID'));
+        self.toast('Terobosan Kelompok dibuat! ' + (res.tagihanCount || 0) + ' penerobosan, total Rp ' + (res.total || 0).toLocaleString('id-ID'));
         self.pagePatungan();
       })
       .withFailureHandler(function(err) {
@@ -1271,7 +1271,7 @@ var App = {
 
   pageTagihanPatungan: function(patunganId) {
     this.history.push('patungan');
-    this.showLoading('Memuat tagihan...');
+    this.showLoading('Memuat penerobosan...');
     var self = this;
     google.script.run
       .withSuccessHandler(function(res) {
@@ -1335,12 +1335,12 @@ var App = {
       return header + items;
     }).join('');
 
-    var html = self.pageWrapper(p.nama || 'Tagihan Terobosan',
+    var html = self.pageWrapper(p.nama || 'Penerobosan',
       '<div style="font-size:12px;color:#888;margin-bottom:12px;">' + App.formatDate(p.tanggal) + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
       summaryCards +
       '<div class="card">' +
         '<div id="tagihanModal"></div>' +
-        (rows || '<div class="text-center text-muted" style="padding:24px;">Belum ada tagihan.</div>') +
+        (rows || '<div class="text-center text-muted" style="padding:24px;">Belum ada penerobosan.</div>') +
       '</div>'
     );
     document.getElementById('app').innerHTML = html;
@@ -1370,7 +1370,7 @@ var App = {
           document.getElementById('bayarError').innerHTML = '<div class="error-box">' + res.message + '</div>';
           return;
         }
-        self.toast('Tagihan ditandai lunas ✓');
+        self.toast('Penerobosan ditandai lunas ✓');
         self.pageTagihanPatungan(self._currentTagihanPatunganId);
       })
       .withFailureHandler(function(err) {
@@ -1425,7 +1425,7 @@ var App = {
     }).join('') || '<div class="text-muted" style="padding:24px 0;">Belum ada jamaah aktif.</div>';
 
     var html = self.pageWrapper('Atur Grade Jamaah',
-      '<div class="info-box mb-16">Grade menentukan besar tagihan setiap jamaah dalam musyawarah patungan. Grade A = kemampuan tertinggi, dst.</div>' +
+      '<div class="info-box mb-16">Grade menentukan besar penerobosan setiap jamaah dalam Terobosan Kelompok. Grade A = kemampuan tertinggi, dst.</div>' +
       '<div class="card">' + rows + '</div>'
     );
     document.getElementById('app').innerHTML = html;
