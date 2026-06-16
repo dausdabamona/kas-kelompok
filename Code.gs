@@ -20,6 +20,7 @@ const CONFIG = {
     PEMBELAAN: 'Pembelaan',
     PATUNGAN: 'Terobosan Kelompok',
     TAGIHAN_PATUNGAN: 'Penerobosan',
+    HAK_AKSES: 'Hak Akses',
     LOG: 'Activity Log',
   },
   ROLES: {
@@ -31,6 +32,92 @@ const CONFIG = {
   },
   STATUS: { OPEN: 'OPEN', CLOSED: 'CLOSED' },
 };
+
+// ══════════════════════════════════════════════════════
+// HAK AKSES (CAPABILITY) — definisi & default per role
+// ══════════════════════════════════════════════════════
+// Daftar capability (sumber tunggal). grup: 'lihat' | 'edit'
+function getCapabilities_() {
+  return [
+    // Lihat (menu/UI)
+    { code: 'view.bukuIR', label: 'Lihat: Buku IR', grup: 'lihat' },
+    { code: 'view.kelolaBuku', label: 'Lihat: Kelola Buku', grup: 'lihat' },
+    { code: 'view.setoranDesa', label: 'Lihat: Setoran Desa', grup: 'lihat' },
+    { code: 'view.jamaah', label: 'Lihat: Jamaah', grup: 'lihat' },
+    { code: 'view.laporanSetoran', label: 'Lihat: Laporan Setoran', grup: 'lihat' },
+    { code: 'view.pemeriksaanSaldo', label: 'Lihat: Pemeriksaan Saldo', grup: 'lihat' },
+    { code: 'view.laporanPDF', label: 'Lihat: Laporan PDF', grup: 'lihat' },
+    { code: 'view.terobosan', label: 'Lihat: Terobosan Kelompok', grup: 'lihat' },
+    { code: 'view.penerobosanInfak', label: 'Lihat: Penerobosan Infak', grup: 'lihat' },
+    { code: 'view.setting', label: 'Lihat: Setting', grup: 'lihat' },
+    // Edit/Aksi (server-enforced)
+    { code: 'trx.input', label: 'Input Transaksi', grup: 'edit' },
+    { code: 'bukuIR.input', label: 'Input Rincian Buku IR', grup: 'edit' },
+    { code: 'jamaah.add', label: 'Tambah Jamaah', grup: 'edit' },
+    { code: 'jamaah.edit', label: 'Edit Jamaah', grup: 'edit' },
+    { code: 'jamaah.delete', label: 'Hapus Jamaah', grup: 'edit' },
+    { code: 'terobosan.create', label: 'Buat Terobosan', grup: 'edit' },
+    { code: 'terobosan.bayar', label: 'Bayar Penerobosan', grup: 'edit' },
+    { code: 'terobosan.batal', label: 'Batal Bayar Penerobosan', grup: 'edit' },
+    { code: 'grade.edit', label: 'Atur Grade Jamaah', grup: 'edit' },
+    { code: 'saldo.input', label: 'Input/Pemeriksaan Saldo', grup: 'edit' },
+    { code: 'bank.input', label: 'Input Transaksi Bank', grup: 'edit' },
+    { code: 'bank.manage', label: 'Kelola Bank (rekon/pending/daily)', grup: 'edit' },
+    { code: 'setoran.realisasi', label: 'Realisasi Setoran Desa', grup: 'edit' },
+    { code: 'pembelaan.manage', label: 'Kelola Pembelaan', grup: 'edit' },
+    { code: 'master.manage', label: 'Kelola Master (Pos/Musyawaroh)', grup: 'edit' }
+  ];
+}
+
+// Default izin per role (meniru perilaku hardcode lama). ADMIN selalu true.
+function getDefaultPermMatrix_() {
+  var R = CONFIG.ROLES;
+  var allRoles = [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS, R.PENEROBOS];
+  var nonPenerobos = [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS];
+  // map capability → daftar role yang diizinkan secara default
+  var def = {
+    'view.bukuIR': nonPenerobos,
+    'view.kelolaBuku': nonPenerobos,
+    'view.setoranDesa': nonPenerobos,
+    'view.jamaah': allRoles,
+    'view.laporanSetoran': nonPenerobos,
+    'view.pemeriksaanSaldo': nonPenerobos,
+    'view.laporanPDF': nonPenerobos,
+    'view.terobosan': allRoles,
+    'view.penerobosanInfak': [R.PENEROBOS],
+    'view.setting': [R.ADMIN],
+    'trx.input': allRoles,
+    'bukuIR.input': allRoles,
+    'jamaah.add': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
+    'jamaah.edit': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
+    'jamaah.delete': [R.ADMIN],
+    'terobosan.create': [R.ADMIN, R.BENDAHARA_1, R.PENULIS],
+    'terobosan.bayar': allRoles,
+    'terobosan.batal': [R.ADMIN, R.BENDAHARA_1, R.PENEROBOS],
+    'grade.edit': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
+    'saldo.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
+    'bank.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
+    'bank.manage': [R.ADMIN, R.BENDAHARA_1],
+    'setoran.realisasi': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
+    'pembelaan.manage': allRoles,
+    'master.manage': [R.ADMIN]
+  };
+  // bentuk matriks { role: { cap: bool } }
+  var matrix = {};
+  allRoles.forEach(function(role) { matrix[role] = {}; });
+  getCapabilities_().forEach(function(c) {
+    var allowed = def[c.code] || [];
+    allRoles.forEach(function(role) {
+      matrix[role][c.code] = (role === R.ADMIN) || (allowed.indexOf(role) >= 0);
+    });
+  });
+  return matrix;
+}
+
+function getAllRoles_() {
+  var R = CONFIG.ROLES;
+  return [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS, R.PENEROBOS];
+}
 
 function doGet(e) {
   return HtmlService.createTemplateFromFile('Index')
@@ -182,6 +269,11 @@ function getSheetSchema_() {
       name: CONFIG.SHEETS.TAGIHAN_PATUNGAN,
       headers: ['ID', 'PatunganID', 'AnggotaID', 'AnggotaNama', 'Grade', 'Nominal', 'StatusBayar', 'TanggalBayar', 'Catatan', 'CreatedBy', 'CreatedAt'],
       note: 'Penerobosan per jamaah — JANGAN edit manual | StatusBayar: Belum / Lunas'
+    },
+    {
+      name: CONFIG.SHEETS.HAK_AKSES,
+      headers: ['Capability', 'Keterangan'].concat(getAllRoles_()),
+      note: 'Matriks hak akses per role — diatur lewat menu Setting → Kelola Hak Akses. TRUE = boleh.'
     },
     {
       name: CONFIG.SHEETS.LOG,

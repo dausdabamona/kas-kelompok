@@ -5,6 +5,11 @@ var App = {
   // ─────────────────────────────────────────────────
   // INIT & AUTH
   // ─────────────────────────────────────────────────
+  // Cek hak akses (capability) user yang login.
+  can: function(cap) {
+    return !!(App.currentUser && App.currentUser.perms && App.currentUser.perms[cap]);
+  },
+
   // Baca nilai angka dari input (buang pemisah ribuan/titik). Terima id (string) atau elemen.
   num: function(x) {
     var el = (typeof x === 'string') ? document.getElementById(x) : x;
@@ -188,8 +193,6 @@ var App = {
   renderDashboard: function(data) {
     var u = data.user || {};
     var inisial = (u.nama || 'U').charAt(0).toUpperCase();
-    var isAdmin = u.role === 'ADMIN';
-    var isPenerobos = u.role === 'PENEROBOS';
     var periode = data.periode;
 
     var html = '<div class="page-content" style="padding-top:20px;">' +
@@ -223,19 +226,18 @@ var App = {
 
       '<div class="section-title mb-8">Menu</div>' +
       '<div class="menu-grid">' +
-        (isPenerobos
-          ? '<div class="menu-item" style="border:2px solid var(--primary);background:#EFF6FF;" onclick="App.pagePenerobos()"><span class="icon">📋</span><span>Penerobosan Infak</span></div>'
-          : '<div class="menu-item' + (data.belumDirincikanCount > 0 ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()">' +
+        (App.can('view.penerobosanInfak') ? '<div class="menu-item" style="border:2px solid var(--primary);background:#EFF6FF;" onclick="App.pagePenerobos()"><span class="icon">📋</span><span>Penerobosan Infak</span></div>' : '') +
+        (App.can('view.bukuIR') ? '<div class="menu-item' + (data.belumDirincikanCount > 0 ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()">' +
               '<span class="icon">📖</span><span>Buku IR' + (data.belumDirincikanCount > 0 ? ' <span class="menu-badge">' + data.belumDirincikanCount + '</span>' : '') + '</span>' +
-            '</div>') +
-        (!isPenerobos ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '') +
-        (!isPenerobos ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '') +
-        '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' +
-        (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '') +
-        (!isPenerobos ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '') +
-        (!isPenerobos ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '') +
-        '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Terobosan Kelompok</span></div>' +
-        (isAdmin ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
+            '</div>' : '') +
+        (App.can('view.kelolaBuku') ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '') +
+        (App.can('view.setoranDesa') ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '') +
+        (App.can('view.jamaah') ? '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' : '') +
+        (App.can('view.laporanSetoran') ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '') +
+        (App.can('view.pemeriksaanSaldo') ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '') +
+        (App.can('view.laporanPDF') ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '') +
+        (App.can('view.terobosan') ? '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Terobosan Kelompok</span></div>' : '') +
+        (App.can('view.setting') ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '') +
         '<div class="menu-item" onclick="App.loadDashboard()"><span class="icon">🔄</span><span>Refresh</span></div>' +
       '</div>' +
 
@@ -1101,7 +1103,7 @@ var App = {
   renderPatunganList: function(list) {
     var self = this;
     var u = App.currentUser || {};
-    var canAdmin = ['ADMIN','BENDAHARA_1','PENULIS'].indexOf(u.role) >= 0;
+    var canAdmin = App.can('terobosan.create');
 
     var cards = list.map(function(p, idx) {
       var gc = p.gradeConfig || {};
@@ -1324,8 +1326,8 @@ var App = {
     var p = res.patungan || {};
     var tagihan = res.tagihan || [];
     var u = App.currentUser || {};
-    var canBayar = ['ADMIN','BENDAHARA_1','BENDAHARA_2','PENULIS','PENEROBOS'].indexOf(u.role) >= 0;
-    var canBatal = ['ADMIN','BENDAHARA_1','PENEROBOS'].indexOf(u.role) >= 0;
+    var canBayar = App.can('terobosan.bayar');
+    var canBatal = App.can('terobosan.batal');
 
     var summaryCards =
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">' +
@@ -1495,8 +1497,9 @@ var App = {
         if (!res.success) { self.showError(res.message); return; }
         var data = res.data || [];
         var u2 = App.currentUser || {};
-        var canEditJamaah = ['ADMIN','BENDAHARA_1','PENULIS','PENEROBOS'].indexOf(u2.role) >= 0;
-        var canHapusJamaah = u2.role === 'ADMIN';
+        var canEditJamaah = App.can('jamaah.edit');
+        var canAddJamaah = App.can('jamaah.add');
+        var canHapusJamaah = App.can('jamaah.delete');
         var list = data.map(function(a) {
           var inisial = (a.nama || 'J').charAt(0).toUpperCase();
           return '<div class="jamaah-card">' +
@@ -1514,7 +1517,7 @@ var App = {
         }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada jamaah.</div>';
 
         var html = self.pageWrapper('Kelola Jamaah',
-          (canEditJamaah ? '<button class="btn btn-primary mb-16" onclick="App.showFormJamaah(null)">+ Tambah Jamaah</button>' : '') +
+          (canAddJamaah ? '<button class="btn btn-primary mb-16" onclick="App.showFormJamaah(null)">+ Tambah Jamaah</button>' : '') +
           list +
           '<div id="jamaahModal"></div>'
         );
@@ -1625,9 +1628,94 @@ var App = {
       '<div class="kelola-menu-item" onclick="App.pageMusyawaroh()">' +
         '<div class="kelola-menu-icon">🤝</div>' +
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Hasil Musyawaroh</div><div class="kelola-menu-desc">Kelola keputusan musyawarah</div></div><span>›</span>' +
+      '</div>' +
+      '<div class="kelola-menu-item" onclick="App.pageHakAkses()">' +
+        '<div class="kelola-menu-icon">🔐</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Kelola Hak Akses</div><div class="kelola-menu-desc">Atur hak akses tiap role</div></div><span>›</span>' +
       '</div>'
     );
     document.getElementById('app').innerHTML = html;
+  },
+
+  // ─────────────────────────────────────────────────
+  // KELOLA HAK AKSES (matriks role × capability)
+  // ─────────────────────────────────────────────────
+  pageHakAkses: function() {
+    this.history.push('setting');
+    this.showLoading('Memuat hak akses...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.renderHakAkses(res);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getPermMatrix();
+  },
+
+  renderHakAkses: function(res) {
+    var caps = res.capabilities || [];
+    var roles = res.roles || [];
+    var matrix = res.matrix || {};
+    this._hakAksesRoles = roles;
+    this._hakAksesCaps = caps.map(function(c){ return c.code; });
+
+    function th(t){ return '<th style="padding:6px 8px;border:1px solid #d1d5db;background:#f3f4f6;font-size:11px;text-align:center;">' + t + '</th>'; }
+
+    var head = '<th style="padding:6px 8px;border:1px solid #d1d5db;background:#f3f4f6;font-size:11px;text-align:left;">Hak Akses</th>' +
+      roles.map(function(r){ return th(r.replace('BENDAHARA_','B')); }).join('');
+
+    var lastGrup = '';
+    var body = caps.map(function(c) {
+      var grupRow = '';
+      if (c.grup !== lastGrup) {
+        lastGrup = c.grup;
+        grupRow = '<tr><td colspan="' + (roles.length+1) + '" style="padding:5px 8px;background:#e5e7eb;font-weight:bold;font-size:11px;">' +
+          (c.grup === 'lihat' ? '👁️ LIHAT (Menu)' : '✏️ EDIT / AKSI') + '</td></tr>';
+      }
+      var cells = roles.map(function(r) {
+        var checked = !!(matrix[r] && matrix[r][c.code]);
+        var isAdmin = (r === 'ADMIN');
+        return '<td style="padding:4px;border:1px solid #d1d5db;text-align:center;">' +
+          '<input type="checkbox" data-cap="' + c.code + '" data-role="' + r + '"' +
+          (checked ? ' checked' : '') + (isAdmin ? ' disabled title="ADMIN selalu penuh"' : '') + '/></td>';
+      }).join('');
+      return grupRow + '<tr><td style="padding:4px 8px;border:1px solid #d1d5db;font-size:11px;">' + c.label + '</td>' + cells + '</tr>';
+    }).join('');
+
+    var html = this.pageWrapper('Kelola Hak Akses',
+      '<div class="info-box mb-12">Centang = role boleh. Kolom ADMIN terkunci (selalu penuh). Perubahan berlaku setelah user login ulang / refresh.</div>' +
+      '<div id="hakAksesError"></div>' +
+      '<div style="overflow-x:auto;"><table style="border-collapse:collapse;width:100%;"><tr>' + head + '</tr>' + body + '</table></div>' +
+      '<button class="btn btn-primary" style="margin-top:14px;" onclick="App.saveHakAkses()">💾 Simpan Hak Akses</button>'
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  saveHakAkses: function() {
+    var self = this;
+    var roles = this._hakAksesRoles || [];
+    var matrix = {};
+    roles.forEach(function(r){ matrix[r] = {}; });
+    var boxes = document.querySelectorAll('input[type="checkbox"][data-cap]');
+    for (var i = 0; i < boxes.length; i++) {
+      var b = boxes[i];
+      var r = b.getAttribute('data-role');
+      var cap = b.getAttribute('data-cap');
+      if (!matrix[r]) matrix[r] = {};
+      matrix[r][cap] = (r === 'ADMIN') ? true : b.checked;
+    }
+    document.getElementById('hakAksesError').innerHTML = '<div class="info-box">⏳ Menyimpan...</div>';
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { document.getElementById('hakAksesError').innerHTML = '<div class="error-box">' + res.message + '</div>'; return; }
+        self.toast('Hak akses tersimpan ✓');
+        self.pageSetting();
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('hakAksesError').innerHTML = '<div class="error-box">' + err.message + '</div>';
+      })
+      .savePermMatrix(matrix);
   },
 
   pagePosPemasukan: function() {

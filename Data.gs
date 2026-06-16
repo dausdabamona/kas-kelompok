@@ -266,7 +266,7 @@ function getPemeriksaanSaldo() {
 
 function submitPemeriksaanSaldo(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
+    var auth = requirePerm('saldo.input');
     if (!auth.success) return { success: false, message: auth.message };
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
@@ -502,7 +502,7 @@ function getAnggota() {
 
 function addAnggota(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENULIS, CONFIG.ROLES.PENEROBOS]);
+    var auth = requirePerm('jamaah.add');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
@@ -522,7 +522,7 @@ function addAnggota(data) {
 
 function updateAnggota(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENULIS, CONFIG.ROLES.PENEROBOS]);
+    var auth = requirePerm('jamaah.edit');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
@@ -544,7 +544,7 @@ function updateAnggota(data) {
 
 function deleteAnggota(id) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('jamaah.delete');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
@@ -598,7 +598,7 @@ function getPatunganList() {
 
 function addPatungan(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENULIS]);
+    var auth = requirePerm('terobosan.create');
     if (!auth.success) return { success: false, message: auth.message };
     if (!data.nama) return { success: false, message: 'Nama patungan wajib diisi' };
     if (!data.gradeConfig || Object.keys(data.gradeConfig).length === 0)
@@ -731,7 +731,7 @@ function getTagihanPatungan(patunganId) {
 
 function bayarTagihanPatungan(tagihanId, catatan) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2, CONFIG.ROLES.PENULIS, CONFIG.ROLES.PENEROBOS]);
+    var auth = requirePerm('terobosan.bayar');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
@@ -758,7 +758,7 @@ function bayarTagihanPatungan(tagihanId, catatan) {
 
 function batalBayarTagihanPatungan(tagihanId) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENEROBOS]);
+    var auth = requirePerm('terobosan.batal');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
@@ -782,7 +782,7 @@ function batalBayarTagihanPatungan(tagihanId) {
 
 function updateAnggotaGrade(anggotaId, grade) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.PENULIS, CONFIG.ROLES.PENEROBOS]);
+    var auth = requirePerm('grade.edit');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
@@ -1107,7 +1107,7 @@ function getRekapitulasiData() {
 // ──────────────────────────────────────────────────────
 function addPosPemasukan(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
@@ -1126,7 +1126,7 @@ function addPosPemasukan(data) {
 
 function updatePosPemasukan(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
@@ -1147,7 +1147,7 @@ function updatePosPemasukan(data) {
 
 function deletePosPemasukan(id) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
@@ -1167,7 +1167,7 @@ function deletePosPemasukan(id) {
 // ──────────────────────────────────────────────────────
 function addPosPengeluaran(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
@@ -1186,7 +1186,7 @@ function addPosPengeluaran(data) {
 
 function updatePosPengeluaran(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
@@ -1207,7 +1207,7 @@ function updatePosPengeluaran(data) {
 
 function deletePosPengeluaran(id) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
@@ -1273,7 +1273,7 @@ function getPosSetoranAll() {
 
 function addPosSetoran(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
@@ -1296,7 +1296,7 @@ function addPosSetoran(data) {
 
 function updatePosSetoran(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
@@ -1323,7 +1323,7 @@ function updatePosSetoran(data) {
 
 function deletePosSetoran(id) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
@@ -1360,7 +1360,7 @@ function getMusyawaroh() {
 
 function addMusyawaroh(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
@@ -1379,7 +1379,7 @@ function addMusyawaroh(data) {
 
 function updateMusyawaroh(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
@@ -1400,7 +1400,7 @@ function updateMusyawaroh(data) {
 
 function deleteMusyawaroh(id) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN]);
+    var auth = requirePerm('master.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.MUSYAWARAH);
@@ -1544,7 +1544,7 @@ function getRekapSetoran() {
 
 function submitRealisasiSetoran(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
+    var auth = requirePerm('setoran.realisasi');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var periode = getPeriodeAktif();
@@ -2009,7 +2009,7 @@ function getBankDaily(periodeId) {
 
 function addBankTransaction(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1, CONFIG.ROLES.BENDAHARA_2]);
+    var auth = requirePerm('bank.input');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_DAILY);
@@ -2033,7 +2033,7 @@ function addBankTransaction(data) {
 
 function updateBankDaily(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = requirePerm('bank.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_DAILY);
@@ -2091,7 +2091,7 @@ function getBankPending(periodeId) {
 
 function addManualBankIncome(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = requirePerm('bank.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var result = submitTransaksi({
       tipe: 'masuk', jenisId: data.jenisId, nominal: data.nominal,
@@ -2105,7 +2105,7 @@ function addManualBankIncome(data) {
 
 function addPendingTransaction(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = requirePerm('bank.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_PENDING);
@@ -2165,7 +2165,7 @@ function getRekonsiliasiData() {
 
 function submitRekonsiliasiBank(data) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = requirePerm('bank.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var result = addBankTransaction(data);
     if (!result.success) return result;
@@ -2196,7 +2196,7 @@ function findPendingTransactions(keyword) {
 
 function updatePendingStatus(id, status, catatan) {
   try {
-    var auth = checkAuth([CONFIG.ROLES.ADMIN, CONFIG.ROLES.BENDAHARA_1]);
+    var auth = requirePerm('bank.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_PENDING);
