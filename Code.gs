@@ -22,6 +22,8 @@ const CONFIG = {
     TAGIHAN_PATUNGAN: 'Penerobosan',
     HAK_AKSES: 'Hak Akses',
     LOG: 'Activity Log',
+    KAS_PENEROBOS: 'Kas Penerobos',
+    SERAH_TERIMA: 'Serah Terima',
   },
   ROLES: {
     ADMIN: 'ADMIN',
@@ -68,7 +70,11 @@ function getCapabilities_() {
     { code: 'user.manage', label: 'Kelola User', grup: 'edit' },
     { code: 'trx.edit.tunai', label: 'Edit/Hapus Transaksi Tunai', grup: 'edit' },
     { code: 'trx.edit.bank', label: 'Edit/Hapus Transaksi Bank', grup: 'edit' },
-    { code: 'periode.manage', label: 'Kelola Periode (Tutup/Buka)', grup: 'edit' }
+    { code: 'periode.manage', label: 'Kelola Periode (Tutup/Buka)', grup: 'edit' },
+    { code: 'view.kasPenerobos', label: 'Lihat: Kas Penerobos', grup: 'lihat' },
+    { code: 'view.serahTerima', label: 'Lihat: Serah Terima', grup: 'lihat' },
+    { code: 'penerobos.input', label: 'Input Kas Penerobos', grup: 'edit' },
+    { code: 'serahterima.konfirmasi', label: 'Konfirmasi Serah Terima', grup: 'edit' }
   ];
 }
 
@@ -106,7 +112,11 @@ function getDefaultPermMatrix_() {
     'user.manage': [R.ADMIN],
     'trx.edit.tunai': [R.ADMIN, R.BENDAHARA_1],
     'trx.edit.bank': [R.ADMIN, R.BENDAHARA_2],
-    'periode.manage': [R.ADMIN]
+    'periode.manage': [R.ADMIN],
+    'view.kasPenerobos': [R.ADMIN, R.PENEROBOS],
+    'view.serahTerima': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
+    'penerobos.input': [R.ADMIN, R.PENEROBOS],
+    'serahterima.konfirmasi': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2]
   };
   // bentuk matriks { role: { cap: bool } }
   var matrix = {};
@@ -275,6 +285,16 @@ function getSheetSchema_() {
       name: CONFIG.SHEETS.TAGIHAN_PATUNGAN,
       headers: ['ID', 'PatunganID', 'AnggotaID', 'AnggotaNama', 'Grade', 'Nominal', 'StatusBayar', 'TanggalBayar', 'Catatan', 'CreatedBy', 'CreatedAt'],
       note: 'Penerobosan per jamaah — JANGAN edit manual | StatusBayar: Belum / Lunas'
+    },
+    {
+      name: CONFIG.SHEETS.KAS_PENEROBOS,
+      headers: ['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At'],
+      note: 'Status: Aktif / Diserahkan | JANGAN edit manual'
+    },
+    {
+      name: CONFIG.SHEETS.SERAH_TERIMA,
+      headers: ['ID', 'Periode ID', 'Tanggal Serah', 'Penerobos Email', 'Total', 'Sumber Tujuan', 'Catatan', 'Status', 'Dikonfirmasi By', 'Dikonfirmasi At', 'Penerimaan ID', 'Created At'],
+      note: 'Sumber Tujuan: Tunai / Bank | Status: Menunggu / Dikonfirmasi | JANGAN edit manual'
     },
     {
       name: CONFIG.SHEETS.HAK_AKSES,

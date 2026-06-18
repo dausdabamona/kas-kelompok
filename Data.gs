@@ -3072,3 +3072,292 @@ function getJamaahBelumBayar(jenisId) {
     return { success: false, message: e.message };
   }
 }
+
+// ──────────────────────────────────────────────────────
+// KAS PENEROBOS & SERAH TERIMA
+// ──────────────────────────────────────────────────────
+function submitKasPenerobos(data) {
+  try {
+    var auth = requirePerm('penerobos.input');
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+
+    // Validasi FK jenis
+    var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetMaster) {
+      var mrows = sheetMaster.getDataRange().getValues();
+      var valid = false;
+      for (var mi = 1; mi < mrows.length; mi++) {
+        if (String(mrows[mi][0]) === String(data.jenisId)) { valid = true; break; }
+      }
+      if (!valid) return { success: false, message: 'Jenis tidak ditemukan di master data' };
+    }
+
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    if (!sheet) {
+      sheet = ss.insertSheet(CONFIG.SHEETS.KAS_PENEROBOS);
+      sheet.appendRow(['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At']);
+    }
+    var id = generateID('KP');
+    var tgl = toDateStr_(data.tanggal ? new Date(data.tanggal) : new Date());
+    sheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', Number(data.nominal) || 0, data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(new Date())]);
+    logActivity(auth.user.email, 'KAS_PENEROBOS', 'Nominal: ' + data.nominal);
+    return { success: true, id: id };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function getKasPenerobos() {
+  try {
+    var auth = requirePerm('penerobos.input');
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    var periodeId = periode ? periode.id : null;
+
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [], periode: periode };
+
+    // Build jenis map
+    var jenisMap = {};
+    var sheetM = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetM) {
+      var mr = sheetM.getDataRange().getValues();
+      for (var i = 1; i < mr.length; i++) if (mr[i][0]) jenisMap[String(mr[i][0])] = String(mr[i][1] || '');
+    }
+    // Build anggota map
+    var angMap = {};
+    var sheetA = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (sheetA) {
+      var ar = sheetA.getDataRange().getValues();
+      for (var i = 1; i < ar.length; i++) if (ar[i][0]) angMap[String(ar[i][0])] = String(ar[i][1] || '');
+    }
+
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var isAdmin = auth.user.role === CONFIG.ROLES.ADMIN;
+    var result = [];
+    for (var i = 1; i < rows.length; i++) {
+      if (!hGet_(rows[i], h, 'id', 0)) continue;
+      if (periodeId && String(hGet_(rows[i], h, 'periodeid', 1)) !== periodeId) continue;
+      var email = String(hGet_(rows[i], h, 'penerobosemail', 7) || '');
+      if (!isAdmin && email !== auth.user.email) continue;
+      var jenisId = String(hGet_(rows[i], h, 'jenisid', 3) || '');
+      var anggotaId = String(hGet_(rows[i], h, 'anggotaid', 4) || '');
+      result.push({
+        id: String(hGet_(rows[i], h, 'id', 0)),
+        periodeId: String(hGet_(rows[i], h, 'periodeid', 1) || ''),
+        tanggal: toDateStr_(hGet_(rows[i], h, 'tanggal', 2)),
+        jenisId: jenisId,
+        jenis: jenisMap[jenisId] || jenisId,
+        anggotaId: anggotaId,
+        anggota: angMap[anggotaId] || '',
+        nominal: Number(hGet_(rows[i], h, 'nominal', 5)) || 0,
+        catatan: String(hGet_(rows[i], h, 'catatan', 6) || ''),
+        penerobosEmail: email,
+        status: String(hGet_(rows[i], h, 'status', 8) || 'Aktif'),
+        serahTerimaId: String(hGet_(rows[i], h, 'serahterimaid', 9) || '')
+      });
+    }
+    result.sort(function(a, b) { return b.tanggal.localeCompare(a.tanggal); });
+    return { success: true, data: result, periode: periode };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function buatSerahTerima(data) {
+  try {
+    var auth = requirePerm('penerobos.input');
+    if (!auth.success) return { success: false, message: auth.message };
+    if (!data.itemIds || data.itemIds.length === 0) return { success: false, message: 'Pilih minimal 1 item kas' };
+    if (!data.sumberTujuan) return { success: false, message: 'Tentukan tujuan (Tunai/Bank)' };
+
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    if (!sheet) return { success: false, message: 'Sheet Kas Penerobos tidak ditemukan' };
+
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var isAdmin = auth.user.role === CONFIG.ROLES.ADMIN;
+    var colStatus = (h['status'] !== undefined ? h['status'] : 8) + 1;
+    var colSerahId = (h['serahterimaid'] !== undefined ? h['serahterimaid'] : 9) + 1;
+    var periodeId = null;
+    var total = 0;
+    var matchedRows = [];
+
+    // Validasi semua item
+    for (var ii = 0; ii < data.itemIds.length; ii++) {
+      var targetId = String(data.itemIds[ii]);
+      var found = false;
+      for (var i = 1; i < rows.length; i++) {
+        if (String(hGet_(rows[i], h, 'id', 0)) !== targetId) continue;
+        var email = String(hGet_(rows[i], h, 'penerobosemail', 7) || '');
+        if (!isAdmin && email !== auth.user.email) return { success: false, message: 'Item bukan milik Anda: ' + targetId };
+        var status = String(hGet_(rows[i], h, 'status', 8) || '');
+        if (status !== 'Aktif') return { success: false, message: 'Item sudah diserahkan: ' + targetId };
+        var pid = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+        if (!periodeId) periodeId = pid;
+        total += Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
+        matchedRows.push({ rowIdx: i + 1 });
+        found = true;
+        break;
+      }
+      if (!found) return { success: false, message: 'Item tidak ditemukan: ' + targetId };
+    }
+
+    // Buat Serah Terima
+    var stSheet = ss.getSheetByName(CONFIG.SHEETS.SERAH_TERIMA);
+    if (!stSheet) {
+      stSheet = ss.insertSheet(CONFIG.SHEETS.SERAH_TERIMA);
+      stSheet.appendRow(['ID', 'Periode ID', 'Tanggal Serah', 'Penerobos Email', 'Total', 'Sumber Tujuan', 'Catatan', 'Status', 'Dikonfirmasi By', 'Dikonfirmasi At', 'Penerimaan ID', 'Created At']);
+    }
+    var stId = generateID('ST');
+    var now = toDateStr_(new Date());
+    stSheet.appendRow([stId, periodeId, now, auth.user.email, total, data.sumberTujuan, data.catatan || '', 'Menunggu', '', '', '', now]);
+
+    // Update tiap item
+    for (var j = 0; j < matchedRows.length; j++) {
+      sheet.getRange(matchedRows[j].rowIdx, colStatus).setValue('Diserahkan');
+      sheet.getRange(matchedRows[j].rowIdx, colSerahId).setValue(stId);
+    }
+
+    logActivity(auth.user.email, 'BUAT_SERAH_TERIMA', 'ID: ' + stId + ' Total: ' + total);
+    return { success: true, id: stId, total: total };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function getSerahTerimaList() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    var periodeId = periode ? periode.id : null;
+
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.SERAH_TERIMA);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [], periode: periode };
+
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var role = auth.user.role;
+    var isB1 = role === CONFIG.ROLES.BENDAHARA_1 || role === CONFIG.ROLES.ADMIN;
+    var isB2 = role === CONFIG.ROLES.BENDAHARA_2 || role === CONFIG.ROLES.ADMIN;
+    var isPenerobos = role === CONFIG.ROLES.PENEROBOS;
+    var result = [];
+
+    for (var i = 1; i < rows.length; i++) {
+      if (!hGet_(rows[i], h, 'id', 0)) continue;
+      if (periodeId && String(hGet_(rows[i], h, 'periodeid', 1)) !== periodeId) continue;
+      var sumberTujuan = String(hGet_(rows[i], h, 'sumbertujuan', 5) || '');
+      var email = String(hGet_(rows[i], h, 'penerobosemail', 3) || '');
+      // Filter: Penerobos hanya lihat milik sendiri; B1 lihat Tunai; B2 lihat Bank; Admin lihat semua
+      if (isPenerobos && email !== auth.user.email) continue;
+      if (!isPenerobos && role !== CONFIG.ROLES.ADMIN) {
+        if (role === CONFIG.ROLES.BENDAHARA_1 && sumberTujuan !== 'Tunai') continue;
+        if (role === CONFIG.ROLES.BENDAHARA_2 && sumberTujuan !== 'Bank') continue;
+      }
+      result.push({
+        id: String(hGet_(rows[i], h, 'id', 0)),
+        periodeId: String(hGet_(rows[i], h, 'periodeid', 1) || ''),
+        tanggalSerah: toDateStr_(hGet_(rows[i], h, 'tanggalserah', 2)),
+        penerobosEmail: email,
+        total: Number(hGet_(rows[i], h, 'total', 4)) || 0,
+        sumberTujuan: sumberTujuan,
+        catatan: String(hGet_(rows[i], h, 'catatan', 6) || ''),
+        status: String(hGet_(rows[i], h, 'status', 7) || 'Menunggu'),
+        dikonfirmasiBy: String(hGet_(rows[i], h, 'dikonfirmasiby', 8) || ''),
+        dikonfirmasiAt: toDateStr_(hGet_(rows[i], h, 'dikonfirmasiat', 9)),
+        penerimaanId: String(hGet_(rows[i], h, 'penerimaanid', 10) || '')
+      });
+    }
+    result.sort(function(a, b) { return b.tanggalSerah.localeCompare(a.tanggalSerah); });
+    return { success: true, data: result, periode: periode };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function konfirmasiSerahTerima(serahTerimaId) {
+  try {
+    var auth = requirePerm('serahterima.konfirmasi');
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+
+    var stSheet = ss.getSheetByName(CONFIG.SHEETS.SERAH_TERIMA);
+    if (!stSheet) return { success: false, message: 'Sheet Serah Terima tidak ditemukan' };
+
+    var rows = stSheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var stRow = -1;
+    var stData = null;
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) === serahTerimaId) {
+        stRow = i + 1;
+        stData = {
+          status: String(hGet_(rows[i], h, 'status', 7) || ''),
+          total: Number(hGet_(rows[i], h, 'total', 4)) || 0,
+          sumberTujuan: String(hGet_(rows[i], h, 'sumbertujuan', 5) || ''),
+          penerobosEmail: String(hGet_(rows[i], h, 'penerobosemail', 3) || ''),
+          periodeId: String(hGet_(rows[i], h, 'periodeid', 1) || '')
+        };
+        break;
+      }
+    }
+    if (!stData) return { success: false, message: 'Serah Terima tidak ditemukan' };
+    if (stData.status !== 'Menunggu') return { success: false, message: 'Serah Terima sudah dikonfirmasi' };
+
+    // Pastikan Bendahara konfirmasi sesuai tujuan
+    var role = auth.user.role;
+    if (role === CONFIG.ROLES.BENDAHARA_1 && stData.sumberTujuan !== 'Tunai')
+      return { success: false, message: 'Anda hanya bisa konfirmasi serah terima Tunai' };
+    if (role === CONFIG.ROLES.BENDAHARA_2 && stData.sumberTujuan !== 'Bank')
+      return { success: false, message: 'Anda hanya bisa konfirmasi serah terima Bank' };
+
+    // Auto-ensure jenis "Serah Terima Penerobos" ada di Master Pemasukan
+    var stJenisId = 'ST-AUTO';
+    var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetMaster) {
+      var mr = sheetMaster.getDataRange().getValues();
+      var foundJenis = false;
+      for (var mi = 1; mi < mr.length; mi++) {
+        if (String(mr[mi][0]) === stJenisId) { foundJenis = true; break; }
+      }
+      if (!foundJenis) {
+        sheetMaster.appendRow([stJenisId, 'Serah Terima Penerobos', 'Umum', 0, 0, 0, 'manual', 'Aktif']);
+        try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
+      }
+    }
+
+    // Buat INPUT_PENERIMAAN
+    var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (!sheetP) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
+    var penId = generateID('TRX');
+    var now = toDateStr_(new Date());
+    sheetP.appendRow([penId, stData.periodeId, stJenisId, '', now, stData.total, stData.sumberTujuan,
+      'Serah Terima dari: ' + stData.penerobosEmail + (stData.total ? '' : ''), auth.user.email, now]);
+
+    // Update Serah Terima
+    var colStatus = (h['status'] !== undefined ? h['status'] : 7) + 1;
+    var colKonfBy = (h['dikonfirmasiby'] !== undefined ? h['dikonfirmasiby'] : 8) + 1;
+    var colKonfAt = (h['dikonfirmasiat'] !== undefined ? h['dikonfirmasiat'] : 9) + 1;
+    var colPenId  = (h['penerimaanid'] !== undefined ? h['penerimaanid'] : 10) + 1;
+    stSheet.getRange(stRow, colStatus).setValue('Dikonfirmasi');
+    stSheet.getRange(stRow, colKonfBy).setValue(auth.user.email);
+    stSheet.getRange(stRow, colKonfAt).setValue(now);
+    stSheet.getRange(stRow, colPenId).setValue(penId);
+
+    try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+    logActivity(auth.user.email, 'KONFIRMASI_SERAH_TERIMA', 'ID: ' + serahTerimaId + ' Nominal: ' + stData.total);
+    return { success: true, penerimaanId: penId };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}

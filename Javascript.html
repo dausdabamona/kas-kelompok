@@ -244,6 +244,8 @@ var App = {
       jamaah: App.can('view.jamaah') ? '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' : '',
       kelolaBuku: App.can('view.kelolaBuku') ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '',
       pemeriksaanSaldo: App.can('view.pemeriksaanSaldo') ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
+      kasPenerobos: App.can('view.kasPenerobos') ? '<div class="menu-item" onclick="App.pageKasPenerobos()"><span class="icon">💼</span><span>Kas Penerobos</span></div>' : '',
+      serahTerima: App.can('view.serahTerima') ? '<div class="menu-item" onclick="App.pageSerahTerima()"><span class="icon">🤲</span><span>Serah Terima</span></div>' : '',
       setoranDesa: App.can('view.setoranDesa') ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '',
       laporanSetoran: App.can('view.laporanSetoran') ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '',
       laporanPDF: App.can('view.laporanPDF') ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '',
@@ -251,7 +253,7 @@ var App = {
     };
     var groups = [
       { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah] },
-      { judul: '💰 Keuangan', items: [item.kelolaBuku, item.pemeriksaanSaldo, item.setoranDesa] },
+      { judul: '💰 Keuangan', items: [item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
       { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF] },
       { judul: '⚙️ Admin', items: [item.setting] }
     ];
@@ -729,6 +731,20 @@ var App = {
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Rekonsiliasi Bank</div><div class="kelola-menu-desc">Cocokkan saldo sistem dengan buku bank</div></div>' +
         '<span>›</span>' +
       '</div>' +
+      (App.can('view.kasPenerobos') ?
+        '<div class="kelola-menu-item" onclick="App.pageKasPenerobos()">' +
+          '<div class="kelola-menu-icon">💼</div>' +
+          '<div class="kelola-menu-text"><div class="kelola-menu-title">Kas Penerobos</div><div class="kelola-menu-desc">Input & kelola kas yang diterima penerobos</div></div>' +
+          '<span>›</span>' +
+        '</div>'
+      : '') +
+      (App.can('view.serahTerima') ?
+        '<div class="kelola-menu-item" onclick="App.pageSerahTerima()">' +
+          '<div class="kelola-menu-icon">🤲</div>' +
+          '<div class="kelola-menu-text"><div class="kelola-menu-title">Serah Terima</div><div class="kelola-menu-desc">Konfirmasi serah terima dari penerobos</div></div>' +
+          '<span>›</span>' +
+        '</div>'
+      : '') +
       (App.can('periode.manage') ?
         '<div class="kelola-menu-item" onclick="App.pageTutupBuku()">' +
           '<div class="kelola-menu-icon">📚</div>' +
@@ -906,6 +922,219 @@ var App = {
       })
       .withFailureHandler(function(e) { self.showError(e.message); })
       .deleteTransaksi({ id: id, tipe: trx.tipe, sumberKas: trx.sumber });
+  },
+
+  // ─────────────────────────────────────────────────
+  // KAS PENEROBOS
+  // ─────────────────────────────────────────────────
+  pageKasPenerobos: function() {
+    this.history.push('kelolaBuku');
+    this.showLoading('Memuat Kas Penerobos...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self._renderKasPenerobos(res);
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .getKasPenerobos();
+  },
+
+  _renderKasPenerobos: function(res) {
+    var self = this;
+    var periodeOpen = res.periode && res.periode.status === 'OPEN';
+    var canInput = App.can('penerobos.input');
+
+    // Store items for checkbox selection
+    App._kpItems = {};
+    (res.data || []).forEach(function(d) { App._kpItems[d.id] = d; });
+
+    var activeItems = (res.data || []).filter(function(d) { return d.status === 'Aktif'; });
+    var rows = (res.data || []).map(function(d) {
+      var badge = d.status === 'Aktif'
+        ? '<span class="badge badge-success">Aktif</span>'
+        : '<span class="badge badge-muted">Diserahkan</span>';
+      var chk = (d.status === 'Aktif' && canInput && periodeOpen)
+        ? '<input type="checkbox" class="kp-check" data-id="' + d.id + '" onchange="App._updateKpBtn()" style="width:18px;height:18px;margin-right:4px;">'
+        : '';
+      return '<div class="trx-item" style="display:flex;align-items:flex-start;gap:8px;">' +
+        chk +
+        '<div style="flex:1;">' +
+          '<div class="trx-item-top">' +
+            '<span class="trx-item-nama">' + (d.jenis || '-') + (d.anggota ? ' · ' + d.anggota : '') + '</span>' +
+            '<span class="trx-item-nominal text-success">' + App.formatNumber(d.nominal) + '</span>' +
+          '</div>' +
+          '<div class="trx-item-meta">' + App.formatDate(d.tanggal) + (d.catatan ? ' · ' + d.catatan : '') + ' ' + badge + '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
+
+    var html = self.pageWrapper('Kas Penerobos',
+      (canInput && periodeOpen ?
+        '<button class="btn btn-primary mb-16" onclick="App._showFormKasPenerobos()">+ Tambah Kas Masuk</button>'
+      : '') +
+      '<div class="card" style="padding:0 16px;" id="kpList">' + rows + '</div>' +
+      (canInput && periodeOpen && activeItems.length > 0 ?
+        '<div id="kpActionBar" style="display:none;margin-top:12px;">' +
+          '<button class="btn btn-warning" id="kpSerahBtn" onclick="App._showModalSerahTerima()">Buat Serah Terima</button>' +
+        '</div>'
+      : '')
+    );
+    document.getElementById('app').innerHTML = html;
+  },
+
+  _updateKpBtn: function() {
+    var checked = document.querySelectorAll('.kp-check:checked').length;
+    var bar = document.getElementById('kpActionBar');
+    if (bar) bar.style.display = checked > 0 ? 'block' : 'none';
+  },
+
+  _showFormKasPenerobos: function() {
+    var self = this;
+    self.showLoading('Memuat master...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        var opts = (res.data || []).filter(function(m) { return m.status !== 'Nonaktif'; }).map(function(m) {
+          return '<option value="' + m.id + '">' + m.nama + '</option>';
+        }).join('');
+        var modal = '<div class="modal-overlay" id="kpFormOverlay" onclick="if(event.target===this)this.remove()">' +
+          '<div class="modal">' +
+            '<h3 class="modal-title">Tambah Kas Masuk</h3>' +
+            '<div class="form-group"><label>Jenis</label><select id="kpJenisId" class="form-control"><option value="">-- Pilih --</option>' + opts + '</select></div>' +
+            '<div class="form-group"><label>Tanggal</label><input type="date" id="kpTanggal" class="form-control" value="' + new Date().toISOString().substr(0,10) + '"></div>' +
+            '<div class="form-group"><label>Nominal</label><input type="text" id="kpNominal" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0"></div>' +
+            '<div class="form-group"><label>Catatan</label><input type="text" id="kpCatatan" class="form-control" placeholder="Opsional"></div>' +
+            '<div class="btn-group" style="margin-top:16px;">' +
+              '<button class="btn btn-secondary" onclick="document.getElementById(\'kpFormOverlay\').remove()">Batal</button>' +
+              '<button class="btn btn-primary" onclick="App._submitKasPenerobos()">Simpan</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+        document.body.insertAdjacentHTML('beforeend', modal);
+        var nomEl = document.getElementById('kpNominal');
+        if (nomEl) App._formatTsep(nomEl);
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .getMasterPemasukan();
+  },
+
+  _submitKasPenerobos: function() {
+    var jenisId = document.getElementById('kpJenisId').value;
+    var tanggal = document.getElementById('kpTanggal').value;
+    var nominal = App.num('kpNominal');
+    var catatan = document.getElementById('kpCatatan').value;
+    if (!jenisId) { alert('Pilih jenis terlebih dahulu'); return; }
+    if (!nominal) { alert('Nominal tidak boleh 0'); return; }
+    var self = this;
+    self.showLoading('Menyimpan...');
+    document.getElementById('kpFormOverlay').remove();
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.pageKasPenerobos();
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .submitKasPenerobos({ jenisId: jenisId, tanggal: tanggal, nominal: nominal, catatan: catatan });
+  },
+
+  _showModalSerahTerima: function() {
+    var checked = document.querySelectorAll('.kp-check:checked');
+    var ids = [];
+    var total = 0;
+    for (var i = 0; i < checked.length; i++) {
+      var id = checked[i].getAttribute('data-id');
+      ids.push(id);
+      if (App._kpItems && App._kpItems[id]) total += App._kpItems[id].nominal || 0;
+    }
+    if (ids.length === 0) { alert('Pilih minimal 1 item'); return; }
+    var modal = '<div class="modal-overlay" id="stFormOverlay" onclick="if(event.target===this)this.remove()">' +
+      '<div class="modal">' +
+        '<h3 class="modal-title">Buat Serah Terima</h3>' +
+        '<div class="stat-row"><span class="stat-label">Jumlah item</span><span class="stat-value">' + ids.length + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Total</span><span class="stat-value text-success">' + App.formatNumber(total) + '</span></div>' +
+        '<div class="form-group" style="margin-top:12px;"><label>Tujuan Kas</label>' +
+          '<select id="stTujuan" class="form-control">' +
+            '<option value="Tunai">Kas Tunai (Bendahara 1)</option>' +
+            '<option value="Bank">Kas Bank (Bendahara 2)</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="form-group"><label>Catatan</label><input type="text" id="stCatatan" class="form-control" placeholder="Opsional"></div>' +
+        '<div class="btn-group" style="margin-top:16px;">' +
+          '<button class="btn btn-secondary" onclick="document.getElementById(\'stFormOverlay\').remove()">Batal</button>' +
+          '<button class="btn btn-primary" onclick="App._submitSerahTerima(' + JSON.stringify(ids) + ')">Kirim</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', modal);
+  },
+
+  _submitSerahTerima: function(ids) {
+    var tujuan = document.getElementById('stTujuan').value;
+    var catatan = document.getElementById('stCatatan').value;
+    var self = this;
+    self.showLoading('Membuat serah terima...');
+    document.getElementById('stFormOverlay').remove();
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.showToast('Serah terima berhasil dibuat');
+        self.pageKasPenerobos();
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .buatSerahTerima({ itemIds: ids, sumberTujuan: tujuan, catatan: catatan });
+  },
+
+  // ─────────────────────────────────────────────────
+  // SERAH TERIMA
+  // ─────────────────────────────────────────────────
+  pageSerahTerima: function() {
+    this.history.push('kelolaBuku');
+    this.showLoading('Memuat serah terima...');
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        var canKonfirmasi = App.can('serahterima.konfirmasi');
+        var rows = (res.data || []).map(function(d) {
+          var statusBadge = d.status === 'Menunggu'
+            ? '<span class="badge badge-warning">Menunggu</span>'
+            : '<span class="badge badge-success">Dikonfirmasi</span>';
+          var konfBtn = (d.status === 'Menunggu' && canKonfirmasi)
+            ? '<button class="btn btn-sm btn-success" style="margin-top:6px;" onclick="App._konfirmasiST(\'' + d.id + '\',\'' + d.penerobosEmail + '\')">Konfirmasi</button>'
+            : '';
+          return '<div class="trx-item">' +
+            '<div class="trx-item-top">' +
+              '<span class="trx-item-nama">' + d.penerobosEmail + ' → ' + (d.sumberTujuan || '-') + '</span>' +
+              '<span class="trx-item-nominal text-success">' + App.formatNumber(d.total) + '</span>' +
+            '</div>' +
+            '<div class="trx-item-meta">' + App.formatDate(d.tanggalSerah) + (d.catatan ? ' · ' + d.catatan : '') + ' ' + statusBadge + '</div>' +
+            (d.status === 'Dikonfirmasi' ? '<div class="trx-item-meta text-muted">Dikonfirmasi oleh: ' + d.dikonfirmasiBy + '</div>' : '') +
+            konfBtn +
+          '</div>';
+        }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
+
+        var html = self.pageWrapper('Serah Terima',
+          '<div class="card" style="padding:0 16px;">' + rows + '</div>'
+        );
+        document.getElementById('app').innerHTML = html;
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .getSerahTerimaList();
+  },
+
+  _konfirmasiST: function(id, dari) {
+    if (!confirm('Konfirmasi serah terima dari ' + dari + '?\nUang akan masuk ke kas sesuai tujuan.')) return;
+    var self = this;
+    self.showLoading('Memproses...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.showToast('Serah terima dikonfirmasi, pemasukan dicatat otomatis');
+        self.pageSerahTerima();
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .konfirmasiSerahTerima(id);
   },
 
   pageTutupBuku: function() {
