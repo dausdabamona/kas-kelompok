@@ -2750,8 +2750,14 @@ var App = {
     if (!d) return '-';
     try {
       var dt = new Date(d);
-      var months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-      return dt.getDate() + ' ' + months[dt.getMonth()] + ' ' + dt.getFullYear();
+      if (isNaN(dt.getTime())) return String(d);
+      var months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+      var days = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+      var str = days[dt.getDay()] + ', ' + dt.getDate() + ' ' + months[dt.getMonth()] + ' ' + dt.getFullYear();
+      // Tampilkan jam jika ada komponen waktu (bukan hanya tanggal)
+      var h = dt.getHours(), m = dt.getMinutes();
+      if (h !== 0 || m !== 0) str += ', ' + String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ' WIB';
+      return str;
     } catch(e) { return String(d); }
   },
 
