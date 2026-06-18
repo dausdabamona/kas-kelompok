@@ -417,6 +417,18 @@ function submitTransaksi(data) {
     }
 
     if (data.tipe === 'masuk') {
+      // Penerobos: tulis ke KAS_PENEROBOS dulu (belum masuk kas utama)
+      if (auth.user.role === CONFIG.ROLES.PENEROBOS) {
+        var kpSheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+        if (!kpSheet) {
+          kpSheet = ss.insertSheet(CONFIG.SHEETS.KAS_PENEROBOS);
+          kpSheet.appendRow(['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Sumber Kas', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At']);
+        }
+        kpSheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', Number(data.nominal), data.sumberKas || 'Tunai', data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(now)]);
+        logActivity(auth.user.email, 'KAS_PENEROBOS_VIA_TRX', 'Nominal: ' + data.nominal);
+        try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+        return { success: true, id: id, viaPenerobos: true };
+      }
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
       if (!sheet) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
       sheet.appendRow([id, periode.id, data.jenisId, data.anggotaId || '', tgl, Number(data.nominal), data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now)]);
@@ -3098,11 +3110,11 @@ function submitKasPenerobos(data) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.KAS_PENEROBOS);
-      sheet.appendRow(['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At']);
+      sheet.appendRow(['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Sumber Kas', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At']);
     }
     var id = generateID('KP');
     var tgl = toDateStr_(data.tanggal ? new Date(data.tanggal) : new Date());
-    sheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', Number(data.nominal) || 0, data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(new Date())]);
+    sheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', Number(data.nominal) || 0, data.sumberKas || 'Tunai', data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(new Date())]);
     logActivity(auth.user.email, 'KAS_PENEROBOS', 'Nominal: ' + data.nominal);
     return { success: true, id: id };
   } catch(e) {
@@ -3143,7 +3155,7 @@ function getKasPenerobos() {
     for (var i = 1; i < rows.length; i++) {
       if (!hGet_(rows[i], h, 'id', 0)) continue;
       if (periodeId && String(hGet_(rows[i], h, 'periodeid', 1)) !== periodeId) continue;
-      var email = String(hGet_(rows[i], h, 'penerobosemail', 7) || '');
+      var email = String(hGet_(rows[i], h, 'penerobosemail', 8) || '');
       if (!isAdmin && email !== auth.user.email) continue;
       var jenisId = String(hGet_(rows[i], h, 'jenisid', 3) || '');
       var anggotaId = String(hGet_(rows[i], h, 'anggotaid', 4) || '');
@@ -3156,10 +3168,11 @@ function getKasPenerobos() {
         anggotaId: anggotaId,
         anggota: angMap[anggotaId] || '',
         nominal: Number(hGet_(rows[i], h, 'nominal', 5)) || 0,
-        catatan: String(hGet_(rows[i], h, 'catatan', 6) || ''),
+        sumberKas: String(hGet_(rows[i], h, 'sumberkas', 6) || 'Tunai'),
+        catatan: String(hGet_(rows[i], h, 'catatan', 7) || ''),
         penerobosEmail: email,
-        status: String(hGet_(rows[i], h, 'status', 8) || 'Aktif'),
-        serahTerimaId: String(hGet_(rows[i], h, 'serahterimaid', 9) || '')
+        status: String(hGet_(rows[i], h, 'status', 9) || 'Aktif'),
+        serahTerimaId: String(hGet_(rows[i], h, 'serahterimaid', 10) || '')
       });
     }
     result.sort(function(a, b) { return b.tanggal.localeCompare(a.tanggal); });
@@ -3183,8 +3196,8 @@ function buatSerahTerima(data) {
     var rows = sheet.getDataRange().getValues();
     var h = headerMap_(rows[0]);
     var isAdmin = auth.user.role === CONFIG.ROLES.ADMIN;
-    var colStatus = (h['status'] !== undefined ? h['status'] : 8) + 1;
-    var colSerahId = (h['serahterimaid'] !== undefined ? h['serahterimaid'] : 9) + 1;
+    var colStatus = (h['status'] !== undefined ? h['status'] : 9) + 1;
+    var colSerahId = (h['serahterimaid'] !== undefined ? h['serahterimaid'] : 10) + 1;
     var periodeId = null;
     var total = 0;
     var matchedRows = [];
@@ -3195,9 +3208,9 @@ function buatSerahTerima(data) {
       var found = false;
       for (var i = 1; i < rows.length; i++) {
         if (String(hGet_(rows[i], h, 'id', 0)) !== targetId) continue;
-        var email = String(hGet_(rows[i], h, 'penerobosemail', 7) || '');
+        var email = String(hGet_(rows[i], h, 'penerobosemail', 8) || '');
         if (!isAdmin && email !== auth.user.email) return { success: false, message: 'Item bukan milik Anda: ' + targetId };
-        var status = String(hGet_(rows[i], h, 'status', 8) || '');
+        var status = String(hGet_(rows[i], h, 'status', 9) || '');
         if (status !== 'Aktif') return { success: false, message: 'Item sudah diserahkan: ' + targetId };
         var pid = String(hGet_(rows[i], h, 'periodeid', 1) || '');
         if (!periodeId) periodeId = pid;
@@ -3357,6 +3370,67 @@ function konfirmasiSerahTerima(serahTerimaId) {
     try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
     logActivity(auth.user.email, 'KONFIRMASI_SERAH_TERIMA', 'ID: ' + serahTerimaId + ' Nominal: ' + stData.total);
     return { success: true, penerimaanId: penId };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function migrasiTransaksiPenerobos() {
+  try {
+    var auth = requirePerm('master.manage');
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+
+    // Kumpulkan email semua user PENEROBOS
+    var userList = getUserList_();
+    var penerobosEmails = {};
+    for (var u = 0; u < userList.length; u++) {
+      if (userList[u].role === CONFIG.ROLES.PENEROBOS) penerobosEmails[userList[u].email] = true;
+    }
+    if (Object.keys(penerobosEmails).length === 0) return { success: true, count: 0, message: 'Tidak ada user PENEROBOS' };
+
+    var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (!sheetP || sheetP.getLastRow() < 2) return { success: true, count: 0 };
+
+    var kpSheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    if (!kpSheet) {
+      kpSheet = ss.insertSheet(CONFIG.SHEETS.KAS_PENEROBOS);
+      kpSheet.appendRow(['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Sumber Kas', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At']);
+    }
+
+    var rows = sheetP.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var toDelete = [];
+    var count = 0;
+    var now = toDateStr_(new Date());
+
+    for (var i = rows.length - 1; i >= 1; i--) {
+      var createdBy = String(hGet_(rows[i], h, 'createdby', 8) || '');
+      if (!penerobosEmails[createdBy]) continue;
+      var rowId = String(hGet_(rows[i], h, 'id', 0) || '');
+      if (!rowId) continue;
+      var periodeId2 = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+      var tgl2 = toDateStr_(hGet_(rows[i], h, 'tanggal', 4));
+      var jenisId2 = String(hGet_(rows[i], h, 'jenisid', 2) || '');
+      var anggotaId2 = String(hGet_(rows[i], h, 'anggotaid', 3) || '');
+      var nominal2 = Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
+      var sumberKas2 = String(hGet_(rows[i], h, 'sumberkas', 6) || 'Tunai');
+      var catatan2 = String(hGet_(rows[i], h, 'catatan', 7) || '');
+      // Buat ID baru agar tidak bentrok
+      var kpId = 'KP_MIG_' + rowId;
+      kpSheet.appendRow([kpId, periodeId2, tgl2, jenisId2, anggotaId2, nominal2, sumberKas2, catatan2, createdBy, 'Aktif', '', now]);
+      toDelete.push(i + 1);
+      count++;
+    }
+
+    // Hapus dari INPUT_PENERIMAAN (dari bawah agar index tidak geser)
+    for (var d = 0; d < toDelete.length; d++) {
+      sheetP.deleteRow(toDelete[d]);
+    }
+
+    try { CacheService.getScriptCache().remove('dashboard_saldo'); CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
+    logActivity(auth.user.email, 'MIGRASI_KAS_PENEROBOS', 'Count: ' + count);
+    return { success: true, count: count };
   } catch(e) {
     return { success: false, message: e.message };
   }

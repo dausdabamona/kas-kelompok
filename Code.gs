@@ -288,8 +288,8 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.KAS_PENEROBOS,
-      headers: ['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At'],
-      note: 'Status: Aktif / Diserahkan | JANGAN edit manual'
+      headers: ['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Sumber Kas', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At'],
+      note: 'Status: Aktif / Diserahkan | Sumber Kas: Tunai / Bank | JANGAN edit manual'
     },
     {
       name: CONFIG.SHEETS.SERAH_TERIMA,

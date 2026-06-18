@@ -297,6 +297,10 @@ var App = {
     var formHtml = '';
     var today = new Date().toISOString().split('T')[0];
 
+    if (tipe === 'masuk' && App.currentUser && App.currentUser.role === 'PENEROBOS') {
+      formHtml += '<div class="info-box" style="margin-bottom:12px;">💼 Pemasukan Anda akan dicatat sebagai <b>Kas Penerobos</b> dan menunggu serah terima ke bendahara.</div>';
+    }
+
     if (tipe === 'masuk') {
       // Filter lenient: tampilkan semua kecuali yang statusnya eksplisit 'Nonaktif'
       var filteredP = (masterP || []).filter(function(p) {
@@ -2135,9 +2139,31 @@ var App = {
       (App.can('user.manage') ? '<div class="kelola-menu-item" onclick="App.pageKelolaUser()">' +
         '<div class="kelola-menu-icon">👤</div>' +
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Kelola User</div><div class="kelola-menu-desc">Tambah, edit, aktif/nonaktif user</div></div><span>›</span>' +
-      '</div>' : '')
+      '</div>' : '') +
+      (App.can('master.manage') ?
+        '<div class="section-title" style="margin-top:20px;margin-bottom:8px;">🔧 Alat Admin</div>' +
+        '<div class="card" style="padding:14px 16px;">' +
+          '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">Migrasi Kas Penerobos</div>' +
+          '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Pindahkan transaksi pemasukan dari user PENEROBOS di Input Penerimaan ke Kas Penerobos.</div>' +
+          '<button class="btn btn-warning btn-sm" onclick="App._jalankanMigrasiPenerobos()">Jalankan Migrasi</button>' +
+        '</div>'
+      : '')
     );
     document.getElementById('app').innerHTML = html;
+  },
+
+  _jalankanMigrasiPenerobos: function() {
+    if (!confirm('Pindahkan semua transaksi pemasukan dari user PENEROBOS ke Kas Penerobos?\n\nTindakan ini tidak bisa diurungkan.')) return;
+    var self = this;
+    self.showLoading('Memproses migrasi...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        self.showToast('Migrasi selesai: ' + res.count + ' transaksi dipindahkan');
+        self.pageSetting();
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .migrasiTransaksiPenerobos();
   },
 
   // ─────────────────────────────────────────────────
