@@ -2,13 +2,38 @@ function getCurrentUser() {
   try {
     var props = PropertiesService.getUserProperties();
     var email = props.getProperty('userEmail');
-    var nama = props.getProperty('userName');
-    var role = props.getProperty('userRole');
+
+    // Jika belum ada session tersimpan, ambil dari Google session
+    if (!email) {
+      try { email = Session.getActiveUser().getEmail(); } catch(e) {}
+    }
     if (!email) return null;
-    return { email: email, nama: nama, role: role, perms: getPermsForRole_(role) };
+
+    // Cari user di Master User
+    var users = getUserList_();
+    for (var i = 0; i < users.length; i++) {
+      if (users[i].email.toLowerCase().trim() === email.toLowerCase().trim()) {
+        var user = users[i];
+        if (String(user.status || 'Aktif').toLowerCase() === 'nonaktif') {
+          return { notRegistered: true, nonaktif: true, email: email };
+        }
+        // Simpan ke props agar panggilan berikutnya lebih cepat
+        props.setProperty('userEmail', user.email);
+        props.setProperty('userName', user.nama);
+        props.setProperty('userRole', user.role);
+        user.perms = getPermsForRole_(user.role);
+        return user;
+      }
+    }
+    // Email Google terdeteksi tapi tidak terdaftar di Master User
+    return { notRegistered: true, email: email };
   } catch(e) {
     return null;
   }
+}
+
+function getGoogleEmail() {
+  try { return Session.getActiveUser().getEmail() || ''; } catch(e) { return ''; }
 }
 
 // ── HAK AKSES (PERMISSION) ──────────────────────────────
