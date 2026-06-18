@@ -2331,10 +2331,12 @@ var App = {
   renderKelolaUser: function(users) {
     var self = this;
     var myEmail = (App.currentUser && App.currentUser.email || '').toLowerCase();
+    App._userMap = {};
+    users.forEach(function(u) { App._userMap[u.email] = u; });
     var cards = users.map(function(u) {
       var aktif = String(u.status || 'Aktif').toLowerCase() !== 'nonaktif';
       var isSelf = String(u.email).toLowerCase() === myEmail;
-      var ujson = JSON.stringify(u).replace(/'/g, '&#39;');
+      var safeEmail = u.email.replace(/'/g, '&#39;');
       return '<div class="card" style="margin-bottom:10px;">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
           '<div>' +
@@ -2347,9 +2349,9 @@ var App = {
           '</div>' +
         '</div>' +
         '<div style="display:flex;gap:6px;margin-top:10px;">' +
-          '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;" onclick="App.showFormUser(' + ujson + ')">✏️ Edit</button>' +
-          '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;" onclick="App.toggleUserStatus(\'' + u.email + '\',\'' + (aktif ? 'Nonaktif' : 'Aktif') + '\')">' + (aktif ? '🚫 Nonaktif' : '✅ Aktifkan') + '</button>' +
-          (isSelf ? '' : '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;color:#dc2626;" onclick="App.hapusUser(\'' + u.email + '\')">🗑️ Hapus</button>') +
+          '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;" onclick="App.showFormUser(App._userMap[\'' + safeEmail + '\'])">✏️ Edit</button>' +
+          '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;" onclick="App.toggleUserStatus(\'' + safeEmail + '\',\'' + (aktif ? 'Nonaktif' : 'Aktif') + '\')">' + (aktif ? '🚫 Nonaktif' : '✅ Aktifkan') + '</button>' +
+          (isSelf ? '' : '<button class="btn btn-outline" style="flex:1;padding:5px;font-size:12px;color:#dc2626;" onclick="App.hapusUser(\'' + safeEmail + '\')">🗑️ Hapus</button>') +
         '</div>' +
       '</div>';
     }).join('') || '<div class="text-center text-muted" style="padding:24px;">Belum ada user.</div>';
