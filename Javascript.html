@@ -297,8 +297,9 @@ var App = {
 
     var formHtml = '';
     var today = new Date().toISOString().split('T')[0];
+    var isPenerobos = App.currentUser && App.currentUser.role === 'PENEROBOS';
 
-    if (tipe === 'masuk' && App.currentUser && App.currentUser.role === 'PENEROBOS') {
+    if (tipe === 'masuk' && isPenerobos) {
       formHtml += '<div class="info-box" style="margin-bottom:12px;">💼 Pemasukan Anda akan dicatat sebagai <b>Kas Penerobos</b> dan menunggu serah terima ke bendahara.</div>';
     }
 
@@ -359,8 +360,8 @@ var App = {
     var html = this.pageWrapper('Input Transaksi',
       '<div class="tabs">' +
         '<button class="tab-btn' + (tipe === 'masuk' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'masuk\', App._masterP, App._masterPK, App._anggota)">💚 Masuk</button>' +
-        '<button class="tab-btn' + (tipe === 'keluar' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'keluar\', App._masterP, App._masterPK, App._anggota)">❤️ Keluar</button>' +
-        '<button class="tab-btn' + (tipe === 'mutasi' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'mutasi\', App._masterP, App._masterPK, App._anggota)">🔄 Mutasi</button>' +
+        (isPenerobos ? '' : '<button class="tab-btn' + (tipe === 'keluar' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'keluar\', App._masterP, App._masterPK, App._anggota)">❤️ Keluar</button>') +
+        (isPenerobos ? '' : '<button class="tab-btn' + (tipe === 'mutasi' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'mutasi\', App._masterP, App._masterPK, App._anggota)">🔄 Mutasi</button>') +
       '</div>' +
       formHtml +
       '<div id="trxError"></div>' +
