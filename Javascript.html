@@ -247,7 +247,7 @@ var App = {
       pemeriksaanSaldo: (!isPenerobos && App.can('view.pemeriksaanSaldo')) ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
       kasPenerobos: App.can('view.kasPenerobos') ? '<div class="menu-item" onclick="App.pageKasPenerobos()"><span class="icon">💼</span><span>Kas Penerobos</span></div>' : '',
       serahTerima: App.can('view.serahTerima') ? '<div class="menu-item" onclick="App.pageSerahTerima()"><span class="icon">🤲</span><span>Serah Terima</span></div>' : '',
-      setoranDesa: App.can('view.setoranDesa') ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '',
+      setoranDesa: (!isPenerobos && App.can('view.setoranDesa')) ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '',
       laporanSetoran: (!isPenerobos && App.can('view.laporanSetoran')) ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '',
       laporanPDF: (!isPenerobos && App.can('view.laporanPDF')) ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '',
       setting: (!isPenerobos && App.can('view.setting')) ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : ''
