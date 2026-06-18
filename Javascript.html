@@ -238,18 +238,19 @@ var App = {
   // Menu dashboard berkelompok (Opsi B). Grup hanya tampil bila ada isinya.
   _renderMenuGroups: function(data) {
     var alertBuku = data.belumDirincikanCount > 0;
+    var isPenerobos = App.currentUser && App.currentUser.role === 'PENEROBOS';
     var item = {
-      bukuIR: App.can('view.bukuIR') ? '<div class="menu-item' + (alertBuku ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()"><span class="icon">📖</span><span>Buku IR' + (alertBuku ? ' <span class="menu-badge">' + data.belumDirincikanCount + '</span>' : '') + '</span></div>' : '',
+      bukuIR: (!isPenerobos && App.can('view.bukuIR')) ? '<div class="menu-item' + (alertBuku ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()"><span class="icon">📖</span><span>Buku IR' + (alertBuku ? ' <span class="menu-badge">' + data.belumDirincikanCount + '</span>' : '') + '</span></div>' : '',
       terobosan: App.can('view.terobosan') ? '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Terobosan Kelompok</span></div>' : '',
       jamaah: App.can('view.jamaah') ? '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' : '',
-      kelolaBuku: App.can('view.kelolaBuku') ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '',
-      pemeriksaanSaldo: App.can('view.pemeriksaanSaldo') ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
+      kelolaBuku: (!isPenerobos && App.can('view.kelolaBuku')) ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '',
+      pemeriksaanSaldo: (!isPenerobos && App.can('view.pemeriksaanSaldo')) ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
       kasPenerobos: App.can('view.kasPenerobos') ? '<div class="menu-item" onclick="App.pageKasPenerobos()"><span class="icon">💼</span><span>Kas Penerobos</span></div>' : '',
       serahTerima: App.can('view.serahTerima') ? '<div class="menu-item" onclick="App.pageSerahTerima()"><span class="icon">🤲</span><span>Serah Terima</span></div>' : '',
       setoranDesa: App.can('view.setoranDesa') ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '',
-      laporanSetoran: App.can('view.laporanSetoran') ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '',
-      laporanPDF: App.can('view.laporanPDF') ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '',
-      setting: App.can('view.setting') ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : ''
+      laporanSetoran: (!isPenerobos && App.can('view.laporanSetoran')) ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '',
+      laporanPDF: (!isPenerobos && App.can('view.laporanPDF')) ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '',
+      setting: (!isPenerobos && App.can('view.setting')) ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : ''
     };
     var groups = [
       { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah] },
