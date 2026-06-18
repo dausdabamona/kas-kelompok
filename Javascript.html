@@ -2021,11 +2021,11 @@ var App = {
     var rows = aktif.map(function(a) {
       var grade = (a.grade || '').toUpperCase();
       return '<div class="stat-row" style="padding:8px 4px;border-bottom:1px solid #f3f4f6;">' +
-        '<span style="font-size:13px;">' + a.nama + '</span>' +
-        '<select onchange="App.simpanGrade(\'' + a.id + '\',this.value)" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">' +
-          '<option value="" ' + (!grade ? 'selected' : '') + '>— Belum —</option>' +
+        '<span style="font-size:13px;flex:1;">' + a.nama + '</span>' +
+        '<select onchange="App.simpanGrade(\'' + a.id + '\',this.value)" style="padding:5px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:60px;text-align:center;">' +
+          '<option value="" ' + (!grade ? 'selected' : '') + '>-</option>' +
           ['A','B','C','D','E'].map(function(g) {
-            return '<option value="' + g + '" ' + (grade === g ? 'selected' : '') + '>Grade ' + g + '</option>';
+            return '<option value="' + g + '" ' + (grade === g ? 'selected' : '') + '>' + g + '</option>';
           }).join('') +
         '</select>' +
       '</div>';
