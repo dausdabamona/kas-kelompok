@@ -18,6 +18,11 @@ var App = {
   },
 
   // Format input angka dengan pemisah ribuan (id-ID), pertahankan posisi kursor.
+  _formatAllTsep: function() {
+    var self = this;
+    document.querySelectorAll('[data-tsep]').forEach(function(el) { self._formatTsep(el); });
+  },
+
   _formatTsep: function(el) {
     var raw = String(el.value).replace(/[^0-9]/g, '');
     var pos = el.selectionStart || 0;
@@ -47,6 +52,13 @@ var App = {
         var t = e.target;
         if (t && t.matches && t.matches('[data-tsep]')) self._formatTsep(t);
       }, true);
+      // Format otomatis setiap kali konten #app berubah (menangkap semua render)
+      var appEl = document.getElementById('app');
+      if (appEl && window.MutationObserver) {
+        new MutationObserver(function() {
+          setTimeout(function() { self._formatAllTsep(); }, 50);
+        }).observe(appEl, { childList: true, subtree: false });
+      }
       this._tsepBound = true;
     }
     google.script.run
@@ -328,7 +340,7 @@ var App = {
         '<select id="trxSumber"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>' +
         '<div class="form-group"><label>Tanggal</label><input type="date" id="trxTanggal" value="' + today + '"/></div>' +
         '<div class="form-group"><label>Catatan</label><textarea id="trxCatatan" placeholder="Opsional..."></textarea></div>';
-      setTimeout(function() { App.onJenisMasukChange(); }, 100);
+      setTimeout(function() { App.onJenisMasukChange(); App._formatAllTsep(); }, 100);
     } else if (tipe === 'keluar') {
       var filteredPK = (masterPK || []).filter(function(p) {
         var s = (p.status || '').toString().trim().toLowerCase();
@@ -571,7 +583,7 @@ var App = {
       '<button class="btn btn-primary" onclick="App.submitRincianIR()">' + (isEdit ? 'Simpan Perubahan' : 'Simpan Rincian') + '</button>'
     );
     document.getElementById('app').innerHTML = html;
-    setTimeout(function() { App.cekTotalRincian(); }, 100);
+    setTimeout(function() { App.cekTotalRincian(); App._formatAllTsep(); }, 100);
   },
 
   cekTotalRincian: function() {
@@ -1524,7 +1536,7 @@ var App = {
       lastInfo + sysCard + form
     );
     document.getElementById('app').innerHTML = html;
-    setTimeout(function() { App.cekSelisihSaldo(); }, 100);
+    setTimeout(function() { App.cekSelisihSaldo(); App._formatAllTsep(); }, 100);
   },
 
   cekSelisihSaldo: function() {
