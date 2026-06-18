@@ -209,12 +209,12 @@ var App = {
         '</div>' +
       '</div>' +
 
-      '<div class="total-card">' +
+      (u.role !== 'PENEROBOS' ? '<div class="total-card">' +
         '<div class="total-label">💰 Total Kas</div>' +
         '<div class="total-amount">' + this.formatNumber(data.totalKas || 0) + '</div>' +
-      '</div>' +
+      '</div>' : '') +
 
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">' +
+      (u.role !== 'PENEROBOS' ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">' +
         '<div class="kas-card tunai">' +
           '<div class="kas-label">🪙 Kas Tunai</div>' +
           '<div class="kas-amount">' + this.formatNumber(data.kasTunai || 0) + '</div>' +
@@ -223,7 +223,7 @@ var App = {
           '<div class="kas-label">🏦 Kas Bank</div>' +
           '<div class="kas-amount">' + this.formatNumber(data.kasBank || 0) + '</div>' +
         '</div>' +
-      '</div>' +
+      '</div>' : '') +
 
       '<button class="btn btn-success mb-16" onclick="App.pageTransaksi()">+ Input Transaksi</button>' +
 
