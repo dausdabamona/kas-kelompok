@@ -1894,6 +1894,11 @@ function generatePDF(periodeId) {
         rekap.terobosan = terobosan;
       }
     } catch(e) {}
+    try {
+      var ss2 = getSS_();
+      var stList = getSerahTerimaForPDF_(ss2, (rekap.periode && rekap.periode.id) ? rekap.periode.id : '');
+      if (stList && stList.length > 0) rekap.serahTerima = stList;
+    } catch(e) {}
 
     var html = buildPDFHTML(rekap);
     // Kirim HTML string ke client — browser akan render langsung via window.open
@@ -2143,6 +2148,39 @@ function buildPDFHTML(data) {
       html += '<tr><td colspan="3" style="' + S.tot + '">Belum Bayar</td><td style="' + S.totR + '">' + fmtRp(t.totalBelum) + '</td><td style="' + S.tot + '"></td></tr>';
       html += '</table>';
     });
+  }
+
+  // ── G. Serah Terima Penerobos ──
+  if (data.serahTerima && data.serahTerima.length > 0) {
+    html += '<h2 style="' + S.h2 + '">G. Serah Terima Penerobos</h2>';
+    html += '<table style="' + S.tbl + '"><tr>' +
+      '<th style="' + S.th + '">Tanggal</th>' +
+      '<th style="' + S.th + '">Dari (Penerobos)</th>' +
+      '<th style="' + S.th + '">Dikonfirmasi Oleh</th>' +
+      '<th style="' + S.th + '">Tujuan</th>' +
+      '<th style="' + S.thR + '">Total</th>' +
+      '</tr>';
+    var totalST = 0;
+    data.serahTerima.forEach(function(st, idx) {
+      var bg = idx % 2 === 0 ? '' : 'background:#f9fafb;';
+      var td = 'padding:4px 8px;border:1px solid #d1d5db;vertical-align:top;' + bg;
+      var tdR = 'padding:4px 8px;border:1px solid #d1d5db;text-align:right;vertical-align:top;' + bg;
+      html += '<tr>' +
+        '<td style="' + td + '">' + (st.tanggal ? fmtTanggal(st.tanggal) : '-') + '</td>' +
+        '<td style="' + td + '">' + esc_(st.penerobosEmail) + '</td>' +
+        '<td style="' + td + '">' + esc_(st.dikonfirmasiBy) + '</td>' +
+        '<td style="' + td + '">' + esc_(st.sumberTujuan) + '</td>' +
+        '<td style="' + tdR + '">' + fmtRp(st.total) + '</td>' +
+        '</tr>';
+      // Rincian items
+      if (st.items && st.items.length > 0) {
+        var itemStr = st.items.map(function(it) { return esc_(it.jenisNama) + ': ' + fmtRp(it.nominal); }).join(' &nbsp;|&nbsp; ');
+        html += '<tr><td colspan="5" style="padding:2px 8px 6px 20px;border:1px solid #d1d5db;font-size:11px;color:#555;">' + itemStr + '</td></tr>';
+      }
+      totalST += st.total;
+    });
+    html += '<tr><td colspan="4" style="' + S.tot + '">Total Serah Terima</td><td style="' + S.totR + '">' + fmtRp(totalST) + '</td></tr>';
+    html += '</table>';
   }
 
   html += '<div style="' + S.foot + '">Laporan ini dibuat otomatis oleh sistem Kas Kelompok pada ' + cetakTgl + '.</div>';
@@ -3334,28 +3372,36 @@ function konfirmasiSerahTerima(serahTerimaId) {
     if (role === CONFIG.ROLES.BENDAHARA_2 && stData.sumberTujuan !== 'Bank')
       return { success: false, message: 'Anda hanya bisa konfirmasi serah terima Bank' };
 
-    // Auto-ensure jenis "Serah Terima Penerobos" ada di Master Pemasukan
-    var stJenisId = 'ST-AUTO';
-    var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
-    if (sheetMaster) {
-      var mr = sheetMaster.getDataRange().getValues();
-      var foundJenis = false;
-      for (var mi = 1; mi < mr.length; mi++) {
-        if (String(mr[mi][0]) === stJenisId) { foundJenis = true; break; }
-      }
-      if (!foundJenis) {
-        sheetMaster.appendRow([stJenisId, 'Serah Terima Penerobos', 'Umum', 0, 0, 0, 'manual', 'Aktif']);
-        try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
+    // Ambil semua item KAS_PENEROBOS untuk serah terima ini
+    var kpSheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    if (!kpSheet) return { success: false, message: 'Sheet Kas Penerobos tidak ditemukan' };
+    var kpRows = kpSheet.getDataRange().getValues();
+    var kpH = headerMap_(kpRows[0]);
+    var items = [];
+    for (var ki = 1; ki < kpRows.length; ki++) {
+      if (String(hGet_(kpRows[ki], kpH, 'serahterimaid', 10)) === serahTerimaId) {
+        items.push({
+          jenisId:  String(hGet_(kpRows[ki], kpH, 'jenisid', 3) || ''),
+          anggotaId: String(hGet_(kpRows[ki], kpH, 'anggotaid', 4) || ''),
+          nominal:  Number(hGet_(kpRows[ki], kpH, 'nominal', 5)) || 0,
+          catatan:  String(hGet_(kpRows[ki], kpH, 'catatan', 7) || '')
+        });
       }
     }
+    if (items.length === 0) return { success: false, message: 'Tidak ada item kas penerobos untuk serah terima ini' };
 
-    // Buat INPUT_PENERIMAAN
+    // Buat INPUT_PENERIMAAN per item
     var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
     if (!sheetP) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
-    var penId = generateID('TRX');
     var now = toDateStr_(new Date());
-    sheetP.appendRow([penId, stData.periodeId, stJenisId, '', now, stData.total, stData.sumberTujuan,
-      'Serah Terima dari: ' + stData.penerobosEmail + (stData.total ? '' : ''), auth.user.email, now]);
+    var penIds = [];
+    for (var ji = 0; ji < items.length; ji++) {
+      var penId = generateID('TRX');
+      var catatanEntry = 'Serah Terima dari: ' + stData.penerobosEmail + (items[ji].catatan ? ' | ' + items[ji].catatan : '');
+      sheetP.appendRow([penId, stData.periodeId, items[ji].jenisId, items[ji].anggotaId,
+        now, items[ji].nominal, stData.sumberTujuan, catatanEntry, auth.user.email, now]);
+      penIds.push(penId);
+    }
 
     // Update Serah Terima
     var colStatus = (h['status'] !== undefined ? h['status'] : 7) + 1;
@@ -3365,14 +3411,128 @@ function konfirmasiSerahTerima(serahTerimaId) {
     stSheet.getRange(stRow, colStatus).setValue('Dikonfirmasi');
     stSheet.getRange(stRow, colKonfBy).setValue(auth.user.email);
     stSheet.getRange(stRow, colKonfAt).setValue(now);
-    stSheet.getRange(stRow, colPenId).setValue(penId);
+    stSheet.getRange(stRow, colPenId).setValue(penIds.join(','));
 
     try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
-    logActivity(auth.user.email, 'KONFIRMASI_SERAH_TERIMA', 'ID: ' + serahTerimaId + ' Nominal: ' + stData.total);
-    return { success: true, penerimaanId: penId };
+    logActivity(auth.user.email, 'KONFIRMASI_SERAH_TERIMA', 'ID: ' + serahTerimaId + ' Items: ' + items.length + ' Nominal: ' + stData.total);
+    return { success: true, penerimaanIds: penIds, count: items.length };
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+function getSerahTerimaDetail(serahTerimaId) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+
+    var stSheet = ss.getSheetByName(CONFIG.SHEETS.SERAH_TERIMA);
+    if (!stSheet) return { success: false, message: 'Sheet tidak ditemukan' };
+    var rows = stSheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var stData = null;
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) === serahTerimaId) {
+        stData = {
+          id: serahTerimaId,
+          periodeId: String(hGet_(rows[i], h, 'periodeid', 1) || ''),
+          tanggalSerah: toDateStr_(hGet_(rows[i], h, 'tanggalserah', 2)),
+          penerobosEmail: String(hGet_(rows[i], h, 'penerobosemail', 3) || ''),
+          total: Number(hGet_(rows[i], h, 'total', 4)) || 0,
+          sumberTujuan: String(hGet_(rows[i], h, 'sumbertujuan', 5) || ''),
+          catatan: String(hGet_(rows[i], h, 'catatan', 6) || ''),
+          status: String(hGet_(rows[i], h, 'status', 7) || ''),
+          dikonfirmasiBy: String(hGet_(rows[i], h, 'dikonfirmasiby', 8) || ''),
+          dikonfirmasiAt: toDateStr_(hGet_(rows[i], h, 'dikonfirmasiat', 9))
+        };
+        break;
+      }
+    }
+    if (!stData) return { success: false, message: 'Serah Terima tidak ditemukan' };
+
+    // Ambil items KAS_PENEROBOS
+    var kpSheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    var items = [];
+    if (kpSheet) {
+      var kpRows = kpSheet.getDataRange().getValues();
+      var kpH = headerMap_(kpRows[0]);
+      // Build jenis name map
+      var jenisMap = {};
+      var masterSheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+      if (masterSheet) {
+        var mr = masterSheet.getDataRange().getValues();
+        for (var mi = 1; mi < mr.length; mi++) jenisMap[String(mr[mi][0])] = String(mr[mi][1] || '');
+      }
+      for (var ki = 1; ki < kpRows.length; ki++) {
+        if (String(hGet_(kpRows[ki], kpH, 'serahterimaid', 10)) === serahTerimaId) {
+          var jenisId = String(hGet_(kpRows[ki], kpH, 'jenisid', 3) || '');
+          items.push({
+            jenisId: jenisId,
+            jenisNama: jenisMap[jenisId] || jenisId,
+            anggotaId: String(hGet_(kpRows[ki], kpH, 'anggotaid', 4) || ''),
+            nominal: Number(hGet_(kpRows[ki], kpH, 'nominal', 5)) || 0,
+            catatan: String(hGet_(kpRows[ki], kpH, 'catatan', 7) || '')
+          });
+        }
+      }
+    }
+
+    // Info kelompok dari sheet Config jika ada
+    var namaKelompok = 'Kas Kelompok';
+    try {
+      var cfgSheet = ss.getSheetByName('Config');
+      if (cfgSheet) {
+        var cfgRows = cfgSheet.getDataRange().getValues();
+        for (var ci = 0; ci < cfgRows.length; ci++) {
+          if (String(cfgRows[ci][0]).toLowerCase() === 'namakelompok') { namaKelompok = String(cfgRows[ci][1] || namaKelompok); break; }
+        }
+      }
+    } catch(e) {}
+
+    return { success: true, data: stData, items: items, namaKelompok: namaKelompok };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function getSerahTerimaForPDF_(ss, periodeId) {
+  try {
+    var stSheet = ss.getSheetByName(CONFIG.SHEETS.SERAH_TERIMA);
+    if (!stSheet) return [];
+    var rows = stSheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var kpSheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    var kpRows = kpSheet ? kpSheet.getDataRange().getValues() : [[]];
+    var kpH = headerMap_(kpRows[0] || []);
+    var jenisMap = {};
+    var masterSheet = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (masterSheet) {
+      var mr = masterSheet.getDataRange().getValues();
+      for (var mi = 1; mi < mr.length; mi++) jenisMap[String(mr[mi][0])] = String(mr[mi][1] || '');
+    }
+    var result = [];
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'periodeid', 1)) !== periodeId) continue;
+      if (String(hGet_(rows[i], h, 'status', 7)) !== 'Dikonfirmasi') continue;
+      var stId = String(hGet_(rows[i], h, 'id', 0));
+      var items = [];
+      for (var ki = 1; ki < kpRows.length; ki++) {
+        if (String(hGet_(kpRows[ki], kpH, 'serahterimaid', 10)) !== stId) continue;
+        var jId = String(hGet_(kpRows[ki], kpH, 'jenisid', 3) || '');
+        items.push({ jenisNama: jenisMap[jId] || jId, nominal: Number(hGet_(kpRows[ki], kpH, 'nominal', 5)) || 0 });
+      }
+      result.push({
+        tanggal: toDateStr_(hGet_(rows[i], h, 'tanggalserah', 2)),
+        penerobosEmail: String(hGet_(rows[i], h, 'penerobosemail', 3) || ''),
+        total: Number(hGet_(rows[i], h, 'total', 4)) || 0,
+        sumberTujuan: String(hGet_(rows[i], h, 'sumbertujuan', 5) || ''),
+        dikonfirmasiBy: String(hGet_(rows[i], h, 'dikonfirmasiby', 8) || ''),
+        items: items
+      });
+    }
+    return result;
+  } catch(e) { return []; }
 }
 
 function migrasiTransaksiPenerobos() {

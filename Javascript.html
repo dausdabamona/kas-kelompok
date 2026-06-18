@@ -1107,6 +1107,9 @@ var App = {
           var konfBtn = (d.status === 'Menunggu' && canKonfirmasi)
             ? '<button class="btn btn-sm btn-success" style="margin-top:6px;" onclick="App._konfirmasiST(\'' + d.id + '\',\'' + d.penerobosEmail + '\')">Konfirmasi</button>'
             : '';
+          var cetakBtn = d.status === 'Dikonfirmasi'
+            ? '<button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="App._cetakSerahTerima(\'' + d.id + '\')">Cetak</button>'
+            : '';
           return '<div class="trx-item">' +
             '<div class="trx-item-top">' +
               '<span class="trx-item-nama">' + d.penerobosEmail + ' → ' + (d.sumberTujuan || '-') + '</span>' +
@@ -1114,7 +1117,7 @@ var App = {
             '</div>' +
             '<div class="trx-item-meta">' + App.formatDate(d.tanggalSerah) + (d.catatan ? ' · ' + d.catatan : '') + ' ' + statusBadge + '</div>' +
             (d.status === 'Dikonfirmasi' ? '<div class="trx-item-meta text-muted">Dikonfirmasi oleh: ' + d.dikonfirmasiBy + '</div>' : '') +
-            konfBtn +
+            konfBtn + cetakBtn +
           '</div>';
         }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
 
@@ -1134,11 +1137,71 @@ var App = {
     google.script.run
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        self.showToast('Serah terima dikonfirmasi, pemasukan dicatat otomatis');
+        self.showToast('Serah terima dikonfirmasi, ' + (res.count || 1) + ' pemasukan dicatat otomatis');
         self.pageSerahTerima();
       })
       .withFailureHandler(function(e) { self.showError(e.message); })
       .konfirmasiSerahTerima(id);
+  },
+
+  _cetakSerahTerima: function(id) {
+    var self = this;
+    self.showLoading('Memuat rincian...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res.success) { self.showError(res.message); return; }
+        var d = res.data;
+        var items = res.items || [];
+        var namaKelompok = res.namaKelompok || 'Kas Kelompok';
+        var itemRows = items.map(function(it, i) {
+          return '<tr>' +
+            '<td style="padding:6px 10px;border:1px solid #ccc;">' + (i+1) + '</td>' +
+            '<td style="padding:6px 10px;border:1px solid #ccc;">' + it.jenisNama + '</td>' +
+            '<td style="padding:6px 10px;border:1px solid #ccc;text-align:right;">' + App.formatNumber(it.nominal) + '</td>' +
+            '<td style="padding:6px 10px;border:1px solid #ccc;">' + (it.catatan || '-') + '</td>' +
+            '</tr>';
+        }).join('');
+        var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Serah Terima</title>' +
+          '<style>body{font-family:Arial,sans-serif;font-size:13px;padding:20px;max-width:700px;margin:0 auto;}' +
+          'h2{text-align:center;font-size:16px;margin-bottom:2px;}' +
+          '.sub{text-align:center;color:#555;font-size:12px;margin-bottom:16px;}' +
+          'table{width:100%;border-collapse:collapse;margin-bottom:12px;}' +
+          'th{padding:6px 10px;border:1px solid #ccc;background:#f3f4f6;text-align:left;}' +
+          '.info-table td{padding:4px 10px;border:none;vertical-align:top;}' +
+          '.info-table td:first-child{width:160px;font-weight:bold;}' +
+          '.sign-area{display:flex;justify-content:space-between;margin-top:40px;}' +
+          '.sign-box{text-align:center;width:45%;}' +
+          '.sign-line{margin-top:60px;border-top:1px solid #333;padding-top:4px;}' +
+          '@media print{button{display:none!important;}}' +
+          '</style></head><body>' +
+          '<h2>' + namaKelompok + '</h2>' +
+          '<div class="sub">Bukti Serah Terima Kas Penerobos</div>' +
+          '<button onclick="window.print()" style="margin-bottom:12px;padding:6px 16px;cursor:pointer;">🖨️ Cetak</button>' +
+          '<table class="info-table"><tbody>' +
+          '<tr><td>No. Referensi</td><td>: ' + d.id + '</td></tr>' +
+          '<tr><td>Tanggal Serah</td><td>: ' + App.formatDate(d.tanggalSerah) + '</td></tr>' +
+          '<tr><td>Dari (Penerobos)</td><td>: ' + d.penerobosEmail + '</td></tr>' +
+          '<tr><td>Tujuan</td><td>: ' + d.sumberTujuan + '</td></tr>' +
+          '<tr><td>Dikonfirmasi Oleh</td><td>: ' + d.dikonfirmasiBy + '</td></tr>' +
+          '<tr><td>Dikonfirmasi Pada</td><td>: ' + App.formatDate(d.dikonfirmasiAt) + '</td></tr>' +
+          (d.catatan ? '<tr><td>Catatan</td><td>: ' + d.catatan + '</td></tr>' : '') +
+          '</tbody></table>' +
+          '<table><thead><tr><th>#</th><th>Jenis</th><th style="text-align:right;">Nominal</th><th>Catatan</th></tr></thead>' +
+          '<tbody>' + itemRows + '</tbody>' +
+          '<tfoot><tr><td colspan="2" style="padding:6px 10px;border:1px solid #ccc;font-weight:bold;">Total</td>' +
+          '<td style="padding:6px 10px;border:1px solid #ccc;text-align:right;font-weight:bold;">' + App.formatNumber(d.total) + '</td>' +
+          '<td style="padding:6px 10px;border:1px solid #ccc;"></td></tr></tfoot></table>' +
+          '<div class="sign-area">' +
+          '<div class="sign-box"><div>Penerobos</div><div class="sign-line">( ' + d.penerobosEmail + ' )</div></div>' +
+          '<div class="sign-box"><div>Bendahara</div><div class="sign-line">( ' + d.dikonfirmasiBy + ' )</div></div>' +
+          '</div>' +
+          '</body></html>';
+        var w = window.open('', '_blank');
+        if (w) { w.document.write(html); w.document.close(); }
+        self.pageSerahTerima();
+      })
+      .withFailureHandler(function(e) { self.showError(e.message); })
+      .getSerahTerimaDetail(id);
   },
 
   pageTutupBuku: function() {
