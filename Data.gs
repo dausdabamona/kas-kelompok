@@ -1708,11 +1708,17 @@ function getRekapSetoran() {
       var target = 0;
       var sumberKet = '';
       if (sumberTipe === 'bukuir') {
-        var colIdx = mapPosNamaToBukuIRCol(sumberRef, sumberRef, irColMap);
-        if (colIdx >= 0) {
-          for (var r = 0; r < irData.length; r++) target += Number(irData[r][colIdx]) || 0;
+        // Jumlahkan 4 komponen yang disetor ke desa: IR + 1/10 IR + Cicilan + Infak Daerah
+        // Index TIDAK dijumlah — masuk kas kelompok
+        var colIR     = irColMap['ir']           !== undefined ? irColMap['ir']           : 5;
+        var colIR10   = irColMap['ir110']         !== undefined ? irColMap['ir110']         : 6;
+        var colCicilan= irColMap['cicilan']       !== undefined ? irColMap['cicilan']       : 7;
+        var colInfak  = irColMap['infakdaerah']   !== undefined ? irColMap['infakdaerah']   : 8;
+        for (var r = 0; r < irData.length; r++) {
+          target += (Number(irData[r][colIR]) || 0) + (Number(irData[r][colIR10]) || 0)
+                  + (Number(irData[r][colCicilan]) || 0) + (Number(irData[r][colInfak]) || 0);
         }
-        sumberKet = 'Buku IR: ' + sumberRef;
+        sumberKet = 'Buku IR: IR + 1/10 IR + Cicilan + Infak Daerah';
       } else if (sumberTipe === 'pemasukan') {
         var totalMasuk = masukPerJenis[sumberRef] || 0;
         var pct = pctDesaMap[sumberRef];

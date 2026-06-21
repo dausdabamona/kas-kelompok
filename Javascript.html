@@ -573,11 +573,12 @@ var App = {
         '<div class="stat-row"><span class="stat-label">Total Diterima</span><span class="stat-value text-success">' + this.formatNumber(total) + '</span></div>' +
       '</div>' +
       (isEdit ? '<div class="info-box" style="margin-bottom:12px;">✎ Mengubah rincian yang sudah ada. Perubahan dapat dilakukan selama buku belum ditutup.</div>' : '') +
-      '<div class="form-group"><label>IR (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rIR" value="' + vIR + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>1/10 IR (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rIR10" value="' + vIR10 + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Cicilan (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rCicilan" value="' + vCicilan + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Infak Daerah (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rInfakDaerah" value="' + vInfak + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Index (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="rIndex" value="' + vIndex + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>IR (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rIR" value="' + vIR + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>1/10 IR (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rIR10" value="' + vIR10 + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Cicilan (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rCicilan" value="' + vCicilan + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Infak Daerah (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rInfakDaerah" value="' + vInfak + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Index (Rp) <span style="font-size:11px;color:#166534;">→ kas kelompok</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rIndex" value="' + vIndex + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div id="rekapTujuan" style="margin-bottom:12px;"></div>' +
       '<div id="validasiRincian" class="mb-16"></div>' +
       '<div id="rincianError"></div>' +
       '<button class="btn btn-primary" onclick="App.submitRincianIR()">' + (isEdit ? 'Simpan Perubahan' : 'Simpan Rincian') + '</button>'
@@ -599,6 +600,15 @@ var App = {
       el.innerHTML = '<div class="valid-indicator ok">✓ Total sesuai: ' + this.formatNumber(totalRincian) + '</div>';
     } else {
       el.innerHTML = '<div class="valid-indicator error">✗ Total rincian: ' + this.formatNumber(totalRincian) + ' (selisih: ' + this.formatNumber(totalTrx - totalRincian) + ')</div>';
+    }
+    var setoranDesa = ir + ir10 + cicilan + infak;
+    var rekEl = document.getElementById('rekapTujuan');
+    if (rekEl) {
+      rekEl.innerHTML = '<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:10px 12px;font-size:12px;">' +
+        '<div style="font-weight:600;margin-bottom:6px;color:#1E40AF;">Rekap Tujuan</div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#2563EB;">→ Setoran Desa (IR + 1/10IR + Cicilan + Infak):</span><span style="font-weight:700;color:#1D4ED8;">' + App.formatNumber(setoranDesa) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between;"><span style="color:#166534;">→ Kas Kelompok (Index):</span><span style="font-weight:700;color:#15803D;">' + App.formatNumber(index) + '</span></div>' +
+      '</div>';
     }
     return totalRincian === totalTrx;
   },
