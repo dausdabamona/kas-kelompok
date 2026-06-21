@@ -2515,6 +2515,8 @@ var App = {
 
   renderSettingList: function(title, data, mode) {
     this._settingData = data;
+    this._settingMap = {};
+    data.forEach(function(item) { App._settingMap[item.id] = item; });
     var list = data.map(function(item) {
       var detail = '';
       if (mode === 'pemasukan' || mode === 'pengeluaran') detail = (item.kategori || '') + ' · ' + (item.status || '');
@@ -2525,11 +2527,12 @@ var App = {
         detail = sumberTxt + ' · ' + (item.status || '');
       }
       else if (mode === 'musyawaroh') detail = App.formatNumber(item.nilai || 0);
+      var safeId = String(item.id).replace(/'/g, '&#39;');
       return '<div class="setting-item">' +
         '<div class="setting-item-info"><div class="setting-item-nama">' + item.nama + '</div><div class="setting-item-detail">' + detail + '</div></div>' +
         '<div class="setting-item-actions">' +
-          '<button class="action-btn-sm edit" onclick="App.showSettingForm(' + JSON.stringify(item).replace(/'/g, '&#39;') + ')">Edit</button>' +
-          '<button class="action-btn-sm hapus" onclick="App.deleteSettingItem(\'' + item.id + '\')">Hapus</button>' +
+          '<button class="action-btn-sm edit" onclick="App.showSettingForm(App._settingMap[\'' + safeId + '\'])">Edit</button>' +
+          '<button class="action-btn-sm hapus" onclick="App.deleteSettingItem(\'' + safeId + '\')">Hapus</button>' +
         '</div>' +
       '</div>';
     }).join('') || '<div class="text-center text-muted" style="padding:24px;">Belum ada data.</div>';
