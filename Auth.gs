@@ -1,12 +1,12 @@
 function getCurrentUser() {
   try {
-    var props = PropertiesService.getUserProperties();
-    var email = props.getProperty('userEmail');
-
-    // Jika belum ada session tersimpan, ambil dari Google session
-    if (!email) {
-      try { email = Session.getActiveUser().getEmail(); } catch(e) {}
-    }
+    // FASE 1: identitas HANYA dari sesi Google terverifikasi.
+    // UserProperties TIDAK lagi dipercaya sebagai sumber identitas (V2 di
+    // docs/KEAMANAN.md) karena pada deploy "execute as owner + anonymous"
+    // properti itu milik pemilik skrip untuk semua pengunjung → sesi tercampur.
+    // Di Fase 2 diganti session token via resolveUser_(token).
+    var email = '';
+    try { email = Session.getActiveUser().getEmail(); } catch(e) {}
     if (!email) return null;
 
     // Cari user di Master User
@@ -17,10 +17,6 @@ function getCurrentUser() {
         if (String(user.status || 'Aktif').toLowerCase() === 'nonaktif') {
           return { notRegistered: true, nonaktif: true, email: email };
         }
-        // Simpan ke props agar panggilan berikutnya lebih cepat
-        props.setProperty('userEmail', user.email);
-        props.setProperty('userName', user.nama);
-        props.setProperty('userRole', user.role);
         user.perms = getPermsForRole_(user.role);
         return user;
       }
@@ -122,20 +118,29 @@ function getUserList_() {
 
 function loginWithEmail(email) {
   try {
-    if (!email) return { success: false, message: 'Email tidak boleh kosong' };
-    var emailNorm = email.toLowerCase().trim();
+    // FASE 1: jalur ini TIDAK lagi menerbitkan identitas tanpa bukti (V1 di
+    // docs/KEAMANAN.md). Login hanya berhasil bila email yang diklaim COCOK
+    // dengan akun Google terverifikasi (Session). Akan digantikan alur OTP +
+    // session token di Fase 2.
+    var googleEmail = '';
+    try { googleEmail = Session.getActiveUser().getEmail(); } catch(e) {}
+    if (!googleEmail) {
+      return { success: false, message: 'Tidak dapat memverifikasi akun Google. Login berbasis OTP akan tersedia (Fase 2).' };
+    }
+    var emailNorm = String(email || '').toLowerCase().trim();
+    if (emailNorm && emailNorm !== googleEmail.toLowerCase().trim()) {
+      return { success: false, message: 'Email tidak cocok dengan akun Google Anda.' };
+    }
+    // Identitas dipakai dari akun Google terverifikasi, bukan input mentah.
+    var emailVerified = googleEmail.toLowerCase().trim();
     var users = getUserList_();
     for (var i = 0; i < users.length; i++) {
-      if (users[i].email.toLowerCase().trim() === emailNorm) {
+      if (users[i].email.toLowerCase().trim() === emailVerified) {
         var user = users[i];
         if (String(user.status || 'Aktif').toLowerCase() === 'nonaktif') {
           return { success: false, message: 'Akun nonaktif. Hubungi Admin.' };
         }
-        var props = PropertiesService.getUserProperties();
-        props.setProperty('userEmail', user.email);
-        props.setProperty('userName', user.nama);
-        props.setProperty('userRole', user.role);
-        logActivity(user.email, 'LOGIN', 'Login berhasil');
+        logActivity(user.email, 'LOGIN', 'Login berhasil (Google terverifikasi)');
         user.perms = getPermsForRole_(user.role);
         return { success: true, user: user };
       }
