@@ -566,6 +566,76 @@ function deleteTransaksi(data) {
 }
 
 // ──────────────────────────────────────────────────────
+// IMPOR CSV — banyak transaksi bank sekaligus (mis. rekening koran)
+// payload = { jenisMasukId, jenisKeluarId, sumberKas, rows:[{tanggal,tipe,nominal,keterangan}] }
+// Semua baris sumber kas sama (default 'Bank'); tiap baris memakai jenis
+// default sesuai tipe. Dibungkus withLock_ agar atomik.
+// ──────────────────────────────────────────────────────
+function importTransaksiCSV(payload) {
+  try {
+    var auth = requirePerm('trx.input');
+    if (!auth.success) return { success: false, message: auth.message };
+    payload = payload || {};
+    var rows = payload.rows || [];
+    if (!rows.length) return { success: false, message: 'Tidak ada baris untuk diimpor.' };
+    if (rows.length > 500) return { success: false, message: 'Maksimum 500 baris per impor.' };
+
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif.' };
+
+    var sumberKas = (String(payload.sumberKas || 'Bank') === 'Tunai') ? 'Tunai' : 'Bank';
+    var jenisMasukId = String(payload.jenisMasukId || '');
+    var jenisKeluarId = String(payload.jenisKeluarId || '');
+
+    // Validasi FK jenis (bila dipakai)
+    function jenisValid_(sheetName, id) {
+      if (!id) return false;
+      var sh = ss.getSheetByName(sheetName);
+      if (!sh) return false;
+      var r = sh.getDataRange().getValues();
+      for (var i = 1; i < r.length; i++) { if (String(r[i][0]) === id) return true; }
+      return false;
+    }
+    var adaMasuk = rows.some(function(x) { return String(x.tipe).toLowerCase() === 'masuk'; });
+    var adaKeluar = rows.some(function(x) { return String(x.tipe).toLowerCase() === 'keluar'; });
+    if (adaMasuk && !jenisValid_(CONFIG.SHEETS.PEMASUKAN, jenisMasukId)) return { success: false, message: 'Pilih Jenis Pemasukan yang valid (ada baris "masuk").' };
+    if (adaKeluar && !jenisValid_(CONFIG.SHEETS.PENGELUARAN, jenisKeluarId)) return { success: false, message: 'Pilih Jenis Pengeluaran yang valid (ada baris "keluar").' };
+
+    return withLock_(function() {
+      var shIn = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+      var shOut = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+      var now = new Date();
+      var berhasil = 0; var gagal = [];
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i] || {};
+        var tipe = String(row.tipe || '').toLowerCase().trim();
+        var nominal = Number(String(row.nominal).replace(/[^0-9]/g, '')) || 0;
+        var tgl = toDateStr_(row.tanggal ? new Date(row.tanggal) : now);
+        var ket = String(row.keterangan || '');
+        if (tipe !== 'masuk' && tipe !== 'keluar') { gagal.push({ baris: i + 1, alasan: 'Tipe harus masuk/keluar' }); continue; }
+        if (nominal <= 0) { gagal.push({ baris: i + 1, alasan: 'Nominal tidak valid' }); continue; }
+        if (!tgl) { gagal.push({ baris: i + 1, alasan: 'Tanggal tidak valid' }); continue; }
+        var id = generateID('TRX');
+        if (tipe === 'masuk') {
+          if (!shIn) { gagal.push({ baris: i + 1, alasan: 'Sheet penerimaan tidak ada' }); continue; }
+          shIn.appendRow([id, periode.id, jenisMasukId, '', tgl, nominal, sumberKas, ket, auth.user.email, toDateStr_(now)]);
+        } else {
+          if (!shOut) { gagal.push({ baris: i + 1, alasan: 'Sheet pengeluaran tidak ada' }); continue; }
+          shOut.appendRow([id, periode.id, jenisKeluarId, tgl, nominal, sumberKas, ket, auth.user.email, toDateStr_(now)]);
+        }
+        berhasil++;
+      }
+      try { var c = CacheService.getScriptCache(); c.remove('dashboard_saldo'); c.remove('master_trx_data'); } catch(e) {}
+      logActivity(auth.user.email, 'IMPOR_CSV', 'Berhasil: ' + berhasil + ', Gagal: ' + gagal.length);
+      return { success: true, berhasil: berhasil, gagal: gagal, total: rows.length };
+    });
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ──────────────────────────────────────────────────────
 // RIWAYAT TRANSAKSI SAYA — transaksi yang diinput user login
 // Mengembalikan gabungan pemasukan/pengeluaran/mutasi/kas penerobos
 // milik user (berdasarkan Created By = email), urut terbaru dulu.

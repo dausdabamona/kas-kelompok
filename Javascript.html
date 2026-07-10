@@ -419,6 +419,8 @@ var App = {
 
       '<button class="btn btn-secondary mb-16" onclick="App.pageRiwayatSaya()">🧾 Riwayat Transaksi Saya</button>' +
 
+      (App.can('trx.input') ? '<button class="btn btn-outline mb-16" onclick="App.pageImportCsv()">📥 Input CSV (impor bank)</button>' : '') +
+
       (u.role === 'ADMIN' ? '<button class="btn btn-outline mb-16" onclick="App.openAdminConsole()">🖥️ Admin Console (desktop)</button>' : '') +
 
       this._renderMenuGroups(data) +
@@ -2995,6 +2997,105 @@ var App = {
       content = '<div class="info-box" style="margin-bottom:12px;">Cabut perangkat yang hilang/tidak dikenal. Sesi aktif perangkat itu langsung berakhir.</div>' + cards;
     }
     document.getElementById('app').innerHTML = this.pageWrapper('Kelola Perangkat', content);
+  },
+
+  // ─────────────────────────────────────────────────
+  // IMPOR CSV (rekening koran / banyak transaksi bank)
+  // ─────────────────────────────────────────────────
+  pageImportCsv: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat data...');
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) { self.renderImportCsv((r && r.pemasukan) || [], (r && r.pengeluaran) || []); })
+      .withFailureHandler(function() { self.renderImportCsv([], []); })
+      .getTransaksiMasterData();
+  },
+
+  renderImportCsv: function(masterP, masterPK) {
+    this._impMasuk = null;
+    var aktif = function(arr) { return (arr || []).filter(function(p) { return String(p.status || '').toLowerCase() !== 'nonaktif'; }); };
+    var optP = aktif(masterP).map(function(p) { return '<option value="' + p.id + '">' + App.escapeHtml(p.nama) + '</option>'; }).join('');
+    var optPK = aktif(masterPK).map(function(p) { return '<option value="' + p.id + '">' + App.escapeHtml(p.nama) + '</option>'; }).join('');
+    var content =
+      '<div class="info-box" style="margin-bottom:12px;">Format kolom: <b>Tanggal, Tipe, Nominal, Keterangan</b>.<br>Tanggal <code>YYYY-MM-DD</code>, Tipe <code>masuk</code>/<code>keluar</code>. Baris judul boleh disertakan.</div>' +
+      '<div class="form-group"><label>Sumber Kas</label><select id="impSumber"><option value="Bank">Bank</option><option value="Tunai">Tunai</option></select></div>' +
+      '<div class="form-group"><label>Jenis untuk baris "masuk"</label><select id="impJenisMasuk">' + (optP || '<option value="">-- tidak ada --</option>') + '</select></div>' +
+      '<div class="form-group"><label>Jenis untuk baris "keluar"</label><select id="impJenisKeluar">' + (optPK || '<option value="">-- tidak ada --</option>') + '</select></div>' +
+      '<div class="form-group"><label>Data CSV (tempel di sini)</label>' +
+        '<textarea id="impCsv" rows="8" placeholder="Tanggal,Tipe,Nominal,Keterangan\n2026-06-05,masuk,50000,Setoran ..." style="font-family:monospace;font-size:12px;"></textarea></div>' +
+      '<button class="btn btn-secondary" onclick="App.previewCsv()">👁️ Pratinjau</button>' +
+      '<div id="impPreview" style="margin-top:12px;"></div>';
+    document.getElementById('app').innerHTML = this.pageWrapper('Input CSV', content);
+  },
+
+  previewCsv: function() {
+    var raw = (document.getElementById('impCsv').value || '').trim();
+    if (!raw) { document.getElementById('impPreview').innerHTML = '<div class="error-box">Tempel data CSV dulu.</div>'; return; }
+    var lines = raw.split(/\r?\n/).filter(function(l) { return l.trim(); });
+    var rows = [];
+    lines.forEach(function(line, idx) {
+      var parts = line.split(',');
+      if (parts.length < 3) return;
+      var tanggal = (parts[0] || '').trim();
+      var tipe = (parts[1] || '').trim().toLowerCase();
+      var nominal = (parts[2] || '').replace(/[^0-9]/g, '');
+      var keterangan = parts.slice(3).join(',').trim();
+      // Lewati baris judul (nominal bukan angka pada baris pertama)
+      if (idx === 0 && !/^\d+$/.test(nominal)) return;
+      rows.push({ tanggal: tanggal, tipe: tipe, nominal: Number(nominal) || 0, keterangan: keterangan });
+    });
+    this._csvRows = rows;
+    if (!rows.length) { document.getElementById('impPreview').innerHTML = '<div class="error-box">Tidak ada baris valid terbaca.</div>'; return; }
+    var tMasuk = 0, tKeluar = 0, nInvalid = 0;
+    var trs = rows.map(function(r) {
+      var ok = (r.tipe === 'masuk' || r.tipe === 'keluar') && r.nominal > 0 && r.tanggal;
+      if (!ok) nInvalid++;
+      if (r.tipe === 'masuk') tMasuk += r.nominal; else if (r.tipe === 'keluar') tKeluar += r.nominal;
+      var warna = r.tipe === 'masuk' ? 'var(--success)' : 'var(--danger)';
+      return '<tr' + (ok ? '' : ' style="background:#FEE2E2;"') + '>' +
+        '<td style="padding:4px 6px;font-size:12px;">' + App.escapeHtml(r.tanggal) + '</td>' +
+        '<td style="padding:4px 6px;font-size:12px;color:' + warna + ';font-weight:600;">' + App.escapeHtml(r.tipe) + '</td>' +
+        '<td style="padding:4px 6px;font-size:12px;text-align:right;">' + App.formatNumber(r.nominal) + '</td>' +
+        '<td style="padding:4px 6px;font-size:12px;">' + App.escapeHtml(r.keterangan) + '</td></tr>';
+    }).join('');
+    document.getElementById('impPreview').innerHTML =
+      '<div class="card" style="margin-bottom:10px;">' +
+        '<div class="stat-row"><span class="stat-label">Baris terbaca</span><span class="stat-value">' + rows.length + (nInvalid ? ' (' + nInvalid + ' invalid)' : '') + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Total Masuk</span><span class="stat-value" style="color:var(--success);">' + App.formatNumber(tMasuk) + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Total Keluar</span><span class="stat-value" style="color:var(--danger);">' + App.formatNumber(tKeluar) + '</span></div>' +
+      '</div>' +
+      '<div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;"><table style="width:100%;border-collapse:collapse;">' +
+        '<thead><tr style="background:#F8FAFC;"><th style="padding:5px 6px;text-align:left;font-size:11px;">Tanggal</th><th style="padding:5px 6px;text-align:left;font-size:11px;">Tipe</th><th style="padding:5px 6px;text-align:right;font-size:11px;">Nominal</th><th style="padding:5px 6px;text-align:left;font-size:11px;">Keterangan</th></tr></thead>' +
+        '<tbody>' + trs + '</tbody></table></div>' +
+      '<div id="impError" style="margin-top:10px;"></div>' +
+      '<button class="btn btn-primary" style="margin-top:10px;" onclick="App.submitImportCsv()">📥 Impor ' + rows.length + ' Transaksi</button>';
+  },
+
+  submitImportCsv: function() {
+    if (!this._csvRows || !this._csvRows.length) return;
+    var payload = {
+      sumberKas: document.getElementById('impSumber').value,
+      jenisMasukId: document.getElementById('impJenisMasuk').value,
+      jenisKeluarId: document.getElementById('impJenisKeluar').value,
+      rows: this._csvRows
+    };
+    var self = this;
+    var errEl = document.getElementById('impError');
+    if (!confirm('Impor ' + this._csvRows.length + ' transaksi ke kas?')) return;
+    App.srv()
+      .withSuccessHandler(function(res) {
+        if (res && res.success) {
+          var msg = '✅ Berhasil ' + res.berhasil + ' dari ' + res.total + ' transaksi.';
+          if (res.gagal && res.gagal.length) msg += ' Gagal ' + res.gagal.length + ' (baris: ' + res.gagal.map(function(g) { return g.baris; }).join(', ') + ').';
+          self.toast(msg);
+          self.loadDashboard();
+        } else {
+          errEl.innerHTML = '<div class="error-box">❌ ' + self.escapeHtml((res && res.message) || 'Gagal impor.') + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) { errEl.innerHTML = '<div class="error-box">❌ Gagal terhubung. ' + self.escapeHtml((err && err.message) || '') + '</div>'; })
+      .importTransaksiCSV(payload);
   },
 
   openAdminConsole: function() {
