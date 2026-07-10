@@ -553,6 +553,142 @@ function deleteTransaksi(data) {
 }
 
 // ──────────────────────────────────────────────────────
+// RIWAYAT TRANSAKSI SAYA — transaksi yang diinput user login
+// Mengembalikan gabungan pemasukan/pengeluaran/mutasi/kas penerobos
+// milik user (berdasarkan Created By = email), urut terbaru dulu.
+// ──────────────────────────────────────────────────────
+function getRiwayatTransaksiSaya() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var email = auth.user.email;
+    var ss = getSS_();
+
+    // Peta nama jenis pemasukan & pengeluaran (id -> nama)
+    var namaMasuk = {}, namaKeluar = {};
+    var sheetP = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetP) {
+      var rp = sheetP.getDataRange().getValues();
+      for (var i = 1; i < rp.length; i++) { if (rp[i][0]) namaMasuk[String(rp[i][0])] = String(rp[i][1] || ''); }
+    }
+    var sheetPK = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
+    if (sheetPK) {
+      var rpk = sheetPK.getDataRange().getValues();
+      for (var i = 1; i < rpk.length; i++) { if (rpk[i][0]) namaKeluar[String(rpk[i][0])] = String(rpk[i][1] || ''); }
+    }
+
+    var list = [];
+
+    // Pemasukan (Input Penerimaan)
+    var shIn = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (shIn) {
+      var rin = shIn.getDataRange().getValues();
+      var hin = headerMap_(rin[0]);
+      for (var i = 1; i < rin.length; i++) {
+        if (!hGet_(rin[i], hin, 'id', 0)) continue;
+        if (String(hGet_(rin[i], hin, 'createdby', 8)) !== email) continue;
+        var jid = String(hGet_(rin[i], hin, 'jenisid', 2) || '');
+        list.push({
+          id: String(hGet_(rin[i], hin, 'id', 0)),
+          tipe: 'masuk',
+          jenis: namaMasuk[jid] || jid || 'Pemasukan',
+          nominal: Number(hGet_(rin[i], hin, 'nominal', 5)) || 0,
+          sumberKas: String(hGet_(rin[i], hin, 'sumberkas', 6) || ''),
+          tanggal: toDateStr_(hGet_(rin[i], hin, 'tanggal', 4)),
+          catatan: String(hGet_(rin[i], hin, 'catatan', 7) || ''),
+          createdAt: toDateStr_(hGet_(rin[i], hin, 'createdat', 9)),
+          seq: i
+        });
+      }
+    }
+
+    // Pengeluaran (Input Pengeluaran)
+    var shOut = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+    if (shOut) {
+      var rout = shOut.getDataRange().getValues();
+      var hout = headerMap_(rout[0]);
+      for (var i = 1; i < rout.length; i++) {
+        if (!hGet_(rout[i], hout, 'id', 0)) continue;
+        if (String(hGet_(rout[i], hout, 'createdby', 7)) !== email) continue;
+        var jid2 = String(hGet_(rout[i], hout, 'jenisid', 2) || '');
+        list.push({
+          id: String(hGet_(rout[i], hout, 'id', 0)),
+          tipe: 'keluar',
+          jenis: namaKeluar[jid2] || jid2 || 'Pengeluaran',
+          nominal: Number(hGet_(rout[i], hout, 'nominal', 4)) || 0,
+          sumberKas: String(hGet_(rout[i], hout, 'sumberkas', 5) || ''),
+          tanggal: toDateStr_(hGet_(rout[i], hout, 'tanggal', 3)),
+          catatan: String(hGet_(rout[i], hout, 'catatan', 6) || ''),
+          createdAt: toDateStr_(hGet_(rout[i], hout, 'createdat', 8)),
+          seq: i
+        });
+      }
+    }
+
+    // Mutasi (Input Setoran Bank)
+    var shMut = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
+    if (shMut) {
+      var rmut = shMut.getDataRange().getValues();
+      var hmut = headerMap_(rmut[0]);
+      for (var i = 1; i < rmut.length; i++) {
+        if (!hGet_(rmut[i], hmut, 'id', 0)) continue;
+        if (String(hGet_(rmut[i], hmut, 'createdby', 5)) !== email) continue;
+        var arah = String(hGet_(rmut[i], hmut, 'arah', 4) || '');
+        list.push({
+          id: String(hGet_(rmut[i], hmut, 'id', 0)),
+          tipe: 'mutasi',
+          jenis: arah === 'tarik' ? 'Tarik (Bank → Tunai)' : 'Setor (Tunai → Bank)',
+          nominal: Number(hGet_(rmut[i], hmut, 'nominal', 3)) || 0,
+          sumberKas: '',
+          tanggal: toDateStr_(hGet_(rmut[i], hmut, 'tanggal', 2)),
+          catatan: '',
+          createdAt: toDateStr_(hGet_(rmut[i], hmut, 'createdat', 6)),
+          seq: i
+        });
+      }
+    }
+
+    // Kas Penerobos (transaksi masuk via penerobos)
+    var shKP = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    if (shKP) {
+      var rkp = shKP.getDataRange().getValues();
+      var hkp = headerMap_(rkp[0]);
+      for (var i = 1; i < rkp.length; i++) {
+        if (!hGet_(rkp[i], hkp, 'id', 0)) continue;
+        if (String(hGet_(rkp[i], hkp, 'penerobosemail', 8)) !== email) continue;
+        var jid3 = String(hGet_(rkp[i], hkp, 'jenisid', 3) || '');
+        list.push({
+          id: String(hGet_(rkp[i], hkp, 'id', 0)),
+          tipe: 'masuk',
+          jenis: (namaMasuk[jid3] || jid3 || 'Pemasukan') + ' (Penerobos)',
+          nominal: Number(hGet_(rkp[i], hkp, 'nominal', 5)) || 0,
+          sumberKas: String(hGet_(rkp[i], hkp, 'sumberkas', 6) || ''),
+          tanggal: toDateStr_(hGet_(rkp[i], hkp, 'tanggal', 2)),
+          catatan: String(hGet_(rkp[i], hkp, 'catatan', 7) || ''),
+          createdAt: toDateStr_(hGet_(rkp[i], hkp, 'createdat', 11)),
+          seq: i
+        });
+      }
+    }
+
+    // Urut terbaru dulu: tanggal desc, lalu createdAt desc, lalu seq desc
+    list.sort(function(a, b) {
+      var ka = a.createdAt || a.tanggal || '';
+      var kb = b.createdAt || b.tanggal || '';
+      if (ka !== kb) return ka < kb ? 1 : -1;
+      var ta = a.tanggal || '', tb = b.tanggal || '';
+      if (ta !== tb) return ta < tb ? 1 : -1;
+      return (b.seq || 0) - (a.seq || 0);
+    });
+    list.forEach(function(it) { delete it.seq; });
+
+    return { success: true, data: list, total: list.length };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ──────────────────────────────────────────────────────
 // MASTER DATA
 // ──────────────────────────────────────────────────────
 // MASTER DATA — satu fungsi untuk semua, dengan cache
