@@ -1,10 +1,14 @@
+// FASE 2b: identitas request-scoped, di-set oleh apiCall() dari session token.
+// Null di luar konteks dispatcher.
+var __REQ_USER_ = null;
+
 function getCurrentUser() {
   try {
-    // FASE 1: identitas HANYA dari sesi Google terverifikasi.
-    // UserProperties TIDAK lagi dipercaya sebagai sumber identitas (V2 di
-    // docs/KEAMANAN.md) karena pada deploy "execute as owner + anonymous"
-    // properti itu milik pemilik skrip untuk semua pengunjung → sesi tercampur.
-    // Di Fase 2 diganti session token via resolveUser_(token).
+    // FASE 2b: sumber identitas utama = session token (di-resolve apiCall →
+    // __REQ_USER_). Fallback ke sesi Google hanya sementara (feature-flag)
+    // sampai frontend sepenuhnya token-based di Fase 2c; akan dihapus setelah itu.
+    if (__REQ_USER_) return __REQ_USER_;
+
     var email = '';
     try { email = Session.getActiveUser().getEmail(); } catch(e) {}
     if (!email) return null;
@@ -607,4 +611,108 @@ function verifySession_(token) {
   } catch(e) {
     return null;
   }
+}
+
+// Cabut sesi (logout / device revoke). Set status Dicabut pada baris token.
+function invalidateSession_(token) {
+  try {
+    if (!token) return false;
+    var hash = hashSecret_(String(token), '');
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.SESI);
+    if (!sheet) return false;
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'tokenhash', 0)) !== hash) continue;
+      var colStat = (h['status'] !== undefined ? h['status'] : 5) + 1;
+      sheet.getRange(i + 1, colStat).setValue('Dicabut');
+      return true;
+    }
+    return false;
+  } catch(e) { return false; }
+}
+
+// ════════════════════════════════════════════════════════
+// FASE 2b — RESOLUSI IDENTITAS TOKEN + DISPATCHER
+// Sumber identitas TUNGGAL untuk panggilan token-based = session token.
+// Pola dispatcher (docs/KEAMANAN.md §d): 1 endpoint apiCall menetapkan
+// __REQ_USER_ dari token lalu memanggil fungsi tujuan. checkAuth() &
+// requirePerm() TIDAK berubah tanda tangan — cukup membaca getCurrentUser()
+// yang kini mengutamakan __REQ_USER_. Regresi minimal: ~65 endpoint tak
+// disentuh; hanya frontend diarahkan lewat apiCall (Fase 2c).
+// ════════════════════════════════════════════════════════
+
+// Pengganti getCurrentUser lama untuk jalur token: identitas dari session token.
+function resolveUser_(token) {
+  return verifySession_(token);
+}
+
+// Denylist fungsi global yang TIDAK boleh dipanggil via dispatcher
+// (setup/migrasi/util/rahasia). Helper privat (akhiran '_') otomatis ditolak.
+var API_DENYLIST_ = {
+  'apiCall': true, 'doGet': true, 'include': true,
+  'setupSheets': true, 'repairSheetHeaders': true, 'migratePosSetoran': true,
+  'migrasiKeamanan': true,
+  'fmtRp': true, 'fmtTanggal': true, 'generateID': true, 'logActivity': true,
+  'getSpreadsheetId': true, 'calculateSaldo': true, 'buildPDFHTML': true,
+  'hitungJumlahBulan': true, 'mapPosNamaToIRColName': true, 'mapPosNamaToBukuIRCol': true,
+  'testDashboard': true, 'testFindPeriode': true, 'testBukuIR': true
+};
+
+function isAllowedEndpoint_(fnName) {
+  if (!fnName || typeof fnName !== 'string') return false;
+  if (fnName.charAt(fnName.length - 1) === '_') return false; // helper privat
+  if (API_DENYLIST_[fnName]) return false;
+  return true;
+}
+
+// Dispatcher tunggal: semua panggilan frontend yang butuh auth lewat sini.
+// token = session token; fnName = nama endpoint; argsArray = argumen asli.
+// Endpoint tetap menegakkan requirePerm/checkAuth sendiri (defense-in-depth).
+function apiCall(token, fnName, argsArray) {
+  try {
+    __REQ_USER_ = resolveUser_(token); // null bila token invalid/kadaluarsa
+    if (!isAllowedEndpoint_(fnName)) return { success: false, message: 'Endpoint tidak dikenal.' };
+    var fn = (typeof globalThis !== 'undefined') ? globalThis[fnName] : this[fnName];
+    if (typeof fn !== 'function') return { success: false, message: 'Endpoint tidak ditemukan.' };
+    var args = Array.isArray(argsArray) ? argsArray : [];
+    return fn.apply(null, args);
+  } catch(e) {
+    return { success: false, message: e.message };
+  } finally {
+    __REQ_USER_ = null; // reset agar tidak bocor antar panggilan
+  }
+}
+
+// ── Endpoint publik alur login (tanpa sesi — bootstrap) ──
+function apiRequestOtp(email) {
+  return requestOtp_(email);
+}
+function apiVerifyOtp(email, otp, deviceName) {
+  return verifyOtp_(email, otp, deviceName);
+}
+function apiLoginPin(email, pin, deviceToken) {
+  return loginWithPin_(email, pin, deviceToken);
+}
+// Set/ubah PIN — butuh session token valid.
+function apiSetPin(token, pin) {
+  var user = resolveUser_(token);
+  if (!user) return { success: false, message: 'Sesi tidak valid. Silakan login ulang.' };
+  return setPin_(user.email, pin);
+}
+// Logout — cabut sesi saat ini.
+function apiLogout(token) {
+  try {
+    var user = resolveUser_(token);
+    if (user) logActivity(user.email, 'LOGOUT', 'Logout (token)');
+  } catch(e) {}
+  invalidateSession_(token);
+  return { success: true };
+}
+// Pulihkan sesi saat app dibuka: kembalikan user bila token masih valid.
+function apiCurrentUser(token) {
+  var user = resolveUser_(token);
+  if (!user) return { success: false };
+  return { success: true, user: user };
 }
