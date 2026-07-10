@@ -82,9 +82,9 @@ var App = {
     var msg = '';
     if (userInfo && userInfo.notRegistered) {
       if (userInfo.nonaktif) {
-        msg = '<div class="error-box" style="margin-bottom:12px;">⛔ Akun <b>' + userInfo.email + '</b> dinonaktifkan. Hubungi Admin.</div>';
+        msg = '<div class="error-box" style="margin-bottom:12px;">⛔ Akun <b>' + this.escapeHtml(userInfo.email) + '</b> dinonaktifkan. Hubungi Admin.</div>';
       } else {
-        msg = '<div class="error-box" style="margin-bottom:12px;">❌ Email <b>' + userInfo.email + '</b> tidak terdaftar. Hubungi Admin untuk didaftarkan.</div>';
+        msg = '<div class="error-box" style="margin-bottom:12px;">❌ Email <b>' + this.escapeHtml(userInfo.email) + '</b> tidak terdaftar. Hubungi Admin untuk didaftarkan.</div>';
       }
     } else {
       msg = '<div class="info-box" style="margin-bottom:12px;">Pastikan Anda login ke Google dengan email yang sudah didaftarkan oleh Admin.</div>';
@@ -211,9 +211,9 @@ var App = {
       '<div class="user-info">' +
         '<div class="avatar">' + inisial + '</div>' +
         '<div>' +
-          '<div class="user-name">' + (u.nama || '-') + '</div>' +
-          '<div class="user-role">' + (u.role || '') + ' · ' + (data.namaKelompok || 'Kas Kelompok') + '</div>' +
-          (periode ? '<div class="text-small text-muted mt-8">Periode: ' + periode.nama + '</div>' : '<div class="text-small text-danger mt-8">⚠ Tidak ada periode aktif</div>') +
+          '<div class="user-name">' + App.escapeHtml(u.nama || '-') + '</div>' +
+          '<div class="user-role">' + App.escapeHtml(u.role || '') + ' · ' + App.escapeHtml(data.namaKelompok || 'Kas Kelompok') + '</div>' +
+          (periode ? '<div class="text-small text-muted mt-8">Periode: ' + App.escapeHtml(periode.nama) + '</div>' : '<div class="text-small text-danger mt-8">⚠ Tidak ada periode aktif</div>') +
         '</div>' +
         '<div style="display:flex;gap:6px;">' +
           '<button class="btn btn-sm" style="background:#EFF6FF;color:#2563EB;border:none;cursor:pointer;" onclick="App.loadDashboard()" title="Refresh">🔄</button>' +
@@ -243,7 +243,7 @@ var App = {
 
       this._renderMenuGroups(data) +
 
-      '<div class="app-footer">' + (data.namaKelompok || 'Kas Kelompok') + '</div>' +
+      '<div class="app-footer">' + App.escapeHtml(data.namaKelompok || 'Kas Kelompok') + '</div>' +
     '</div>';
 
     document.getElementById('app').innerHTML = html;
@@ -324,11 +324,11 @@ var App = {
         return s !== 'nonaktif';
       });
       var opts = filteredP.map(function(p) {
-        return '<option value="' + p.id + '" data-kategori="' + (p.kategori || '') + '">' + p.nama + '</option>';
+        return '<option value="' + p.id + '" data-kategori="' + App.escapeHtml(p.kategori || '') + '">' + App.escapeHtml(p.nama) + '</option>';
       }).join('');
       if (!opts) opts = '<option value="">-- Belum ada data. Tambah di Setting > Pos Pemasukan --</option>';
       var angOpts = '<option value="">-- Pilih Jamaah --</option>' + (anggota || []).map(function(a) {
-        return '<option value="' + a.id + '">' + a.nama + '</option>';
+        return '<option value="' + a.id + '">' + App.escapeHtml(a.nama) + '</option>';
       }).join('');
       formHtml =
         '<div class="form-group"><label>Jenis Pemasukan</label>' +
@@ -349,7 +349,7 @@ var App = {
         return s !== 'nonaktif';
       });
       var opts = filteredPK.map(function(p) {
-        return '<option value="' + p.id + '">' + p.nama + '</option>';
+        return '<option value="' + p.id + '">' + App.escapeHtml(p.nama) + '</option>';
       }).join('');
       if (!opts) opts = '<option value="">-- Belum ada data. Tambah di Setting > Pos Pengeluaran --</option>';
       formHtml =
@@ -819,10 +819,10 @@ var App = {
         var cardsP = (res.pemasukan || []).map(function(p) {
           return '<div class="trx-item">' +
             '<div class="trx-item-top">' +
-              '<span class="trx-item-nama">' + (p.jenis || '-') + '</span>' +
+              '<span class="trx-item-nama">' + App.escapeHtml(p.jenis || '-') + '</span>' +
               '<span class="trx-item-nominal text-success">' + App.formatNumber(p.nominal) + '</span>' +
             '</div>' +
-            '<div class="trx-item-meta">' + App.formatDate(p.tanggal) + ' · ' + (p.sumber || '-') + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
+            '<div class="trx-item-meta">' + App.formatDate(p.tanggal) + ' · ' + App.escapeHtml(p.sumber || '-') + (p.catatan ? ' · ' + App.escapeHtml(p.catatan) : '') + '</div>' +
             trxActions(p.id, p.sumber) +
           '</div>';
         }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
@@ -830,10 +830,10 @@ var App = {
         var cardsPK = (res.pengeluaran || []).map(function(p) {
           return '<div class="trx-item">' +
             '<div class="trx-item-top">' +
-              '<span class="trx-item-nama">' + (p.jenis || '-') + '</span>' +
+              '<span class="trx-item-nama">' + App.escapeHtml(p.jenis || '-') + '</span>' +
               '<span class="trx-item-nominal text-danger">' + App.formatNumber(p.nominal) + '</span>' +
             '</div>' +
-            '<div class="trx-item-meta">' + App.formatDate(p.tanggal) + ' · ' + (p.sumber || '-') + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
+            '<div class="trx-item-meta">' + App.formatDate(p.tanggal) + ' · ' + App.escapeHtml(p.sumber || '-') + (p.catatan ? ' · ' + App.escapeHtml(p.catatan) : '') + '</div>' +
             trxActions(p.id, p.sumber) +
           '</div>';
         }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
@@ -879,7 +879,7 @@ var App = {
 
   _renderEditTrxModal: function(trx, masterList) {
     var jenisopts = masterList.map(function(m) {
-      return '<option value="' + m.id + '"' + (m.id === trx.jenisId ? ' selected' : '') + '>' + m.nama + '</option>';
+      return '<option value="' + m.id + '"' + (m.id === trx.jenisId ? ' selected' : '') + '>' + App.escapeHtml(m.nama) + '</option>';
     }).join('');
     var label = trx.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran';
     var anggotaField = '';
@@ -994,7 +994,7 @@ var App = {
             '<span class="trx-item-nama">' + (d.jenis || '-') + (d.anggota ? ' · ' + d.anggota : '') + '</span>' +
             '<span class="trx-item-nominal text-success">' + App.formatNumber(d.nominal) + '</span>' +
           '</div>' +
-          '<div class="trx-item-meta">' + App.formatDate(d.tanggal) + (d.catatan ? ' · ' + d.catatan : '') + ' ' + badge + '</div>' +
+          '<div class="trx-item-meta">' + App.formatDate(d.tanggal) + (d.catatan ? ' · ' + App.escapeHtml(d.catatan) : '') + ' ' + badge + '</div>' +
         '</div>' +
       '</div>';
     }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
@@ -1026,7 +1026,7 @@ var App = {
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var opts = (res.data || []).filter(function(m) { return m.status !== 'Nonaktif'; }).map(function(m) {
-          return '<option value="' + m.id + '">' + m.nama + '</option>';
+          return '<option value="' + m.id + '">' + App.escapeHtml(m.nama) + '</option>';
         }).join('');
         var modal = '<div class="modal-overlay" id="kpFormOverlay" onclick="if(event.target===this)this.remove()">' +
           '<div class="modal">' +
@@ -1141,7 +1141,7 @@ var App = {
               '<span class="trx-item-nama">' + d.penerobosEmail + ' → ' + (d.sumberTujuan || '-') + '</span>' +
               '<span class="trx-item-nominal text-success">' + App.formatNumber(d.total) + '</span>' +
             '</div>' +
-            '<div class="trx-item-meta">' + App.formatDate(d.tanggalSerah) + (d.catatan ? ' · ' + d.catatan : '') + ' ' + statusBadge + '</div>' +
+            '<div class="trx-item-meta">' + App.formatDate(d.tanggalSerah) + (d.catatan ? ' · ' + App.escapeHtml(d.catatan) : '') + ' ' + statusBadge + '</div>' +
             (d.status === 'Dikonfirmasi' ? '<div class="trx-item-meta text-muted">Dikonfirmasi oleh: ' + d.dikonfirmasiBy + '</div>' : '') +
             konfBtn + cetakBtn +
           '</div>';
@@ -1200,7 +1200,7 @@ var App = {
           '.sign-line{margin-top:60px;border-top:1px solid #333;padding-top:4px;}' +
           '@media print{button{display:none!important;}}' +
           '</style></head><body>' +
-          '<h2>' + namaKelompok + '</h2>' +
+          '<h2>' + App.escapeHtml(namaKelompok) + '</h2>' +
           '<div class="sub">Bukti Serah Terima Kas Penerobos</div>' +
           '<button onclick="window.print()" style="margin-bottom:12px;padding:6px 16px;cursor:pointer;">🖨️ Cetak</button>' +
           '<table class="info-table"><tbody>' +
@@ -1210,7 +1210,7 @@ var App = {
           '<tr><td>Tujuan</td><td>: ' + d.sumberTujuan + '</td></tr>' +
           '<tr><td>Dikonfirmasi Oleh</td><td>: ' + d.dikonfirmasiBy + '</td></tr>' +
           '<tr><td>Dikonfirmasi Pada</td><td>: ' + App.formatDate(d.dikonfirmasiAt) + '</td></tr>' +
-          (d.catatan ? '<tr><td>Catatan</td><td>: ' + d.catatan + '</td></tr>' : '') +
+          (d.catatan ? '<tr><td>Catatan</td><td>: ' + App.escapeHtml(d.catatan) + '</td></tr>' : '') +
           '</tbody></table>' +
           '<table><thead><tr><th>#</th><th>Jenis</th><th style="text-align:right;">Nominal</th><th>Catatan</th></tr></thead>' +
           '<tbody>' + itemRows + '</tbody>' +
@@ -1397,7 +1397,7 @@ var App = {
           return '<div class="pos-card">' +
             '<div class="pos-card-header">' +
               '<div>' +
-                '<div class="pos-card-nama">' + item.nama + (item.isAuto ? ' <span style="font-size:10px;color:#6B7280;font-weight:400;">(' + (item.sumberKet || 'otomatis') + ')</span>' : '') + '</div>' +
+                '<div class="pos-card-nama">' + App.escapeHtml(item.nama) + (item.isAuto ? ' <span style="font-size:10px;color:#6B7280;font-weight:400;">(' + App.escapeHtml(item.sumberKet || 'otomatis') + ')</span>' : '') + '</div>' +
                 '<div class="progress-bar" style="width:120px;margin-top:6px;"><div class="progress-fill ' + fillClass + '" style="width:' + fill + '%;"></div></div>' +
               '</div>' +
               '<div style="text-align:right;">' +
@@ -1443,7 +1443,7 @@ var App = {
     document.getElementById('setoranModal').innerHTML =
       '<div class="modal-overlay" onclick="App.closeModalSetoran(event)">' +
         '<div class="modal">' +
-          '<div class="modal-title">Update Setoran: ' + item.nama + '</div>' +
+          '<div class="modal-title">Update Setoran: ' + App.escapeHtml(item.nama) + '</div>' +
           targetRow +
           '<div class="form-group"><label>Jumlah Disetor (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="sRealisasi" value="' + item.realisasi + '"/></div>' +
           kasRow +
@@ -1704,8 +1704,8 @@ var App = {
       return '<div class="card" style="margin-bottom:12px;">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
           '<div>' +
-            '<div style="font-weight:bold;font-size:15px;">' + p.nama + '</div>' +
-            '<div style="font-size:12px;color:#555;margin-top:2px;">' + App.formatDate(p.tanggal) + (p.catatan ? ' — ' + p.catatan : '') + '</div>' +
+            '<div style="font-weight:bold;font-size:15px;">' + App.escapeHtml(p.nama) + '</div>' +
+            '<div style="font-size:12px;color:#555;margin-top:2px;">' + App.formatDate(p.tanggal) + (p.catatan ? ' — ' + App.escapeHtml(p.catatan) : '') + '</div>' +
             '<div style="font-size:11px;color:#888;margin-top:4px;">' + (gradeInfo || 'Belum ada grade') + '</div>' +
           '</div>' +
           '<span class="badge" style="background:' + (p.status === 'Aktif' ? '#dcfce7' : '#f3f4f6') + ';color:' + (p.status === 'Aktif' ? '#166534' : '#555') + ';">' + p.status + '</span>' +
@@ -1953,8 +1953,8 @@ var App = {
         var sudah = t.statusBayar === 'Lunas';
         return '<div class="stat-row" style="padding:6px 4px;border-bottom:1px solid #f3f4f6;">' +
           '<div>' +
-            '<div style="font-size:13px;">' + t.anggotaNama + '</div>' +
-            (sudah ? '<div style="font-size:11px;color:#888;">Lunas ' + App.formatDate(t.tanggalBayar) + (t.catatan ? ' — ' + t.catatan : '') + '</div>' : '') +
+            '<div style="font-size:13px;">' + App.escapeHtml(t.anggotaNama) + '</div>' +
+            (sudah ? '<div style="font-size:11px;color:#888;">Lunas ' + App.formatDate(t.tanggalBayar) + (t.catatan ? ' — ' + App.escapeHtml(t.catatan) : '') + '</div>' : '') +
           '</div>' +
           '<div style="display:flex;align-items:center;gap:6px;">' +
             '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:' + (sudah ? '#dcfce7' : '#fef3c7') + ';color:' + (sudah ? '#166534' : '#92400e') + ';">' + (sudah ? '✓ Lunas' : '⏳ Belum') + '</span>' +
@@ -1967,7 +1967,7 @@ var App = {
     }).join('');
 
     var html = self.pageWrapper(p.nama || 'Penerobosan',
-      '<div style="font-size:12px;color:#888;margin-bottom:12px;">' + App.formatDate(p.tanggal) + (p.catatan ? ' · ' + p.catatan : '') + '</div>' +
+      '<div style="font-size:12px;color:#888;margin-bottom:12px;">' + App.formatDate(p.tanggal) + (p.catatan ? ' · ' + App.escapeHtml(p.catatan) : '') + '</div>' +
       summaryCards +
       '<div class="card">' +
         '<div id="tagihanModal"></div>' +
@@ -2045,7 +2045,7 @@ var App = {
     var rows = aktif.map(function(a) {
       var grade = (a.grade || '').toUpperCase();
       return '<div class="stat-row" style="padding:8px 4px;border-bottom:1px solid #f3f4f6;">' +
-        '<span style="font-size:13px;flex:1;">' + a.nama + '</span>' +
+        '<span style="font-size:13px;flex:1;">' + App.escapeHtml(a.nama) + '</span>' +
         '<select onchange="App.simpanGrade(\'' + a.id + '\',this.value)" style="padding:5px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:60px;text-align:center;">' +
           '<option value="" ' + (!grade ? 'selected' : '') + '>-</option>' +
           ['A','B','C','D','E'].map(function(g) {
@@ -2097,9 +2097,9 @@ var App = {
           return '<div class="jamaah-card">' +
             '<div class="jamaah-avatar">' + inisial + '</div>' +
             '<div class="jamaah-info">' +
-              '<div class="jamaah-nama">' + a.nama + '</div>' +
+              '<div class="jamaah-nama">' + App.escapeHtml(a.nama) + '</div>' +
               '<div class="jamaah-detail">IR: ' + App.formatNumber(a.ir) + ' · 1/10: ' + App.formatNumber(a.ir10) + '</div>' +
-              '<div class="jamaah-detail">' + (a.noTelp || '-') + ' · ' + (a.status || '') + '</div>' +
+              '<div class="jamaah-detail">' + App.escapeHtml(a.noTelp || '-') + ' · ' + App.escapeHtml(a.status || '') + '</div>' +
             '</div>' +
             '<div style="display:flex;flex-direction:column;gap:6px;">' +
               (canEditJamaah ? '<button class="action-btn-sm edit" onclick="App.showFormJamaah(' + JSON.stringify(a).replace(/'/g, '&#39;') + ')">Edit</button>' : '') +
@@ -2365,8 +2365,8 @@ var App = {
       return '<div class="card" style="margin-bottom:10px;">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
           '<div>' +
-            '<div style="font-weight:bold;">' + (u.nama || '-') + (isSelf ? ' <span style="font-size:10px;color:#888;">(Anda)</span>' : '') + '</div>' +
-            '<div style="font-size:12px;color:#555;">' + u.email + '</div>' +
+            '<div style="font-weight:bold;">' + App.escapeHtml(u.nama || '-') + (isSelf ? ' <span style="font-size:10px;color:#888;">(Anda)</span>' : '') + '</div>' +
+            '<div style="font-size:12px;color:#555;">' + App.escapeHtml(u.email) + '</div>' +
             '<div style="margin-top:4px;">' +
               '<span class="badge" style="background:#e0e7ff;color:#3730a3;">' + (u.role || '-') + '</span> ' +
               '<span class="badge" style="background:' + (aktif ? '#dcfce7' : '#f3f4f6') + ';color:' + (aktif ? '#166534' : '#888') + ';">' + (aktif ? 'Aktif' : 'Nonaktif') + '</span>' +
@@ -2521,17 +2521,17 @@ var App = {
     data.forEach(function(item) { App._settingMap[item.id] = item; });
     var list = data.map(function(item) {
       var detail = '';
-      if (mode === 'pemasukan' || mode === 'pengeluaran') detail = (item.kategori || '') + ' · ' + (item.status || '');
+      if (mode === 'pemasukan' || mode === 'pengeluaran') detail = App.escapeHtml((item.kategori || '') + ' · ' + (item.status || ''));
       else if (mode === 'posSetoran') {
         var sumberTxt = item.sumberTipe === 'bukuir' ? ('Buku IR: ' + item.sumberRef)
           : item.sumberTipe === 'pemasukan' ? ('Pemasukan: ' + item.sumberRef)
           : 'Manual';
-        detail = sumberTxt + ' · ' + (item.status || '');
+        detail = App.escapeHtml(sumberTxt + ' · ' + (item.status || ''));
       }
       else if (mode === 'musyawaroh') detail = App.formatNumber(item.nilai || 0);
       var safeId = String(item.id).replace(/'/g, '&#39;');
       return '<div class="setting-item">' +
-        '<div class="setting-item-info"><div class="setting-item-nama">' + item.nama + '</div><div class="setting-item-detail">' + detail + '</div></div>' +
+        '<div class="setting-item-info"><div class="setting-item-nama">' + App.escapeHtml(item.nama) + '</div><div class="setting-item-detail">' + detail + '</div></div>' +
         '<div class="setting-item-actions">' +
           '<button class="action-btn-sm edit" onclick="App.showSettingForm(App._settingMap[\'' + safeId + '\'])">Edit</button>' +
           '<button class="action-btn-sm hapus" onclick="App.deleteSettingItem(\'' + safeId + '\')">Hapus</button>' +
@@ -2564,10 +2564,10 @@ var App = {
       var irOpts = irKeys.map(function(k){ return '<option value="' + k[0] + '"' + (v.sumberRef === k[0] ? ' selected' : '') + '>' + k[1] + '</option>'; }).join('');
       // Opsi jenis pemasukan (FK ke Master Pemasukan)
       var pmList = this._pemasukanListForSetoran || [];
-      var pmOpts = pmList.map(function(p){ return '<option value="' + p.kode + '"' + (v.sumberRef === p.kode ? ' selected' : '') + '>' + p.nama + '</option>'; }).join('');
+      var pmOpts = pmList.map(function(p){ return '<option value="' + p.kode + '"' + (v.sumberRef === p.kode ? ' selected' : '') + '>' + App.escapeHtml(p.nama) + '</option>'; }).join('');
       // Opsi pengeluaran (FK untuk catat realisasi setoran sebagai pengeluaran kas)
       var pkList = this._pengeluaranListForSetoran || [];
-      var pkOpts = '<option value="">-- Tidak dicatat sebagai pengeluaran --</option>' + pkList.map(function(p){ return '<option value="' + p.kode + '"' + (v.pengeluaranRef === p.kode ? ' selected' : '') + '>' + p.nama + '</option>'; }).join('');
+      var pkOpts = '<option value="">-- Tidak dicatat sebagai pengeluaran --</option>' + pkList.map(function(p){ return '<option value="' + p.kode + '"' + (v.pengeluaranRef === p.kode ? ' selected' : '') + '>' + App.escapeHtml(p.nama) + '</option>'; }).join('');
       fields = '<div class="form-group"><label>Nama *</label><input type="text" id="sNama" value="' + (v.nama || '') + '"/></div>' +
         '<div class="form-group"><label>Sumber Data</label><select id="sSumberTipe" onchange="App.onSumberTipeChange()">' +
           '<option value="manual"' + (st === 'manual' ? ' selected' : '') + '>Manual (isi target sendiri)</option>' +
@@ -2762,11 +2762,16 @@ var App = {
     document.getElementById('app').innerHTML = this.pageWrapper('Riwayat Transaksi Saya', content);
   },
 
-  _esc: function(s) {
+  // FASE 1: escaping HTML untuk semua data dinamis sebelum masuk innerHTML (V5).
+  // Wajib membungkus data dari input pengguna (nama, catatan, email, keterangan)
+  // agar payload seperti <img onerror=...> tidak tereksekusi (XSS tersimpan).
+  escapeHtml: function(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   },
+  // Alias lama.
+  _esc: function(s) { return this.escapeHtml(s); },
 
   pageWrapper: function(title, content, hideBack) {
     var backBtn = hideBack ? '<span style="width:36px;"></span>' : '<button class="btn-back" onclick="App.back()">‹</button>';
@@ -3066,7 +3071,7 @@ var App = {
         : '';
       return '<div class="pos-card">' +
         '<div class="pos-card-header">' +
-          '<div class="pos-card-nama">' + item.nama + ' <span style="font-size:10px;color:var(--text-muted);font-weight:500;">(' + item.pctDesa + '% desa)</span></div>' +
+          '<div class="pos-card-nama">' + App.escapeHtml(item.nama) + ' <span style="font-size:10px;color:var(--text-muted);font-weight:500;">(' + item.pctDesa + '% desa)</span></div>' +
           '<span class="status-badge ' + badgeClass + '">' + item.status + '</span>' +
         '</div>' +
         '<div class="pos-card-row"><span class="pos-card-label">Pemasukan</span><span class="pos-card-value">' + App.formatNumber(item.totalMasuk) + '</span></div>' +
@@ -3098,7 +3103,7 @@ var App = {
     document.getElementById('setoranDesaModal').innerHTML =
       '<div class="modal-overlay" onclick="App.closeModalSetoranDesa(event)">' +
         '<div class="modal">' +
-          '<div class="modal-title">Setoran Desa: ' + item.nama + '</div>' +
+          '<div class="modal-title">Setoran Desa: ' + App.escapeHtml(item.nama) + '</div>' +
           '<div class="info-box" style="margin-bottom:10px;font-size:12px;">Jatah dari pemasukan: <b>' + App.formatNumber(item.jatahDesa) + '</b>' +
             (item.topUpKas > 0 ? '<br>Perlu tambahan dari kas: <b>' + App.formatNumber(item.topUpKas) + '</b>' : '') +
             '<br>Kewajiban setor: <b>' + App.formatNumber(item.kewajiban) + '</b></div>' +
@@ -3169,8 +3174,8 @@ var App = {
           return '<div class="jamaah-card">' +
             '<div class="jamaah-avatar">' + (a.nama || 'J').charAt(0).toUpperCase() + '</div>' +
             '<div class="jamaah-info">' +
-              '<div class="jamaah-nama">' + a.nama + '</div>' +
-              '<div class="jamaah-detail">' + (a.noTelp || '-') + '</div>' +
+              '<div class="jamaah-nama">' + App.escapeHtml(a.nama) + '</div>' +
+              '<div class="jamaah-detail">' + App.escapeHtml(a.noTelp || '-') + '</div>' +
               (a.targetBayar > 0 ? '<div class="jamaah-detail" style="color:var(--danger);font-weight:600;">Belum bayar: ' + App.formatNumber(a.targetBayar) + '</div>' : '') +
             '</div>' +
           '</div>';
@@ -3182,8 +3187,8 @@ var App = {
           return '<div class="jamaah-card">' +
             '<div class="jamaah-avatar" style="background:linear-gradient(135deg,var(--success),#047857);">' + (a.nama || 'J').charAt(0).toUpperCase() + '</div>' +
             '<div class="jamaah-info">' +
-              '<div class="jamaah-nama">' + a.nama + '</div>' +
-              '<div class="jamaah-detail">' + (a.noTelp || '-') + '</div>' +
+              '<div class="jamaah-nama">' + App.escapeHtml(a.nama) + '</div>' +
+              '<div class="jamaah-detail">' + App.escapeHtml(a.noTelp || '-') + '</div>' +
               '<div class="jamaah-detail" style="color:var(--success);font-weight:600;">Bayar: ' + App.formatNumber(a.jumlahBayar) + '</div>' +
             '</div>' +
             '<span class="status-badge lunas">✓ Bayar</span>' +
@@ -3264,7 +3269,7 @@ var App = {
             return '<div class="jamaah-card">' +
               '<div class="jamaah-avatar" style="background:linear-gradient(135deg,#F59E0B,#B45309);">' + (a.nama||'J').charAt(0).toUpperCase() + '</div>' +
               '<div class="jamaah-info">' +
-                '<div class="jamaah-nama">' + a.nama + '</div>' +
+                '<div class="jamaah-nama">' + App.escapeHtml(a.nama) + '</div>' +
                 '<div class="jamaah-detail">' + App.formatNumber(a.nominal) + ' · ' + App.formatDate(a.tanggal) + '</div>' +
               '</div>' + waBtn +
             '</div>';
@@ -3442,7 +3447,7 @@ var App = {
             : '';
           return '<div class="jamaah-card">' +
             '<div class="jamaah-avatar" style="background:linear-gradient(135deg,#EF4444,#B91C1C);">' + (a.nama||'J').charAt(0).toUpperCase() + '</div>' +
-            '<div class="jamaah-info"><div class="jamaah-nama">' + a.nama + '</div><div class="jamaah-detail">' + (a.noTelp||'No. HP tidak ada') + '</div></div>' +
+            '<div class="jamaah-info"><div class="jamaah-nama">' + App.escapeHtml(a.nama) + '</div><div class="jamaah-detail">' + App.escapeHtml(a.noTelp||'No. HP tidak ada') + '</div></div>' +
             waBtn +
           '</div>';
         }).join('');
@@ -3452,7 +3457,7 @@ var App = {
       : sudah.map(function(a) {
           return '<div class="jamaah-card">' +
             '<div class="jamaah-avatar" style="background:linear-gradient(135deg,var(--success),#047857);">' + (a.nama||'J').charAt(0).toUpperCase() + '</div>' +
-            '<div class="jamaah-info"><div class="jamaah-nama">' + a.nama + '</div><div class="jamaah-detail">' + App.formatNumber(a.jumlah) + '</div></div>' +
+            '<div class="jamaah-info"><div class="jamaah-nama">' + App.escapeHtml(a.nama) + '</div><div class="jamaah-detail">' + App.formatNumber(a.jumlah) + '</div></div>' +
             '<span class="status-badge lunas">✓</span>' +
           '</div>';
         }).join('');
