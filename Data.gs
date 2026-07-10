@@ -268,6 +268,7 @@ function submitPemeriksaanSaldo(data) {
   try {
     var auth = requirePerm('saldo.input');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
 
@@ -292,6 +293,7 @@ function submitPemeriksaanSaldo(data) {
       'Tunai: ' + saldoTunai + ', Bank: ' + saldoBank);
 
     return { success: true, id: id };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -301,6 +303,7 @@ function tutupBuku(data) {
   try {
     var auth = requirePerm('periode.manage');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif yang bisa ditutup' };
 
@@ -343,6 +346,7 @@ function tutupBuku(data) {
 
     logActivity(auth.user.email, 'TUTUP_BUKU', 'Periode: ' + periode.nama + ' | Tunai: ' + saldoTunai + ' Bank: ' + saldoBank);
     return { success: true, id: sldId };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -352,6 +356,7 @@ function bukaPeriode(data) {
   try {
     var auth = requirePerm('periode.manage');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     if (!data.nama) return { success: false, message: 'Nama periode wajib diisi' };
     if (!data.tglMulai) return { success: false, message: 'Tanggal mulai wajib diisi' };
 
@@ -383,6 +388,7 @@ function bukaPeriode(data) {
     try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
     logActivity(auth.user.email, 'BUKA_PERIODE', 'Periode: ' + data.nama);
     return { success: true, id: id };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -396,6 +402,7 @@ function submitTransaksi(data) {
     // FASE 1: endpoint mutasi wajib requirePerm (sebelumnya hanya checkAuth).
     var auth = requirePerm('trx.input');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
@@ -452,6 +459,7 @@ function submitTransaksi(data) {
     // Invalidate saldo cache setiap ada transaksi baru
     try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
     return { success: true, id: id };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -462,6 +470,7 @@ function updateTransaksi(data) {
     var cap = (data.sumberKas === 'Tunai') ? 'trx.edit.tunai' : 'trx.edit.bank';
     var auth = requirePerm(cap);
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
     if (periode.status !== CONFIG.STATUS.OPEN) return { success: false, message: 'Periode sudah ditutup, tidak bisa mengedit transaksi' };
@@ -519,6 +528,7 @@ function updateTransaksi(data) {
       return { success: false, message: 'Transaksi tidak ditemukan' };
     }
     return { success: false, message: 'Tipe transaksi tidak valid' };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -529,6 +539,7 @@ function deleteTransaksi(data) {
     var cap = (data.sumberKas === 'Tunai') ? 'trx.edit.tunai' : 'trx.edit.bank';
     var auth = requirePerm(cap);
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
     if (periode.status !== CONFIG.STATUS.OPEN) return { success: false, message: 'Periode sudah ditutup, tidak bisa menghapus transaksi' };
@@ -548,6 +559,7 @@ function deleteTransaksi(data) {
       }
     }
     return { success: false, message: 'Transaksi tidak ditemukan' };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -1069,6 +1081,7 @@ function bayarTagihanPatungan(tagihanId, catatan) {
   try {
     var auth = requirePerm('terobosan.bayar');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
     if (!sheet) return { success: false, message: 'Sheet penerobosan tidak ditemukan' };
@@ -1087,6 +1100,7 @@ function bayarTagihanPatungan(tagihanId, catatan) {
       }
     }
     return { success: false, message: 'Penerobosan tidak ditemukan' };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -1096,6 +1110,7 @@ function batalBayarTagihanPatungan(tagihanId) {
   try {
     var auth = requirePerm('terobosan.batal');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.TAGIHAN_PATUNGAN);
     if (!sheet) return { success: false, message: 'Sheet penerobosan tidak ditemukan' };
@@ -1111,6 +1126,7 @@ function batalBayarTagihanPatungan(tagihanId) {
       }
     }
     return { success: false, message: 'Penerobosan tidak ditemukan' };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -1281,6 +1297,7 @@ function submitRincianIR(data) {
     // FASE 1: endpoint mutasi wajib requirePerm (sebelumnya hanya checkAuth).
     var auth = requirePerm('bukuIR.input');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
     if (!sheet) {
@@ -1330,6 +1347,7 @@ function submitRincianIR(data) {
     }
     try { var c = CacheService.getScriptCache(); c.remove('master_trx_data'); c.remove('buku_ir_data'); c.remove('dashboard_saldo'); } catch(e) {}
     return { success: true, id: id, updated: existingRow > 0 };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -1887,6 +1905,7 @@ function submitRealisasiSetoran(data) {
   try {
     var auth = requirePerm('setoran.realisasi');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
@@ -1967,6 +1986,7 @@ function submitRealisasiSetoran(data) {
     } catch(e) {}
     logActivity(auth.user.email, 'SETORAN_DESA', (posNama || data.posId) + ': ' + realisasi);
     return { success: true };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -2390,6 +2410,7 @@ function addBankTransaction(data) {
   try {
     var auth = requirePerm('bank.input');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_DAILY);
     if (!sheet) {
@@ -2405,6 +2426,7 @@ function addBankTransaction(data) {
       selisih === 0 ? 'Balance' : 'Selisih', data.catatan || '', toDateStr_(new Date())]);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -2414,6 +2436,7 @@ function updateBankDaily(data) {
   try {
     var auth = requirePerm('bank.manage');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_DAILY);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
@@ -2432,6 +2455,7 @@ function updateBankDaily(data) {
       }
     }
     return { success: false, message: 'Data tidak ditemukan' };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -3271,6 +3295,7 @@ function submitKasPenerobos(data) {
   try {
     var auth = requirePerm('penerobos.input');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
@@ -3296,6 +3321,7 @@ function submitKasPenerobos(data) {
     sheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', Number(data.nominal) || 0, data.sumberKas || 'Tunai', data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(new Date())]);
     logActivity(auth.user.email, 'KAS_PENEROBOS', 'Nominal: ' + data.nominal);
     return { success: true, id: id };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -3365,6 +3391,7 @@ function buatSerahTerima(data) {
   try {
     var auth = requirePerm('penerobos.input');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     if (!data.itemIds || data.itemIds.length === 0) return { success: false, message: 'Pilih minimal 1 item kas' };
     if (!data.sumberTujuan) return { success: false, message: 'Tentukan tujuan (Tunai/Bank)' };
 
@@ -3419,6 +3446,7 @@ function buatSerahTerima(data) {
 
     logActivity(auth.user.email, 'BUAT_SERAH_TERIMA', 'ID: ' + stId + ' Total: ' + total);
     return { success: true, id: stId, total: total };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -3479,6 +3507,7 @@ function konfirmasiSerahTerima(serahTerimaId) {
   try {
     var auth = requirePerm('serahterima.konfirmasi');
     if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
     var ss = getSS_();
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
@@ -3557,6 +3586,7 @@ function konfirmasiSerahTerima(serahTerimaId) {
     try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
     logActivity(auth.user.email, 'KONFIRMASI_SERAH_TERIMA', 'ID: ' + serahTerimaId + ' Items: ' + items.length + ' Nominal: ' + stData.total);
     return { success: true, penerimaanIds: penIds, count: items.length };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }

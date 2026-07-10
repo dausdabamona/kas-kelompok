@@ -170,6 +170,23 @@ function generateID(prefix) {
   return prefix + '_' + new Date().getTime() + '_' + Math.random().toString(36).substr(2, 5).toUpperCase();
 }
 
+// FASE 3: kunci skrip untuk operasi uang agar atomik (mencegah race saldo
+// saat dua submit bersamaan). Auth dijalankan DI LUAR lock; hanya bagian
+// tulis dibungkus. Gagal ambil lock 15 dtk → pesan "sibuk".
+function withLock_(fn) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch(e) {
+    return { success: false, message: 'Sistem sedang sibuk, coba lagi sebentar.' };
+  }
+  try {
+    return fn();
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
 function logActivity(user, action, detail) {
   try {
     var ss = SpreadsheetApp.openById(getSpreadsheetId());
