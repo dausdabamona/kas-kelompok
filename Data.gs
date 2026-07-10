@@ -393,7 +393,8 @@ function bukaPeriode(data) {
 // ──────────────────────────────────────────────────────
 function submitTransaksi(data) {
   try {
-    var auth = checkAuth();
+    // FASE 1: endpoint mutasi wajib requirePerm (sebelumnya hanya checkAuth).
+    var auth = requirePerm('trx.input');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var periode = getPeriodeAktif();
@@ -1277,7 +1278,8 @@ function getBukuIRData() {
 
 function submitRincianIR(data) {
   try {
-    var auth = checkAuth();
+    // FASE 1: endpoint mutasi wajib requirePerm (sebelumnya hanya checkAuth).
+    var auth = requirePerm('bukuIR.input');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
@@ -3111,7 +3113,8 @@ function getPembelaanData() {
 
 function submitKesanggupanPembelaan(data) {
   try {
-    var auth = checkAuth();
+    // FASE 1: endpoint mutasi wajib requirePerm (sebelumnya hanya checkAuth).
+    var auth = requirePerm('pembelaan.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var periode = getPeriodeAktif();
@@ -3146,7 +3149,8 @@ function submitKesanggupanPembelaan(data) {
 
 function updateStatusPembelaan(id, status) {
   try {
-    var auth = checkAuth();
+    // FASE 1: endpoint mutasi wajib requirePerm (sebelumnya hanya checkAuth).
+    var auth = requirePerm('pembelaan.manage');
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PEMBELAAN);
