@@ -419,6 +419,8 @@ var App = {
 
       '<button class="btn btn-secondary mb-16" onclick="App.pageRiwayatSaya()">🧾 Riwayat Transaksi Saya</button>' +
 
+      (u.role === 'ADMIN' ? '<button class="btn btn-outline mb-16" onclick="App.openAdminConsole()">🖥️ Admin Console (desktop)</button>' : '') +
+
       this._renderMenuGroups(data) +
 
       '<div class="app-footer">' + App.escapeHtml(data.namaKelompok || 'Kas Kelompok') + '</div>' +
@@ -2993,6 +2995,17 @@ var App = {
       content = '<div class="info-box" style="margin-bottom:12px;">Cabut perangkat yang hilang/tidak dikenal. Sesi aktif perangkat itu langsung berakhir.</div>' + cards;
     }
     document.getElementById('app').innerHTML = this.pageWrapper('Kelola Perangkat', content);
+  },
+
+  openAdminConsole: function() {
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) {
+        if (r && r.url) window.open(r.url + '?view=admin', '_blank');
+        else self.toast('URL aplikasi tidak tersedia.');
+      })
+      .withFailureHandler(function() { self.toast('Gagal membuka konsol.'); })
+      .getAppUrl();
   },
 
   confirmRevokeDevice: function(deviceId, nama) {

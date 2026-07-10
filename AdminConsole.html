@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --tunai: #F59E0B; --bank: #3B82F6;
+    --success: #059669; --warning: #D97706; --danger: #DC2626;
+    --admin: #0F766E; --admin-dark: #115E59; --admin-soft: #CCFBF1; --admin-ink: #042F2E;
+    --bg: #F4F3EE; --card: #FFFFFF;
+    --sidebar: #0B3B37; --sidebar-2: #0E4A44;
+    --text: #1A2725; --text-muted: #6B7C79;
+    --border: #E5E3DA; --border-soft: #EFEDE4;
+    --radius: 12px; --radius-sm: 9px;
+    --shadow: 0 1px 2px rgba(16,40,37,.04), 0 4px 14px rgba(16,40,37,.055);
+    --shadow-lg: 0 10px 34px rgba(16,40,37,.12);
+    --font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.45; font-size: 13.5px; -webkit-font-smoothing: antialiased; }
+  @media (prefers-reduced-motion: reduce) { * { animation:none!important; transition:none!important; } }
+  .num { font-variant-numeric: tabular-nums; }
+  .layout { display: flex; min-height: 100vh; }
+
+  .sidebar { width: 236px; flex-shrink: 0; background: linear-gradient(180deg, var(--sidebar), var(--sidebar-2)); color: #D7E7E4; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 17px 18px 15px; }
+  .brand-mark { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg,#14B8A6,#0F766E); display: grid; place-items: center; font-size: 18px; box-shadow: 0 4px 12px rgba(20,184,166,.35); }
+  .brand-name { font-weight: 800; font-size: 14px; color: #fff; letter-spacing: -.2px; }
+  .brand-sub { font-size: 10.5px; color: #7FB3AC; font-weight: 600; }
+  .nav { flex: 1; overflow-y: auto; padding: 4px 10px 16px; }
+  .nav::-webkit-scrollbar { width: 6px; } .nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 9px; }
+  .nav-group { margin-top: 13px; }
+  .nav-label { font-size: 10px; text-transform: uppercase; letter-spacing: .9px; color: #5E938C; font-weight: 700; padding: 0 10px 6px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm); color: #BCD6D2; font-weight: 500; cursor: pointer; font-size: 13px; position: relative; transition: background .15s, color .15s; text-decoration: none; }
+  .nav-item:hover { background: rgba(255,255,255,.06); color: #EAF5F3; }
+  .nav-item.active { background: rgba(20,184,166,.16); color: #fff; font-weight: 600; }
+  .nav-item.active::before { content:''; position:absolute; left:-10px; top:7px; bottom:7px; width:3px; border-radius:0 3px 3px 0; background:#2DD4BF; }
+  .nav-item .ico { width: 19px; text-align: center; font-size: 14px; flex-shrink: 0; }
+  .nav-item .pill { margin-left: auto; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px; }
+  .nav-item.active .pill { background: #2DD4BF; color: var(--admin-ink); }
+  .sidebar-foot { padding: 11px; border-top: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; gap: 9px; }
+  .sf-avatar { width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0; background: linear-gradient(135deg,#2DD4BF,#0F766E); color: var(--admin-ink); display: grid; place-items: center; font-weight: 800; font-size: 12px; }
+  .sf-name { font-size: 12px; font-weight: 700; color: #fff; } .sf-role { font-size: 10px; color: #7FB3AC; font-weight: 600; }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { position: sticky; top: 0; z-index: 20; background: rgba(244,243,238,.88); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); padding: 11px 22px; display: flex; align-items: center; gap: 14px; }
+  .crumb { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+  .crumb b { color: var(--text); font-weight: 800; font-size: 15px; }
+  .crumb .sep { margin: 0 7px; opacity: .5; }
+  .tb-spacer { flex: 1; }
+  .qbtn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border-radius: 10px; border: none; font-family: inherit; font-weight: 700; font-size: 12.5px; cursor: pointer; text-decoration: none; }
+  .qbtn.primary { background: var(--admin); color: #fff; } .qbtn.primary:hover { background: var(--admin-dark); }
+  .qbtn.ghost { background: var(--card); border: 1px solid var(--border); color: var(--text); } .qbtn.ghost:hover { border-color: var(--admin); color: var(--admin); }
+  .period-chip { display: inline-flex; align-items: center; gap: 7px; background: var(--admin-soft); color: var(--admin-dark); font-weight: 700; font-size: 12px; padding: 6px 12px; border-radius: 99px; }
+  .period-chip .dot { width: 6px; height: 6px; border-radius: 99px; background: var(--success); box-shadow: 0 0 0 3px rgba(5,150,105,.18); }
+
+  .content { padding: 18px 22px 34px; }
+  .kpi-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
+  .kpi { background: var(--card); border-radius: var(--radius); padding: 13px 14px; box-shadow: var(--shadow); border: 1px solid var(--border-soft); }
+  .kpi-label { font-size: 10.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .4px; display: flex; align-items: center; gap: 6px; }
+  .kpi-label .d { width: 8px; height: 8px; border-radius: 3px; }
+  .kpi-value { font-size: 18px; font-weight: 800; letter-spacing: -.5px; margin-top: 7px; }
+  .kpi-value .rp { font-size: 11px; color: var(--text-muted); font-weight: 700; margin-right: 1px; }
+  .kpi-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; min-height: 22px; }
+  .kpi-delta { font-size: 11px; font-weight: 700; } .up { color: var(--success); } .down { color: var(--danger); } .flat { color: var(--text-muted); }
+  .spark { height: 22px; }
+  .mini-prog { height: 6px; background: var(--border-soft); border-radius: 99px; margin-top: 9px; overflow: hidden; }
+  .mini-prog > i { display: block; height: 100%; background: var(--admin); border-radius: 99px; }
+
+  .grid-main { display: grid; grid-template-columns: minmax(0,2.2fr) minmax(300px,1fr); gap: 16px; align-items: start; }
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+  .panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border-soft); }
+  .panel-head { display: flex; align-items: center; gap: 10px; padding: 13px 16px 11px; border-bottom: 1px solid var(--border-soft); }
+  .panel-title { font-size: 13.5px; font-weight: 800; letter-spacing: -.2px; }
+  .panel-title small { font-weight: 600; color: var(--text-muted); font-size: 11.5px; margin-left: 5px; }
+  .panel-head .tools { margin-left: auto; display: flex; gap: 6px; }
+  .link { font-size: 11.5px; font-weight: 700; color: var(--admin); cursor: pointer; text-decoration: none; }
+
+  .chart-body { padding: 14px 16px 10px; display: flex; gap: 18px; align-items: stretch; }
+  .bars { display: flex; align-items: flex-end; gap: 16px; height: 150px; flex: 1; }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; }
+  .bar-stack { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 5px; }
+  .bar { width: 15px; border-radius: 5px 5px 0 0; transition: height .5s cubic-bezier(.4,0,.2,1); }
+  .bar.in { background: linear-gradient(180deg,#34D399,#059669); } .bar.out { background: linear-gradient(180deg,#FCA5A5,#DC2626); }
+  .bar-label { font-size: 11px; color: var(--text-muted); font-weight: 700; }
+  .chart-side { width: 148px; flex-shrink: 0; border-left: 1px solid var(--border-soft); padding-left: 16px; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+  .cs-item .cs-l { font-size: 11px; color: var(--text-muted); font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .cs-item .cs-v { font-size: 17px; font-weight: 800; letter-spacing: -.4px; }
+  .cs-item .sw { width: 9px; height: 9px; border-radius: 3px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); font-weight: 700; padding: 10px 14px; background: #FBFAF6; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+  thead th.r { text-align: right; }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; vertical-align: middle; }
+  tbody tr:hover { background: #FBFAF6; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.r { text-align: right; }
+  .t-date { color: var(--text-muted); font-weight: 600; white-space: nowrap; font-size: 12px; }
+  .t-jenis { font-weight: 700; }
+  .t-name { color: var(--text-muted); }
+  .amt { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .amt.in { color: var(--success); } .amt.out { color: var(--danger); }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 7px; white-space: nowrap; }
+  .chip .d { width: 6px; height: 6px; border-radius: 99px; }
+  .chip.tunai { background: #FEF3C7; color: #92400E; } .chip.tunai .d { background: var(--tunai); }
+  .chip.bank { background: #DBEAFE; color: #1E40AF; } .chip.bank .d { background: var(--bank); }
+  .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 7px; white-space: nowrap; }
+  .b-ok { background: #D1FAE5; color: #047857; }
+  .b-wait { background: #FEF3C7; color: #92400E; }
+  .b-need { background: #FEE2E2; color: #B91C1C; }
+  .t-oleh { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11.5px; font-weight: 600; }
+  .t-oleh .av { width: 20px; height: 20px; border-radius: 6px; background: var(--admin-soft); color: var(--admin-dark); display: grid; place-items: center; font-size: 9px; font-weight: 800; }
+  .table-foot { display: flex; align-items: center; justify-content: space-between; padding: 11px 16px; font-size: 12px; color: var(--text-muted); }
+  .empty { padding: 26px 16px; text-align: center; color: var(--text-muted); font-size: 12.5px; }
+
+  .rail { display: flex; flex-direction: column; gap: 16px; }
+  .count-badge { background: var(--danger); color: #fff; font-size: 11px; font-weight: 800; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; display: grid; place-items: center; }
+  .act { display: flex; align-items: center; gap: 11px; padding: 10px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-soft); margin: 0 12px 8px; cursor: pointer; transition: border-color .15s, transform .1s, box-shadow .15s; background: #fff; text-decoration: none; color: inherit; }
+  .act:first-of-type { margin-top: 12px; }
+  .act:hover { border-color: var(--admin); box-shadow: var(--shadow); transform: translateX(2px); }
+  .act-ico { width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0; display: grid; place-items: center; font-size: 15px; }
+  .act.warn .act-ico { background:#FEF3C7; } .act.info .act-ico { background:#DBEAFE; } .act.danger .act-ico { background:#FEE2E2; }
+  .act-body { flex: 1; min-width: 0; } .act-title { font-weight: 700; font-size: 12.5px; } .act-sub { font-size: 11px; color: var(--text-muted); }
+  .act-count { font-weight: 800; font-size: 14px; margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .act.warn .act-count { color: var(--warning); } .act.info .act-count { color: var(--bank); } .act.danger .act-count { color: var(--danger); }
+  .act .chev { color: var(--text-muted); font-size: 13px; }
+
+  .pc { padding: 14px 16px 16px; }
+  .pc-status { display: inline-flex; align-items: center; gap: 6px; background: #D1FAE5; color: var(--success); font-weight: 800; font-size: 10.5px; padding: 3px 10px; border-radius: 99px; text-transform: uppercase; letter-spacing: .5px; }
+  .pc-status.closed { background:#FEE2E2; color:var(--danger); }
+  .pc-name { font-size: 16px; font-weight: 800; margin: 10px 0 2px; }
+  .pc-range { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+  .pc-r { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; }
+  .pc-r:first-of-type { border-top: 1px dashed var(--border); margin-top: 12px; }
+  .pc-r span:first-child { color: var(--text-muted); } .pc-r span:last-child { font-weight: 700; }
+  .btn { width: 100%; padding: 11px; border-radius: var(--radius-sm); border: none; font-family: inherit; font-weight: 700; font-size: 12.5px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 12px; text-decoration: none; }
+  .btn-admin { background: var(--admin); color: #fff; } .btn-admin:hover { background: var(--admin-dark); }
+
+  .sec-body { padding: 6px 16px 14px; }
+  .stat-row { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-ico { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 14px; background: var(--admin-soft); flex-shrink: 0; }
+  .stat-name { font-weight: 600; font-size: 12.5px; } .stat-sub { font-size: 11px; color: var(--text-muted); }
+  .stat-val { margin-left: auto; font-weight: 800; font-size: 15px; }
+
+  .grid-bottom { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+  .donut-wrap { display: flex; align-items: center; gap: 16px; padding: 16px; }
+  .donut { position: relative; flex-shrink: 0; }
+  .donut-center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+  .donut-center b { font-size: 15px; font-weight: 800; display: block; } .donut-center small { font-size: 10px; color: var(--text-muted); font-weight: 600; }
+  .dl { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 7px; }
+  .dl .sw { width: 10px; height: 10px; border-radius: 3px; } .dl .nm { font-weight: 600; } .dl .vl { margin-left: auto; font-weight: 700; color: var(--text-muted); }
+  .role-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px; margin: 0 5px 6px 0; }
+  .role-chip .n { background: rgba(0,0,0,.08); padding: 0 5px; border-radius: 99px; }
+  .rc-admin { background: var(--admin-soft); color: var(--admin-dark); } .rc-b1 { background:#DBEAFE; color:#1E40AF; } .rc-b2 { background:#E0E7FF; color:#3730A3; } .rc-pen { background:#FEF3C7; color:#92400E; } .rc-per { background:#F3E8FF; color:#6B21A8; }
+  .log-item { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }
+  .log-item:last-child { border-bottom: none; }
+  .log-dot { width: 7px; height: 7px; border-radius: 99px; margin-top: 5px; flex-shrink: 0; background: var(--admin); }
+  .log-act { font-weight: 700; font-size: 12px; } .log-act .who { color: var(--admin); } .log-time { font-size: 10.5px; color: var(--text-muted); }
+
+  .gate { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+  .gate-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-lg); border: 1px solid var(--border-soft); padding: 30px; max-width: 380px; text-align: center; }
+  .gate-card h2 { font-size: 18px; margin-bottom: 8px; } .gate-card p { color: var(--text-muted); margin-bottom: 18px; }
+  .loading { min-height: 100vh; display: grid; place-items: center; color: var(--text-muted); font-weight: 600; }
+
+  .small-note { display: none; }
+  @media (max-width: 1180px) {
+    .kpi-strip { grid-template-columns: repeat(3, 1fr); }
+    .grid-main { grid-template-columns: 1fr; }
+    .grid-bottom { grid-template-columns: 1fr; }
+    .chart-side { display: none; }
+    .small-note { display: block; margin: 0 0 14px; padding: 10px 14px; background: #FEF3C7; color: #92400E; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  }
+</style>
+</head>
+<body>
+<div id="root"><div class="loading">Memuat konsol admin…</div></div>
+
+<script>
+  // Base URL aplikasi mobile (buang parameter view).
+  function appUrl() {
+    var u = window.location.href.split('?')[0];
+    return u;
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+  function rp(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
+  function jt(n) { n = Number(n || 0); if (n >= 1e9) return 'Rp ' + (n/1e9).toFixed(1).replace('.',',') + 'M'; if (n >= 1e6) return 'Rp ' + (n/1e6).toFixed(1).replace('.',',') + 'jt'; if (n >= 1e3) return 'Rp ' + Math.round(n/1e3) + 'rb'; return 'Rp ' + n; }
+  function initials(name) { return String(name||'?').split(' ').map(function(w){return w.charAt(0);}).join('').substring(0,2).toUpperCase(); }
+
+  function gate(msg) {
+    document.getElementById('root').innerHTML =
+      '<div class="gate"><div class="gate-card"><div style="font-size:34px;margin-bottom:8px;">🕌</div>' +
+      '<h2>Admin Console</h2><p>' + esc(msg) + '</p>' +
+      '<a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl()) + '">Buka Aplikasi →</a></div></div>';
+  }
+
+  function load() {
+    var token = '';
+    try { token = localStorage.getItem('kk_session') || ''; } catch(e) {}
+    if (!token) { gate('Silakan masuk terlebih dulu lewat aplikasi (di perangkat/browser yang sama).'); return; }
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (!res || res.success === false) {
+          var m = (res && res.message) || 'Gagal memuat.';
+          gate(/belum login|sesi/i.test(m) ? 'Sesi berakhir. Masuk lagi lewat aplikasi.' : m);
+          return;
+        }
+        render(res);
+      })
+      .withFailureHandler(function(e) { gate('Gagal terhubung. ' + ((e && e.message) || '')); })
+      .apiCall(token, 'getAdminConsole', []);
+  }
+
+  // Sparkline SVG dari array angka.
+  function sparkSvg(pts, color, w, h) {
+    w = w || 56; h = h || 22; var pad = 2;
+    if (!pts || pts.length < 2) return '';
+    var min = Math.min.apply(null, pts), max = Math.max.apply(null, pts), rng = (max - min) || 1;
+    var step = (w - pad*2)/(pts.length - 1);
+    var d = pts.map(function(v,i){ var x=pad+i*step; var y=h-pad-((v-min)/rng)*(h-pad*2); return (i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1); }).join(' ');
+    var last=pts[pts.length-1], lx=pad+(pts.length-1)*step, ly=h-pad-((last-min)/rng)*(h-pad*2);
+    return '<svg class="spark" width="'+w+'" height="'+h+'"><path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="'+lx.toFixed(1)+'" cy="'+ly.toFixed(1)+'" r="2.2" fill="'+color+'"/></svg>';
+  }
+  function deltaHtml(cur, prev) {
+    if (!prev) return '<span class="kpi-delta flat">—</span>';
+    var pct = Math.round((cur - prev) / prev * 100);
+    if (pct > 0) return '<span class="kpi-delta up">▲ ' + pct + '%</span>';
+    if (pct < 0) return '<span class="kpi-delta down">▼ ' + Math.abs(pct) + '%</span>';
+    return '<span class="kpi-delta flat">0%</span>';
+  }
+
+  function render(d) {
+    var arus = d.arus6 || [];
+    var sparkIn = arus.map(function(a){ return a.masuk; });
+    var sparkOut = arus.map(function(a){ return a.keluar; });
+    var prevMasuk = arus.length >= 2 ? arus[arus.length-2].masuk : 0;
+    var prevKeluar = arus.length >= 2 ? arus[arus.length-2].keluar : 0;
+    var avgIn = arus.length ? arus.reduce(function(s,a){return s+a.masuk;},0)/arus.length : 0;
+    var avgOut = arus.length ? arus.reduce(function(s,a){return s+a.keluar;},0)/arus.length : 0;
+
+    var roleMap = { 'ADMIN':'rc-admin', 'BENDAHARA_1':'rc-b1', 'BENDAHARA_2':'rc-b2', 'PENULIS':'rc-pen', 'PENEROBOS':'rc-per' };
+    var donutColors = ['#0F766E','#14B8A6','#F59E0B','#3B82F6','#A78BFA','#6B21A8'];
+
+    // ── KPI strip ──
+    var kpis = ''
+      + kpi('Saldo Tunai', 'var(--tunai)', rp(d.kasTunai), '')
+      + kpi('Saldo Bank', 'var(--bank)', rp(d.kasBank), '')
+      + kpi('Total Kas', 'var(--admin)', rp(d.totalKas), '')
+      + kpi('Masuk (bln ini)', 'var(--success)', rp(d.masukBulan), deltaHtml(d.masukBulan, prevMasuk) + sparkSvg(sparkIn, '#059669'))
+      + kpi('Keluar (bln ini)', 'var(--danger)', rp(d.keluarBulan), deltaHtml(d.keluarBulan, prevKeluar) + sparkSvg(sparkOut, '#DC2626'))
+      + '<div class="kpi"><div class="kpi-label"><span class="d" style="background:var(--admin)"></span> Transaksi Periode</div>'
+      + '<div class="kpi-value"><span class="num">' + ((d.periode && d.periode.transaksi) || 0) + '</span></div>'
+      + '<div class="kpi-foot"><span class="kpi-delta flat">periode berjalan</span></div></div>';
+
+    // ── Arus kas bars ──
+    var maxBar = Math.max(1, Math.max.apply(null, arus.map(function(a){ return Math.max(a.masuk, a.keluar); }).concat([1])));
+    var barsHtml = arus.length ? arus.map(function(a) {
+      var lbl = a.ym ? a.ym.substring(5) + '/' + a.ym.substring(2,4) : '';
+      return '<div class="bar-col"><div class="bar-stack">'
+        + '<div class="bar in" title="Masuk: ' + rp(a.masuk) + '" style="height:' + Math.round(a.masuk/maxBar*100) + '%"></div>'
+        + '<div class="bar out" title="Keluar: ' + rp(a.keluar) + '" style="height:' + Math.round(a.keluar/maxBar*100) + '%"></div>'
+        + '</div><div class="bar-label">' + esc(lbl) + '</div></div>';
+    }).join('') : '<div class="empty" style="margin:auto;">Belum ada data transaksi.</div>';
+
+    // ── Buku besar ──
+    var rows = (d.bukuBesar || []).map(function(t) {
+      var chipCls = String(t.sumber).toLowerCase() === 'bank' ? 'bank' : 'tunai';
+      var sign = t.arah === 'in' ? '+' : '−';
+      return '<tr><td class="t-date">' + esc(t.tgl) + '</td>'
+        + '<td class="t-jenis">' + esc(t.jenis) + '</td>'
+        + '<td class="t-name">' + esc(t.nama || '—') + '</td>'
+        + '<td><span class="chip ' + chipCls + '"><span class="d"></span>' + esc(t.sumber) + '</span></td>'
+        + '<td class="r amt ' + t.arah + '">' + sign + Number(t.nominal).toLocaleString('id-ID') + '</td>'
+        + '<td><span class="t-oleh"><span class="av">' + esc(initials(t.oleh)) + '</span>' + esc(t.oleh) + '</span></td></tr>';
+    }).join('');
+    var bukuBody = rows || '<tr><td colspan="6"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>';
+
+    // ── Perlu tindakan ──
+    var acts = [];
+    if (d.belumDirinci > 0) acts.push(actItem('warn', '📖', 'Buku IR belum dirinci', 'Masuk tanpa rincian', d.belumDirinci));
+    if (d.serahMenunggu > 0) acts.push(actItem('info', '🤲', 'Serah terima menunggu', 'Perlu konfirmasi bendahara', d.serahMenunggu));
+    var actHtml = acts.length ? acts.join('') : '<div class="empty" style="padding:20px 16px;">✅ Tidak ada yang perlu ditindak.</div>';
+    var actCount = acts.length;
+
+    // ── Komposisi donut ──
+    var komp = d.komposisi || [];
+    var donutHtml = komp.length ? donut(komp, donutColors) : '<div class="empty">Belum ada pemasukan.</div>';
+    var legend = komp.map(function(k, i) {
+      return '<div class="dl"><span class="sw" style="background:' + donutColors[i % donutColors.length] + '"></span><span class="nm">' + esc(k.nama) + '</span><span class="vl">' + k.pct + '%</span></div>';
+    }).join('');
+
+    // ── Peran ──
+    var roleOrder = ['ADMIN','BENDAHARA_1','BENDAHARA_2','PENULIS','PENEROBOS'];
+    var roleLabel = { 'ADMIN':'ADMIN','BENDAHARA_1':'BENDAHARA 1','BENDAHARA_2':'BENDAHARA 2','PENULIS':'PENULIS','PENEROBOS':'PENEROBOS' };
+    var roleChips = roleOrder.filter(function(r){ return (d.roles||{})[r]; }).map(function(r) {
+      return '<span class="role-chip ' + (roleMap[r]||'') + '">' + roleLabel[r] + ' <span class="n">' + d.roles[r] + '</span></span>';
+    }).join('') || '<span class="stat-sub">Belum ada user.</span>';
+
+    // ── Log ──
+    var logHtml = (d.logs || []).map(function(l) {
+      return '<div class="log-item"><div class="log-dot"></div><div><div class="log-act"><span class="who">' + esc(l.who) + '</span> ' + esc((l.action||'').toLowerCase().replace(/_/g,' ')) + '</div><div class="log-time">' + esc(l.detail) + ' · ' + esc(l.time) + '</div></div></div>';
+    }).join('') || '<div class="empty">Belum ada aktivitas.</div>';
+
+    var periodeOpen = d.periode && String(d.periode.status).toUpperCase() === 'OPEN';
+
+    document.getElementById('root').innerHTML =
+    '<div class="layout">'
+    + sidebar(d)
+    + '<div class="main"><header class="topbar">'
+      + '<div class="crumb"><b>Dashboard</b><span class="sep">/</span>' + esc(d.namaKelompok) + '</div>'
+      + '<div class="tb-spacer"></div>'
+      + '<div class="period-chip"><span class="dot"></span> ' + esc((d.periode && d.periode.nama) || 'Tanpa periode') + '</div>'
+      + '<a class="qbtn ghost" href="' + esc(appUrl()) + '">📱 Versi Mobile</a>'
+      + '<a class="qbtn primary" href="' + esc(appUrl()) + '">＋ Input Transaksi</a>'
+    + '</header><div class="content">'
+      + '<div class="small-note">💡 Konsol ini dirancang untuk layar lebar. Untuk HP, gunakan versi mobile.</div>'
+      + '<div class="kpi-strip">' + kpis + '</div>'
+      + '<div class="grid-main"><div class="stack">'
+        + '<div class="panel"><div class="panel-head"><div class="panel-title">Arus Kas <small>6 bulan terakhir</small></div></div>'
+          + '<div class="chart-body"><div class="bars">' + barsHtml + '</div>'
+          + '<div class="chart-side">'
+            + '<div class="cs-item"><div class="cs-l"><span class="sw" style="background:#059669"></span> Rata2 masuk</div><div class="cs-v num">' + jt(avgIn) + '</div></div>'
+            + '<div class="cs-item"><div class="cs-l"><span class="sw" style="background:#DC2626"></span> Rata2 keluar</div><div class="cs-v num">' + jt(avgOut) + '</div></div>'
+            + '<div class="cs-item"><div class="cs-l"><span class="sw" style="background:#0F766E"></span> Surplus rata2</div><div class="cs-v num" style="color:var(--admin)">' + jt(avgIn - avgOut) + '</div></div>'
+          + '</div></div></div>'
+        + '<div class="panel"><div class="panel-head"><div class="panel-title">Buku Besar <small>transaksi periode berjalan</small></div></div>'
+          + '<div style="overflow-x:auto;"><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Anggota / Ket.</th><th>Sumber</th><th class="r">Nominal</th><th>Oleh</th></tr></thead><tbody>' + bukuBody + '</tbody></table></div>'
+          + '<div class="table-foot"><span>Menampilkan ' + (d.bukuBesar||[]).length + ' dari ' + ((d.periode && d.periode.transaksi) || 0) + ' transaksi</span></div></div>'
+      + '</div>'
+      + '<div class="rail">'
+        + '<div class="panel"><div class="panel-head"><div class="panel-title">Perlu Tindakan</div><span class="count-badge" style="margin-left:auto;">' + actCount + '</span></div>' + actHtml + '</div>'
+        + '<div class="panel pc"><span class="pc-status ' + (periodeOpen ? '' : 'closed') + '"><span style="width:5px;height:5px;border-radius:99px;background:currentColor;display:inline-block;"></span> ' + (periodeOpen ? 'Buku Terbuka' : 'Buku Tertutup') + '</span>'
+          + '<div class="pc-name">' + esc((d.periode && d.periode.nama) || '—') + '</div>'
+          + '<div class="pc-range">Mulai: ' + esc((d.periode && d.periode.mulai) || '—') + '</div>'
+          + '<div class="pc-r"><span>Saldo awal tunai</span><span class="num">' + rp(d.periode && d.periode.saldoAwalTunai) + '</span></div>'
+          + '<div class="pc-r"><span>Saldo awal bank</span><span class="num">' + rp(d.periode && d.periode.saldoAwalBank) + '</span></div>'
+          + '<div class="pc-r"><span>Transaksi</span><span class="num">' + ((d.periode && d.periode.transaksi) || 0) + '</span></div>'
+          + '<a class="btn btn-admin" href="' + esc(appUrl()) + '">🔒 Kelola di Aplikasi</a></div>'
+        + '<div class="panel"><div class="panel-head"><div class="panel-title">Keamanan Akses</div><a class="link" style="margin-left:auto;" href="' + esc(appUrl()) + '">Kelola</a></div>'
+          + '<div class="sec-body">'
+            + '<div class="stat-row"><div class="stat-ico">📱</div><div><div class="stat-name">Perangkat terpercaya</div><div class="stat-sub">Status Aktif</div></div><div class="stat-val">' + d.perangkatAktif + '</div></div>'
+            + '<div class="stat-row"><div class="stat-ico">🔐</div><div><div class="stat-name">Sesi aktif</div><div class="stat-sub">Belum kadaluarsa</div></div><div class="stat-val">' + d.sesiAktif + '</div></div>'
+          + '</div></div>'
+      + '</div></div>'
+      + '<div class="grid-bottom">'
+        + '<div class="panel"><div class="panel-head"><div class="panel-title">Komposisi Pemasukan</div></div><div class="donut-wrap"><div class="donut">' + donutHtml + '</div><div style="flex:1;">' + legend + '</div></div></div>'
+        + '<div class="panel"><div class="panel-head"><div class="panel-title">Pengguna &amp; Peran</div><a class="link" style="margin-left:auto;" href="' + esc(appUrl()) + '">Kelola user</a></div><div class="sec-body"><div style="padding:4px 0 8px;">' + roleChips + '</div>'
+          + '<div class="stat-row" style="border-top:1px solid var(--border-soft)"><div class="stat-ico">👤</div><div><div class="stat-name">Total pengguna aktif</div><div class="stat-sub">' + d.userNonaktif + ' nonaktif</div></div><div class="stat-val">' + d.userAktif + '</div></div></div></div>'
+        + '<div class="panel"><div class="panel-head"><div class="panel-title">Aktivitas Terbaru</div><a class="link" style="margin-left:auto;" href="' + esc(appUrl()) + '">Semua log</a></div><div class="sec-body">' + logHtml + '</div></div>'
+      + '</div>'
+    + '</div></div></div>';
+
+    // Animasikan bar setelah render
+    setTimeout(function() {
+      document.querySelectorAll('.bar').forEach(function(b) { var h = b.style.height; b.style.height = '0'; requestAnimationFrame(function(){ b.style.height = h; }); });
+    }, 30);
+  }
+
+  function kpi(label, color, value, foot) {
+    return '<div class="kpi"><div class="kpi-label"><span class="d" style="background:' + color + '"></span> ' + esc(label) + '</div>'
+      + '<div class="kpi-value"><span class="num">' + esc(value) + '</span></div>'
+      + '<div class="kpi-foot">' + (foot || '<span class="kpi-delta flat">saldo terkini</span>') + '</div></div>';
+  }
+  function actItem(cls, ico, title, sub, count) {
+    return '<div class="act ' + cls + '"><div class="act-ico">' + ico + '</div><div class="act-body"><div class="act-title">' + esc(title) + '</div><div class="act-sub">' + esc(sub) + '</div></div><div class="act-count">' + count + ' <span class="chev">›</span></div></div>';
+  }
+  function donut(komp, colors) {
+    var size=118, stroke=20, r=(size-stroke)/2, cx=size/2, cy=size/2, circ=2*Math.PI*r, off=0;
+    var total = komp.reduce(function(s,k){ return s + k.nilai; }, 0);
+    var svg='<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" style="transform:rotate(-90deg)"><circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#EFEDE4" stroke-width="'+stroke+'"/>';
+    komp.forEach(function(k, i){ var frac = total ? k.nilai/total : 0; var len=frac*circ; svg+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+colors[i%colors.length]+'" stroke-width="'+stroke+'" stroke-dasharray="'+len+' '+(circ-len)+'" stroke-dashoffset="'+(-off)+'"/>'; off+=len; });
+    svg+='</svg>';
+    return svg + '<div class="donut-center"><b>' + jt(total) + '</b><small>total masuk</small></div>';
+  }
+  function sidebar(d) {
+    var app = esc(appUrl());
+    function item(ico, label, active) { return '<a class="nav-item' + (active?' active':'') + '" href="' + app + '"><span class="ico">' + ico + '</span> ' + label + '</a>'; }
+    return '<aside class="sidebar"><div class="brand"><div class="brand-mark">🕌</div><div><div class="brand-name">Kas Kelompok</div><div class="brand-sub">Admin Console</div></div></div>'
+      + '<nav class="nav">'
+        + '<div class="nav-group"><div class="nav-label">Ringkasan</div>' + item('📊','Dashboard', true) + item('🧮','Pemeriksaan Saldo') + item('📄','Laporan PDF') + '</div>'
+        + '<div class="nav-group"><div class="nav-label">Keuangan</div>' + item('📖','Buku IR') + item('🏘️','Setoran Desa') + item('🏦','Bank &amp; Rekonsiliasi') + item('📈','Laporan Setoran') + '</div>'
+        + '<div class="nav-group"><div class="nav-label">Jamaah</div>' + item('👥','Anggota') + item('🤝','Terobosan Kelompok') + item('🤲','Serah Terima') + '</div>'
+        + '<div class="nav-group"><div class="nav-label">Tata Kelola</div>' + item('🔑','Kelola User') + item('🛡️','Hak Akses') + item('📱','Perangkat &amp; Sesi') + item('🗂️','Master &amp; Pos') + item('🗓️','Periode') + item('📜','Activity Log') + '</div>'
+      + '</nav>'
+      + '<div class="sidebar-foot"><div class="sf-avatar">' + esc((d.user && d.user.inisial) || 'A') + '</div><div style="flex:1; min-width:0;"><div class="sf-name">' + esc((d.user && d.user.nama) || 'Admin') + '</div><div class="sf-role">' + esc((d.user && d.user.role) || 'ADMIN') + '</div></div><a href="' + app + '" style="cursor:pointer;font-size:14px;text-decoration:none;" title="Aplikasi">⏻</a></div></aside>';
+  }
+
+  load();
+</script>
+</body>
+</html>

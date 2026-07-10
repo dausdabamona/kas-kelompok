@@ -139,6 +139,15 @@ function getAllRoles_() {
 }
 
 function doGet(e) {
+  // Konsol admin desktop terpisah: ?view=admin (khusus ADMIN, gate di server).
+  var view = (e && e.parameter && e.parameter.view) ? String(e.parameter.view) : '';
+  if (view === 'admin') {
+    return HtmlService.createTemplateFromFile('AdminConsole')
+      .evaluate()
+      .setTitle('Admin Console · Kas Kelompok')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
     .setTitle('Kas Kelompok')
@@ -148,6 +157,12 @@ function doGet(e) {
 
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+// URL web app (untuk membuka Admin Console desktop dari app mobile).
+function getAppUrl() {
+  try { return { success: true, url: ScriptApp.getService().getUrl() }; }
+  catch(e) { return { success: false, message: e.message }; }
 }
 
 function fmtRp(angka) {

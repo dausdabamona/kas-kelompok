@@ -702,6 +702,152 @@ function getRiwayatTransaksiSaya() {
 }
 
 // ──────────────────────────────────────────────────────
+// ADMIN CONSOLE (desktop) — agregasi data nyata, KHUSUS ADMIN
+// Dipakai halaman ?view=admin. Menggabungkan saldo, periode, arus kas
+// 6 bulan, buku besar terbaru, komposisi pemasukan, peran, keamanan,
+// perlu-tindakan, dan activity log — dari sheet yang sudah ada.
+// ──────────────────────────────────────────────────────
+function getAdminConsole() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    if (auth.user.role !== CONFIG.ROLES.ADMIN) return { success: false, message: 'Khusus Admin.' };
+
+    var ss = getSS_();
+    var periode = getPeriodeAktif();
+    var periodeId = periode ? periode.id : null;
+
+    var namaKelompok = 'Kas Kelompok';
+    try {
+      var sheetK = ss.getSheetByName(CONFIG.SHEETS.KELOMPOK);
+      if (sheetK && sheetK.getLastRow() > 1) namaKelompok = sheetK.getRange(2, 2).getValue() || namaKelompok;
+    } catch(e) {}
+
+    var saldo = { tunai: 0, bank: 0 };
+    try { saldo = calculateSaldo(periodeId, periode); } catch(e) {}
+
+    // Peta nama jenis & anggota & user
+    var namaMasuk = {}, katMasuk = {}, namaKeluar = {}, namaAnggota = {}, namaUser = {};
+    var sheetP = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (sheetP) { var rp = sheetP.getDataRange().getValues(); for (var i = 1; i < rp.length; i++) { if (rp[i][0]) { namaMasuk[String(rp[i][0])] = String(rp[i][1] || ''); katMasuk[String(rp[i][0])] = String(rp[i][2] || 'Umum'); } } }
+    var sheetPK = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
+    if (sheetPK) { var rpk = sheetPK.getDataRange().getValues(); for (var i = 1; i < rpk.length; i++) { if (rpk[i][0]) namaKeluar[String(rpk[i][0])] = String(rpk[i][1] || ''); } }
+    var sheetA = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (sheetA) { var ra = sheetA.getDataRange().getValues(); for (var i = 1; i < ra.length; i++) { if (ra[i][0]) namaAnggota[String(ra[i][0])] = String(ra[i][1] || ''); } }
+    var users = getUserList_();
+    users.forEach(function(u) { namaUser[u.email.toLowerCase()] = u.nama || u.email; });
+
+    // Baca transaksi masuk & keluar
+    var trx = []; // {tgl, ym, jenis, kat, nama, sumber, nominal, arah, oleh, periodeId}
+    var shIn = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (shIn) {
+      var rin = shIn.getDataRange().getValues(); var hin = headerMap_(rin[0]);
+      for (var i = 1; i < rin.length; i++) {
+        if (!hGet_(rin[i], hin, 'id', 0)) continue;
+        var jid = String(hGet_(rin[i], hin, 'jenisid', 2) || '');
+        var tgl = toDateStr_(hGet_(rin[i], hin, 'tanggal', 4));
+        var aid = String(hGet_(rin[i], hin, 'anggotaid', 3) || '');
+        var email = String(hGet_(rin[i], hin, 'createdby', 8) || '').toLowerCase();
+        trx.push({ tgl: tgl, ym: tgl.substring(0, 7), jenis: namaMasuk[jid] || 'Pemasukan', kat: katMasuk[jid] || 'Umum',
+          nama: namaAnggota[aid] || '', sumber: String(hGet_(rin[i], hin, 'sumberkas', 6) || 'Tunai'),
+          nominal: Number(hGet_(rin[i], hin, 'nominal', 5)) || 0, arah: 'in', oleh: namaUser[email] || email,
+          periodeId: String(hGet_(rin[i], hin, 'periodeid', 1) || '') });
+      }
+    }
+    var shOut = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+    if (shOut) {
+      var rout = shOut.getDataRange().getValues(); var hout = headerMap_(rout[0]);
+      for (var i = 1; i < rout.length; i++) {
+        if (!hGet_(rout[i], hout, 'id', 0)) continue;
+        var jid2 = String(hGet_(rout[i], hout, 'jenisid', 2) || '');
+        var tgl2 = toDateStr_(hGet_(rout[i], hout, 'tanggal', 3));
+        var email2 = String(hGet_(rout[i], hout, 'createdby', 7) || '').toLowerCase();
+        trx.push({ tgl: tgl2, ym: tgl2.substring(0, 7), jenis: namaKeluar[jid2] || 'Pengeluaran', kat: 'Umum',
+          nama: String(hGet_(rout[i], hout, 'catatan', 6) || ''), sumber: String(hGet_(rout[i], hout, 'sumberkas', 5) || 'Tunai'),
+          nominal: Number(hGet_(rout[i], hout, 'nominal', 4)) || 0, arah: 'out', oleh: namaUser[email2] || email2,
+          periodeId: String(hGet_(rout[i], hout, 'periodeid', 1) || '') });
+      }
+    }
+
+    // Arus kas 6 bulan terakhir (dari semua transaksi, per bulan)
+    var byMonth = {};
+    trx.forEach(function(t) { if (!t.ym) return; if (!byMonth[t.ym]) byMonth[t.ym] = { masuk: 0, keluar: 0 }; byMonth[t.ym][t.arah === 'in' ? 'masuk' : 'keluar'] += t.nominal; });
+    var months = Object.keys(byMonth).sort();
+    var arus6 = months.slice(-6).map(function(m) { return { ym: m, masuk: byMonth[m].masuk, keluar: byMonth[m].keluar }; });
+
+    // Masuk/keluar bulan berjalan
+    var nowYm = toDateStr_(new Date()).substring(0, 7);
+    var masukBulan = (byMonth[nowYm] || {}).masuk || 0;
+    var keluarBulan = (byMonth[nowYm] || {}).keluar || 0;
+
+    // Buku besar: transaksi periode berjalan terbaru (maks 12)
+    var bukuBesar = trx.filter(function(t) { return !periodeId || t.periodeId === periodeId; })
+      .sort(function(a, b) { return a.tgl < b.tgl ? 1 : (a.tgl > b.tgl ? -1 : 0); })
+      .slice(0, 12);
+    var trxCountPeriode = trx.filter(function(t) { return !periodeId || t.periodeId === periodeId; }).length;
+
+    // Komposisi pemasukan (per jenis, periode berjalan) → persentase
+    var komp = {}, totalMasukP = 0;
+    trx.forEach(function(t) { if (t.arah !== 'in') return; if (periodeId && t.periodeId !== periodeId) return; komp[t.jenis] = (komp[t.jenis] || 0) + t.nominal; totalMasukP += t.nominal; });
+    var komposisi = Object.keys(komp).map(function(k) { return { nama: k, nilai: komp[k], pct: totalMasukP ? Math.round(komp[k] / totalMasukP * 100) : 0 }; })
+      .sort(function(a, b) { return b.nilai - a.nilai; }).slice(0, 6);
+
+    // Peran & user
+    var roleCount = {}; var aktif = 0, nonaktif = 0;
+    users.forEach(function(u) {
+      var act = String(u.status || 'Aktif').toLowerCase() !== 'nonaktif';
+      if (act) aktif++; else nonaktif++;
+      roleCount[u.role] = (roleCount[u.role] || 0) + 1;
+    });
+
+    // Keamanan: perangkat aktif & sesi aktif
+    var perangkatAktif = 0, sesiAktif = 0;
+    var shDev = ss.getSheetByName(CONFIG.SHEETS.PERANGKAT);
+    if (shDev) { var rd = shDev.getDataRange().getValues(); var hd = headerMap_(rd[0]); for (var i = 1; i < rd.length; i++) { if (hGet_(rd[i], hd, 'id', 0) && String(hGet_(rd[i], hd, 'status', 6)) === 'Aktif') perangkatAktif++; } }
+    var shSes = ss.getSheetByName(CONFIG.SHEETS.SESI);
+    var nowMs = new Date().getTime();
+    if (shSes) { var rs = shSes.getDataRange().getValues(); var hs = headerMap_(rs[0]); for (var i = 1; i < rs.length; i++) { if (String(hGet_(rs[i], hs, 'status', 5)) !== 'Aktif') continue; var ev = hGet_(rs[i], hs, 'kadaluarsa', 4); var em = (ev instanceof Date) ? ev.getTime() : new Date(ev).getTime(); if (nowMs <= em) sesiAktif++; } }
+
+    // Perlu tindakan
+    var belumDirinci = 0;
+    try { var bc = CacheService.getScriptCache().get('buku_ir_data'); if (bc) { var bd = JSON.parse(bc); belumDirinci = (bd.data && bd.data.belumDirincikan) ? bd.data.belumDirincikan.length : 0; } } catch(e) {}
+    var serahMenunggu = 0;
+    var shST = ss.getSheetByName(CONFIG.SHEETS.SERAH_TERIMA);
+    if (shST) { var rst = shST.getDataRange().getValues(); var hst = headerMap_(rst[0]); for (var i = 1; i < rst.length; i++) { if (hGet_(rst[i], hst, 'id', 0) && String(hGet_(rst[i], hst, 'status', 7)) === 'Menunggu') serahMenunggu++; } }
+
+    // Activity log terbaru (maks 8)
+    var logs = [];
+    var shLog = ss.getSheetByName(CONFIG.SHEETS.LOG);
+    if (shLog) {
+      var rl = shLog.getDataRange().getValues();
+      for (var i = rl.length - 1; i >= 1 && logs.length < 8; i--) {
+        if (!rl[i][0]) continue;
+        var em3 = String(rl[i][1] || '').toLowerCase();
+        logs.push({ who: namaUser[em3] || rl[i][1] || 'Sistem', action: String(rl[i][2] || ''), detail: String(rl[i][3] || ''), time: toDateStr_(rl[i][0]) });
+      }
+    }
+
+    var inisial = (auth.user.nama || 'A').split(' ').map(function(w) { return w.charAt(0); }).join('').substring(0, 2).toUpperCase();
+
+    return {
+      success: true,
+      namaKelompok: namaKelompok,
+      user: { nama: auth.user.nama, role: auth.user.role, inisial: inisial },
+      periode: periode ? { nama: periode.nama, mulai: periode.tanggalMulai || '', status: periode.status, saldoAwalTunai: periode.saldoAwalTunai || 0, saldoAwalBank: periode.saldoAwalBank || 0, transaksi: trxCountPeriode } : null,
+      kasTunai: saldo.tunai, kasBank: saldo.bank, totalKas: saldo.tunai + saldo.bank,
+      masukBulan: masukBulan, keluarBulan: keluarBulan,
+      arus6: arus6, bukuBesar: bukuBesar, komposisi: komposisi,
+      roles: roleCount, userAktif: aktif, userNonaktif: nonaktif,
+      perangkatAktif: perangkatAktif, sesiAktif: sesiAktif,
+      belumDirinci: belumDirinci, serahMenunggu: serahMenunggu,
+      logs: logs
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ──────────────────────────────────────────────────────
 // MASTER DATA
 // ──────────────────────────────────────────────────────
 // MASTER DATA — satu fungsi untuk semua, dengan cache
