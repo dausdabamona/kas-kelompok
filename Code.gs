@@ -24,6 +24,9 @@ const CONFIG = {
     LOG: 'Activity Log',
     KAS_PENEROBOS: 'Kas Penerobos',
     SERAH_TERIMA: 'Serah Terima',
+    // FASE 2: identitas berbasis token
+    PERANGKAT: 'Perangkat',
+    SESI: 'Sesi',
   },
   ROLES: {
     ADMIN: 'ADMIN',
@@ -198,8 +201,10 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.USER,
-      headers: ['Email', 'Nama', 'Role', 'Status', 'Created'],
-      sample: ['dausdaba@gmail.com', 'Firdaus', 'ADMIN', 'Aktif', new Date()]
+      // FASE 2: 'PIN Hash' & 'PIN Salt' menyimpan HANYA hash PIN (SHA-256 + salt + pepper),
+      // bukan PIN asli. Ditambahkan idempoten via migrasiKeamanan() untuk sheet lama.
+      headers: ['Email', 'Nama', 'Role', 'Status', 'Created', 'PIN Hash', 'PIN Salt'],
+      sample: ['dausdaba@gmail.com', 'Firdaus', 'ADMIN', 'Aktif', new Date(), '', '']
     },
     {
       name: CONFIG.SHEETS.PEMASUKAN,
@@ -305,8 +310,73 @@ function getSheetSchema_() {
       name: CONFIG.SHEETS.LOG,
       headers: ['Timestamp', 'User', 'Action', 'Detail'],
       note: 'Log otomatis — JANGAN edit manual'
+    },
+    {
+      // FASE 2: perangkat terpercaya. Simpan HANYA hash token perangkat.
+      name: CONFIG.SHEETS.PERANGKAT,
+      headers: ['ID', 'Email', 'Device Hash', 'Nama Perangkat', 'Dibuat', 'Terakhir Dipakai', 'Status'],
+      note: 'Status: Aktif / Dicabut | Device Hash = hash token perangkat (bukan token asli) | JANGAN edit manual'
+    },
+    {
+      // FASE 2: sesi aktif. Simpan HANYA hash session token.
+      name: CONFIG.SHEETS.SESI,
+      headers: ['Token Hash', 'Email', 'Device ID', 'Dibuat', 'Kadaluarsa', 'Status'],
+      note: 'Status: Aktif / Kadaluarsa / Dicabut | Token Hash = hash session token | JANGAN edit manual'
     }
   ];
+}
+
+// ══════════════════════════════════════════════════════
+// MIGRASI KEAMANAN (FASE 2) — idempoten, jalankan dari editor:
+//   Run → migrasiKeamanan
+// - Buat sheet "Perangkat" & "Sesi" bila belum ada.
+// - Tambah kolom "PIN Hash" & "PIN Salt" di Master User bila belum ada.
+// - Pastikan pepper keamanan tersimpan di Script Properties (dibuat sekali).
+// Tidak menghapus/mengubah data yang sudah ada.
+// ══════════════════════════════════════════════════════
+function migrasiKeamanan() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var log = [];
+
+  // 1. Buat sheet Perangkat & Sesi (pakai definisi dari getSheetSchema_)
+  var SCHEMA = getSheetSchema_();
+  [CONFIG.SHEETS.PERANGKAT, CONFIG.SHEETS.SESI].forEach(function(nama) {
+    var def = null;
+    for (var i = 0; i < SCHEMA.length; i++) { if (SCHEMA[i].name === nama) { def = SCHEMA[i]; break; } }
+    if (!def) return;
+    var sheet = ss.getSheetByName(nama);
+    if (!sheet) {
+      sheet = ss.insertSheet(nama);
+      sheet.appendRow(def.headers);
+      sheet.getRange(1, 1, 1, def.headers.length)
+        .setFontWeight('bold').setBackground('#1E40AF').setFontColor('#FFFFFF');
+      sheet.setFrozenRows(1);
+      if (def.note) sheet.getRange(1, 1).setNote(def.note);
+      log.push('✅ DIBUAT: ' + nama);
+    } else {
+      log.push('⏭️ SUDAH ADA: ' + nama);
+    }
+  });
+
+  // 2. Tambah kolom PIN di Master User (idempoten via ensureColumns_)
+  var sheetUser = ss.getSheetByName(CONFIG.SHEETS.USER);
+  if (sheetUser) {
+    ensureColumns_(sheetUser, ['PIN Hash', 'PIN Salt']);
+    log.push('🔧 KOLOM PIN dipastikan di ' + CONFIG.SHEETS.USER);
+  } else {
+    log.push('⚠️ Master User tidak ditemukan');
+  }
+
+  // 3. Pastikan pepper ada di Script Properties
+  var pepper = getPepper_();
+  log.push(pepper ? '🔒 Pepper keamanan siap (Script Properties)' : '⚠️ Gagal menyiapkan pepper');
+
+  Logger.log(log.join('\n'));
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.alert('Migrasi Keamanan Selesai ✅', log.join('\n'), ui.ButtonSet.OK);
+  } catch(e) {}
+  return { success: true, log: log };
 }
 
 // ══════════════════════════════════════════════════════
