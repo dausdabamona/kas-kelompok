@@ -1,0 +1,10 @@
+# Hanya file sumber Apps Script yang di-push. Sisanya diabaikan.
+**/**
+
+!Auth.gs
+!Code.gs
+!Data.gs
+!Index.html
+!Javascript.html
+!Stylesheet.html
+!appsscript.json
