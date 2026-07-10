@@ -375,6 +375,45 @@ function deleteUser(email) {
 var SEC_OTP_TTL_MS_ = 5 * 60 * 1000;           // OTP berlaku 5 menit
 var SEC_SESSION_TTL_MS_ = 12 * 60 * 60 * 1000; // sesi berlaku 12 jam
 
+// FASE 4: rate-limit & lockout (CacheService, per email)
+var SEC_MAX_FAIL_ = 5;         // maks percobaan gagal sebelum terkunci
+var SEC_LOCK_TTL_S_ = 15 * 60; // durasi kunci 15 menit (detik)
+
+function _authFailKey_(email) { return 'authfail_' + String(email || '').toLowerCase().trim(); }
+function _authLockKey_(email) { return 'authlock_' + String(email || '').toLowerCase().trim(); }
+
+// Cek apakah email sedang terkunci akibat terlalu banyak percobaan gagal.
+function isAuthLocked_(email) {
+  try { return !!CacheService.getScriptCache().get(_authLockKey_(email)); } catch(e) { return false; }
+}
+// Catat 1 percobaan gagal; kunci 15 menit bila mencapai batas.
+function recordAuthFail_(email) {
+  try {
+    var c = CacheService.getScriptCache();
+    var n = parseInt(c.get(_authFailKey_(email)) || '0', 10) + 1;
+    c.put(_authFailKey_(email), String(n), SEC_LOCK_TTL_S_);
+    if (n >= SEC_MAX_FAIL_) c.put(_authLockKey_(email), '1', SEC_LOCK_TTL_S_);
+    return n;
+  } catch(e) { return 0; }
+}
+// Reset hitungan gagal & kunci setelah sukses.
+function clearAuthFail_(email) {
+  try { var c = CacheService.getScriptCache(); c.remove(_authFailKey_(email)); c.remove(_authLockKey_(email)); } catch(e) {}
+}
+// Throttle pengiriman OTP: cooldown 60 dtk + maks 5/jam per email (anti-spam).
+function _otpThrottleOk_(email) {
+  try {
+    var norm = String(email || '').toLowerCase().trim();
+    var c = CacheService.getScriptCache();
+    if (c.get('otpcd_' + norm)) return false;
+    var cnt = parseInt(c.get('otpcnt_' + norm) || '0', 10);
+    if (cnt >= 5) return false;
+    c.put('otpcd_' + norm, '1', 60);
+    c.put('otpcnt_' + norm, String(cnt + 1), 3600);
+    return true;
+  } catch(e) { return true; }
+}
+
 // Pepper rahasia dari Script Properties (dibuat sekali bila belum ada).
 function getPepper_() {
   var props = PropertiesService.getScriptProperties();
@@ -418,6 +457,8 @@ function requestOtp_(email) {
     if (!norm) return neutral;
     var user = getUserByEmail_(norm);
     if (!user || String(user.status || 'Aktif').toLowerCase() === 'nonaktif') return neutral;
+    // FASE 4: jangan kirim bila akun terkunci atau throttle (pesan tetap netral).
+    if (isAuthLocked_(norm) || !_otpThrottleOk_(norm)) return neutral;
     var otp = '' + Math.floor(100000 + Math.random() * 900000); // 6 digit
     var payload = JSON.stringify({ h: hashSecret_(otp, norm), e: (new Date().getTime() + SEC_OTP_TTL_MS_) });
     CacheService.getScriptCache().put('otp_' + norm, payload, Math.floor(SEC_OTP_TTL_MS_ / 1000));
@@ -436,13 +477,18 @@ function requestOtp_(email) {
 function verifyOtp_(email, otp, deviceName) {
   try {
     var norm = String(email || '').toLowerCase().trim();
+    if (isAuthLocked_(norm)) return { success: false, message: 'Terlalu banyak percobaan. Coba lagi dalam 15 menit.' };
     var cache = CacheService.getScriptCache();
     var raw = cache.get('otp_' + norm);
     if (!raw) return { success: false, message: 'OTP tidak ditemukan atau kadaluarsa. Minta OTP baru.' };
     var data = JSON.parse(raw);
     if (new Date().getTime() > data.e) { cache.remove('otp_' + norm); return { success: false, message: 'OTP kadaluarsa. Minta OTP baru.' }; }
-    if (hashSecret_(String(otp || ''), norm) !== data.h) return { success: false, message: 'Kode OTP salah.' };
+    if (hashSecret_(String(otp || ''), norm) !== data.h) {
+      recordAuthFail_(norm);
+      return { success: false, message: 'Kode OTP salah.' };
+    }
     cache.remove('otp_' + norm); // OTP sekali pakai
+    clearAuthFail_(norm);
     var user = getUserByEmail_(norm);
     if (!user || String(user.status || 'Aktif').toLowerCase() === 'nonaktif') return { success: false, message: 'Akun tidak aktif.' };
     var dev = issueDeviceToken_(user.email, deviceName);
@@ -543,11 +589,17 @@ function verifyPin_(email, pin) {
 // Login harian: perangkat terpercaya + PIN → session token.
 function loginWithPin_(email, pin, deviceToken) {
   try {
+    var norm = String(email || '').toLowerCase().trim();
+    if (isAuthLocked_(norm)) return { success: false, message: 'Terlalu banyak percobaan. Coba lagi dalam 15 menit.' };
     var dev = verifyDevice_(email, deviceToken);
     if (!dev.ok) return { success: false, message: 'Perangkat tidak dikenali. Silakan verifikasi via OTP.' };
     var pinCheck = verifyPin_(email, pin);
     if (pinCheck.noPin) return { success: false, message: 'PIN belum diatur. Masuk via OTP lalu atur PIN.' };
-    if (!pinCheck.ok) return { success: false, message: 'PIN salah.' };
+    if (!pinCheck.ok) {
+      recordAuthFail_(norm);
+      return { success: false, message: 'PIN salah.' };
+    }
+    clearAuthFail_(norm);
     var user = getUserByEmail_(email);
     if (!user || String(user.status || 'Aktif').toLowerCase() === 'nonaktif') return { success: false, message: 'Akun tidak aktif.' };
     var sess = issueSession_(user.email, dev.deviceId);
@@ -715,4 +767,109 @@ function apiCurrentUser(token) {
   var user = resolveUser_(token);
   if (!user) return { success: false };
   return { success: true, user: user };
+}
+
+// ════════════════════════════════════════════════════════
+// FASE 4 — KELOLA PERANGKAT (Admin) + HOUSEKEEPING SESI
+// Endpoint dipanggil lewat dispatcher apiCall (token-aware); tetap
+// menegakkan requirePerm('user.manage') sendiri.
+// ════════════════════════════════════════════════════════
+
+// Cabut semua sesi milik sebuah perangkat (dipakai saat perangkat dicabut).
+function invalidateSessionsByDevice_(deviceId) {
+  try {
+    if (!deviceId) return 0;
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.SESI);
+    if (!sheet) return 0;
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var colStat = (h['status'] !== undefined ? h['status'] : 5) + 1;
+    var n = 0;
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'deviceid', 2)) !== String(deviceId)) continue;
+      if (String(hGet_(rows[i], h, 'status', 5)) !== 'Aktif') continue;
+      sheet.getRange(i + 1, colStat).setValue('Dicabut');
+      n++;
+    }
+    return n;
+  } catch(e) { return 0; }
+}
+
+// Daftar perangkat terpercaya (semua user) untuk halaman Admin.
+function getDeviceList() {
+  var auth = requirePerm('user.manage');
+  if (!auth.success) return auth;
+  try {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PERANGKAT);
+    if (!sheet) return { success: true, data: [] };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var list = [];
+    for (var i = 1; i < rows.length; i++) {
+      if (!hGet_(rows[i], h, 'id', 0)) continue;
+      list.push({
+        id: String(hGet_(rows[i], h, 'id', 0)),
+        email: String(hGet_(rows[i], h, 'email', 1) || ''),
+        nama: String(hGet_(rows[i], h, 'namaperangkat', 3) || 'Perangkat'),
+        dibuat: toDateStr_(hGet_(rows[i], h, 'dibuat', 4)),
+        terakhir: toDateStr_(hGet_(rows[i], h, 'terakhirdipakai', 5)),
+        status: String(hGet_(rows[i], h, 'status', 6) || '')
+      });
+    }
+    // Terbaru dipakai di atas.
+    list.sort(function(a, b) { return (a.terakhir < b.terakhir) ? 1 : (a.terakhir > b.terakhir ? -1 : 0); });
+    return { success: true, data: list };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// Cabut satu perangkat: Status=Dicabut + invalidasi sesi terkait.
+function revokeDevice(deviceId) {
+  var auth = requirePerm('user.manage');
+  if (!auth.success) return auth;
+  try {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PERANGKAT);
+    if (!sheet) return { success: false, message: 'Sheet Perangkat tidak ditemukan.' };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) !== String(deviceId)) continue;
+      var colStat = (h['status'] !== undefined ? h['status'] : 6) + 1;
+      sheet.getRange(i + 1, colStat).setValue('Dicabut');
+      var n = invalidateSessionsByDevice_(deviceId);
+      logActivity(auth.user.email, 'CABUT_PERANGKAT', deviceId + ' (' + n + ' sesi dicabut)');
+      return { success: true, sesiDicabut: n };
+    }
+    return { success: false, message: 'Perangkat tidak ditemukan.' };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// Housekeeping: tandai semua sesi kadaluarsa. Bisa dipanggil dari editor
+// atau dijadwalkan trigger harian. verifySession_ juga menandai saat diakses.
+function cleanupSessions_() {
+  try {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.SESI);
+    if (!sheet) return { success: true, expired: 0 };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var colStat = (h['status'] !== undefined ? h['status'] : 5) + 1;
+    var nowMs = new Date().getTime();
+    var n = 0;
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'status', 5)) !== 'Aktif') continue;
+      var expVal = hGet_(rows[i], h, 'kadaluarsa', 4);
+      var expMs = (expVal instanceof Date) ? expVal.getTime() : new Date(expVal).getTime();
+      if (nowMs > expMs) { sheet.getRange(i + 1, colStat).setValue('Kadaluarsa'); n++; }
+    }
+    return { success: true, expired: n };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
 }

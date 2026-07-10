@@ -442,13 +442,14 @@ var App = {
       setoranDesa: (!isPenerobos && App.can('view.setoranDesa')) ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '',
       laporanSetoran: (!isPenerobos && App.can('view.laporanSetoran')) ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '',
       laporanPDF: (!isPenerobos && App.can('view.laporanPDF')) ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '',
-      setting: (!isPenerobos && App.can('view.setting')) ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : ''
+      setting: (!isPenerobos && App.can('view.setting')) ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '',
+      kelolaPerangkat: App.can('user.manage') ? '<div class="menu-item" onclick="App.pageKelolaPerangkat()"><span class="icon">📱</span><span>Kelola Perangkat</span></div>' : ''
     };
     var groups = [
       { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah] },
       { judul: '💰 Keuangan', items: [item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
       { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF] },
-      { judul: '⚙️ Admin', items: [item.setting] }
+      { judul: '⚙️ Admin', items: [item.setting, item.kelolaPerangkat] }
     ];
     var out = '';
     groups.forEach(function(g) {
@@ -2950,6 +2951,61 @@ var App = {
   },
   // Alias lama.
   _esc: function(s) { return this.escapeHtml(s); },
+
+  // ─────────────────────────────────────────────────
+  // KELOLA PERANGKAT (Admin) — Fase 4
+  // ─────────────────────────────────────────────────
+  pageKelolaPerangkat: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat daftar perangkat...');
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) {
+        if (r && r.success) self.renderKelolaPerangkat(r.data || []);
+        else self.showError((r && r.message) || 'Gagal memuat perangkat');
+      })
+      .withFailureHandler(function(err) { self.showError((err && err.message) || 'Gagal memuat perangkat'); })
+      .getDeviceList();
+  },
+
+  renderKelolaPerangkat: function(data) {
+    var self = this;
+    var content;
+    if (!data.length) {
+      content = '<div class="info-box">Belum ada perangkat terpercaya.</div>';
+    } else {
+      var cards = data.map(function(d) {
+        var aktif = String(d.status).toLowerCase() === 'aktif';
+        var badge = '<span class="badge" style="background:' + (aktif ? '#dcfce7' : '#f3f4f6') + ';color:' + (aktif ? '#166534' : '#888') + ';">' + self.escapeHtml(d.status || '-') + '</span>';
+        var tombol = aktif
+          ? '<button class="action-btn-sm" style="background:var(--danger);color:#fff;" onclick="App.confirmRevokeDevice(\'' + self.escapeHtml(d.id).replace(/'/g, "\\'") + '\',\'' + self.escapeHtml(d.nama).replace(/'/g, "\\'") + '\')">Cabut</button>'
+          : '';
+        return '<div class="card" style="margin-bottom:10px;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">' +
+              '<div style="min-width:0;">' +
+                '<div style="font-weight:600;">' + self.escapeHtml(d.nama) + ' ' + badge + '</div>' +
+                '<div style="font-size:12px;color:var(--text-muted);">' + self.escapeHtml(d.email) + '</div>' +
+                '<div style="font-size:12px;color:var(--text-muted);">Dibuat: ' + self.formatDate(d.dibuat) + ' · Terakhir: ' + self.formatDate(d.terakhir) + '</div>' +
+              '</div>' + tombol +
+            '</div>' +
+          '</div>';
+      }).join('');
+      content = '<div class="info-box" style="margin-bottom:12px;">Cabut perangkat yang hilang/tidak dikenal. Sesi aktif perangkat itu langsung berakhir.</div>' + cards;
+    }
+    document.getElementById('app').innerHTML = this.pageWrapper('Kelola Perangkat', content);
+  },
+
+  confirmRevokeDevice: function(deviceId, nama) {
+    if (!confirm('Cabut perangkat "' + nama + '"?\nSemua sesi aktif perangkat ini akan berakhir.')) return;
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) {
+        if (r && r.success) { self.toast('Perangkat dicabut (' + (r.sesiDicabut || 0) + ' sesi berakhir).'); self.pageKelolaPerangkat(); }
+        else self.toast((r && r.message) || 'Gagal mencabut perangkat.');
+      })
+      .withFailureHandler(function() { self.toast('Gagal terhubung.'); })
+      .revokeDevice(deviceId);
+  },
 
   pageWrapper: function(title, content, hideBack) {
     var backBtn = hideBack ? '<span style="width:36px;"></span>' : '<button class="btn-back" onclick="App.back()">‹</button>';
