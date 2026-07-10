@@ -3,33 +3,10 @@
 var __REQ_USER_ = null;
 
 function getCurrentUser() {
-  try {
-    // FASE 2b: sumber identitas utama = session token (di-resolve apiCall →
-    // __REQ_USER_). Fallback ke sesi Google hanya sementara (feature-flag)
-    // sampai frontend sepenuhnya token-based di Fase 2c; akan dihapus setelah itu.
-    if (__REQ_USER_) return __REQ_USER_;
-
-    var email = '';
-    try { email = Session.getActiveUser().getEmail(); } catch(e) {}
-    if (!email) return null;
-
-    // Cari user di Master User
-    var users = getUserList_();
-    for (var i = 0; i < users.length; i++) {
-      if (users[i].email.toLowerCase().trim() === email.toLowerCase().trim()) {
-        var user = users[i];
-        if (String(user.status || 'Aktif').toLowerCase() === 'nonaktif') {
-          return { notRegistered: true, nonaktif: true, email: email };
-        }
-        user.perms = getPermsForRole_(user.role);
-        return user;
-      }
-    }
-    // Email Google terdeteksi tapi tidak terdaftar di Master User
-    return { notRegistered: true, email: email };
-  } catch(e) {
-    return null;
-  }
+  // Tidy-up: identitas TUNGGAL dari session token (di-set apiCall → __REQ_USER_).
+  // Fallback sesi Google dihapus → V2 tertutup 100% (pada deploy anonim,
+  // Session tak lagi bisa mengklaim identitas apa pun).
+  return __REQ_USER_ || null;
 }
 
 function getGoogleEmail() {
@@ -704,6 +681,7 @@ function resolveUser_(token) {
 // (setup/migrasi/util/rahasia). Helper privat (akhiran '_') otomatis ditolak.
 var API_DENYLIST_ = {
   'apiCall': true, 'doGet': true, 'include': true,
+  'loginWithEmail': true, 'getGoogleEmail': true, 'getCurrentUser': true,
   'setupSheets': true, 'repairSheetHeaders': true, 'migratePosSetoran': true,
   'migrasiKeamanan': true,
   'fmtRp': true, 'fmtTanggal': true, 'generateID': true, 'logActivity': true,

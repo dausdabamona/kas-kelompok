@@ -217,7 +217,17 @@ function logActivity(user, action, detail) {
 }
 
 function getSpreadsheetId() {
-  return '1nR-NkKy4h-IB2D9_WJ8kUD1MMd1KHD811Olf33nIy9k';
+  // Tidy-up (V6): utamakan Script Properties; fallback ke konstanta lama &
+  // simpan sekali agar tidak hardcoded lagi ke depan.
+  var FALLBACK = '1nR-NkKy4h-IB2D9_WJ8kUD1MMd1KHD811Olf33nIy9k';
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var id = props.getProperty('SPREADSHEET_ID');
+    if (!id) { id = FALLBACK; props.setProperty('SPREADSHEET_ID', id); }
+    return id;
+  } catch(e) {
+    return FALLBACK;
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -367,6 +377,7 @@ function getSheetSchema_() {
 // Tidak menghapus/mengubah data yang sudah ada.
 // ══════════════════════════════════════════════════════
 function migrasiKeamanan() {
+  if (!_setupAccessOk_()) return { success: false, message: 'Akses ditolak.' };
   var ss = SpreadsheetApp.openById(getSpreadsheetId());
   var log = [];
 
@@ -415,7 +426,23 @@ function migrasiKeamanan() {
 // SETUP SHEETS — Jalankan SEKALI dari Apps Script Editor
 // Menu: Run → setupSheets
 // ══════════════════════════════════════════════════════
+// Tidy-up (V4): guard fungsi setup/migrasi. Aman untuk bootstrap awal
+// (belum ada ADMIN → izinkan), setelah itu hanya ADMIN terverifikasi
+// (dijalankan dari editor sebagai pemilik) yang boleh. Pemanggilan via
+// google.script.run anonim ditolak (Session kosong).
+function _setupAccessOk_() {
+  try {
+    if (countActiveAdmins_() === 0) return true; // bootstrap pertama kali
+    var email = '';
+    try { email = Session.getActiveUser().getEmail(); } catch(e) {}
+    if (!email) return false;
+    var u = getUserByEmail_(email);
+    return !!(u && u.role === CONFIG.ROLES.ADMIN && String(u.status || 'Aktif').toLowerCase() !== 'nonaktif');
+  } catch(e) { return false; }
+}
+
 function setupSheets() {
+  if (!_setupAccessOk_()) return { success: false, message: 'Akses ditolak.' };
   var ss = SpreadsheetApp.openById(getSpreadsheetId());
   var log = [];
   var SCHEMA = getSheetSchema_();
@@ -539,6 +566,7 @@ function setupSheets() {
 // menjadi (Sumber Tipe=bukuir/pemasukan/manual, Sumber Ref=key).
 // ══════════════════════════════════════════════════════
 function migratePosSetoran() {
+  if (!_setupAccessOk_()) return { success: false, message: 'Akses ditolak.' };
   var ss = SpreadsheetApp.openById(getSpreadsheetId());
   var sheet = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
   if (!sheet || sheet.getLastRow() < 1) {
@@ -599,6 +627,7 @@ function migratePosSetoran() {
 // Aman karena data sudah berurutan sesuai kode versi sekarang.
 // ══════════════════════════════════════════════════════
 function repairSheetHeaders() {
+  if (!_setupAccessOk_()) return { success: false, message: 'Akses ditolak.' };
   var ss = SpreadsheetApp.openById(getSpreadsheetId());
   var SCHEMA = getSheetSchema_();
   var log = [];

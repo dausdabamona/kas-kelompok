@@ -89,8 +89,10 @@ Kolom **Status**:
 
 ---
 
-## E. Tidy-up tersisa (belum dikerjakan — usul digabung ke rilis berikut)
-1. **Hapus fallback Session** di `getCurrentUser` (kini masih feature-flag) + tambahkan `loginWithEmail`, `getGoogleEmail` ke `API_DENYLIST_` → penutupan V2 100%.
-2. **Pindahkan Spreadsheet ID** dari `getSpreadsheetId()` (hardcoded, `Code.gs`) ke Script Properties (V6).
-3. Guard `sistem.setup` untuk `setupSheets`/`repairSheetHeaders`/`migratePosSetoran` (V4) — saat ini hanya editor-run & tidak diekspos frontend, tapi belum ada guard eksplisit.
-4. Fallback non-`Proxy` untuk `App.srv()` bila ada perangkat WebView sangat lawas.
+## E. Tidy-up
+1. ✅ **SELESAI** — `getCurrentUser` kini hanya `__REQ_USER_` (fallback Session dihapus); `loginWithEmail`/`getGoogleEmail`/`getCurrentUser` masuk `API_DENYLIST_` → **V2 tertutup 100%**.
+2. ✅ **SELESAI** — `getSpreadsheetId()` baca `SPREADSHEET_ID` dari Script Properties (fallback + auto-populate) → **V6 ditutup**.
+3. ✅ **SELESAI** — `setupSheets`/`repairSheetHeaders`/`migratePosSetoran`/`migrasiKeamanan` dijaga `_setupAccessOk_()` (bootstrap-safe: izinkan bila belum ada ADMIN; selain itu hanya ADMIN terverifikasi via editor) → **V4 ditutup**. Pemanggilan anonim via `google.script.run` ditolak.
+4. ⏳ **Terbuka (opsional)** — fallback non-`Proxy` untuk `App.srv()` bila ada perangkat WebView sangat lawas (Proxy didukung Android 5+; risiko rendah).
+
+> Dampak tidy-up #1: setelah ini, aplikasi **wajib** punya sesi token valid untuk semua endpoint. Pastikan minimal 1 ADMIN sudah bootstrap perangkat+PIN (via OTP) sebelum push ke produksi.
