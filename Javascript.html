@@ -10,6 +10,57 @@ var App = {
     return !!(App.currentUser && App.currentUser.perms && App.currentUser.perms[cap]);
   },
 
+  // ─── FASE 2c: TOKEN & DISPATCHER FRONTEND ───────────────
+  // Token disimpan di localStorage: sesi (harian) & perangkat (terpercaya).
+  _K_SESSION: 'kk_session', _K_DEVICE: 'kk_device', _K_EMAIL: 'kk_email',
+  getToken: function() { try { return localStorage.getItem(this._K_SESSION) || ''; } catch(e) { return ''; } },
+  setToken: function(t) { try { if (t) localStorage.setItem(this._K_SESSION, t); } catch(e) {} },
+  getDeviceToken: function() { try { return localStorage.getItem(this._K_DEVICE) || ''; } catch(e) { return ''; } },
+  setDeviceToken: function(t) { try { if (t) localStorage.setItem(this._K_DEVICE, t); } catch(e) {} },
+  getSavedEmail: function() { try { return localStorage.getItem(this._K_EMAIL) || ''; } catch(e) { return ''; } },
+  setSavedEmail: function(e) { try { if (e) localStorage.setItem(this._K_EMAIL, e); } catch(err) {} },
+  clearSession: function() { try { localStorage.removeItem(this._K_SESSION); } catch(e) {} },
+
+  // Deteksi error "belum login"/sesi invalid dari respons endpoint.
+  _isAuthError: function(msg) { return /belum login|sesi tidak valid|sesi kadaluarsa/i.test(String(msg || '')); },
+  // Sesi habis → hapus token sesi (device dipertahankan agar bisa login PIN).
+  _forceRelogin: function() {
+    this.clearSession();
+    this.currentUser = null;
+    this.history = [];
+    this.toast('Sesi berakhir. Silakan masuk lagi.');
+    this.renderLoginEmail();
+  },
+
+  // Wrapper pengganti google.script.run: menyisipkan session token sebagai
+  // argumen pertama lewat endpoint dispatcher apiCall(token, fnName, args).
+  // Mempertahankan API withSuccessHandler/withFailureHandler yang sama.
+  srv: function() {
+    var self = this;
+    var handlers = { s: null, f: null };
+    var api = {
+      withSuccessHandler: function(cb) { handlers.s = cb; return api; },
+      withFailureHandler: function(cb) { handlers.f = cb; return api; }
+    };
+    return new Proxy(api, {
+      get: function(target, prop) {
+        if (prop in target) return target[prop];
+        if (typeof prop !== 'string') return undefined;
+        return function() {
+          var args = Array.prototype.slice.call(arguments);
+          var token = self.getToken();
+          google.script.run
+            .withSuccessHandler(function(res) {
+              if (res && res.success === false && self._isAuthError(res.message)) { self._forceRelogin(); return; }
+              if (handlers.s) handlers.s(res);
+            })
+            .withFailureHandler(function(err) { if (handlers.f) handlers.f(err); })
+            .apiCall(token, prop, args);
+        };
+      }
+    });
+  },
+
   // Baca nilai angka dari input (buang pemisah ribuan/titik). Terima id (string) atau elemen.
   num: function(x) {
     var el = (typeof x === 'string') ? document.getElementById(x) : x;
@@ -61,90 +112,217 @@ var App = {
       }
       this._tsepBound = true;
     }
+    // FASE 2c: pulihkan sesi dari session token bila ada; jika tidak/expired,
+    // tampilkan layar login (email → PIN/OTP).
+    var token = this.getToken();
+    if (!token) { this.renderLoginEmail(); return; }
     google.script.run
-      .withSuccessHandler(function(user) {
-        if (user && !user.notRegistered) {
-          self.currentUser = user;
+      .withSuccessHandler(function(res) {
+        if (res && res.success && res.user) {
+          self.currentUser = res.user;
           self.loadDashboard();
           self.updateSyncFab();
           setTimeout(function() { self.checkAndFlushQueue(); }, 3000);
         } else {
-          self.renderLogin(user);
+          self.clearSession();
+          self.renderLoginEmail();
         }
       })
       .withFailureHandler(function() {
-        self.renderLogin(null);
+        self.renderLoginEmail();
       })
-      .getCurrentUser();
+      .apiCurrentUser(token);
   },
 
-  renderLogin: function(userInfo) {
-    var msg = '';
-    if (userInfo && userInfo.notRegistered) {
-      if (userInfo.nonaktif) {
-        msg = '<div class="error-box" style="margin-bottom:12px;">⛔ Akun <b>' + this.escapeHtml(userInfo.email) + '</b> dinonaktifkan. Hubungi Admin.</div>';
-      } else {
-        msg = '<div class="error-box" style="margin-bottom:12px;">❌ Email <b>' + this.escapeHtml(userInfo.email) + '</b> tidak terdaftar. Hubungi Admin untuk didaftarkan.</div>';
-      }
-    } else {
-      msg = '<div class="info-box" style="margin-bottom:12px;">Pastikan Anda login ke Google dengan email yang sudah didaftarkan oleh Admin.</div>';
-    }
+  // ─── FASE 2c: ALUR LOGIN (email → PIN / OTP → set PIN) ───
+  _deviceName: function() {
+    try {
+      var ua = navigator.userAgent || '';
+      var m = ua.match(/(Android|iPhone|iPad|Windows|Macintosh|Linux)/);
+      return (m ? m[1] : 'Perangkat') + ' · ' + ((navigator.platform || 'web')).substring(0, 20);
+    } catch(e) { return 'Perangkat Web'; }
+  },
+
+  _loginShell: function(inner) {
     document.getElementById('app').innerHTML =
       '<div class="login-container">' +
         '<div class="login-logo">🕌</div>' +
         '<div class="login-title">Kas Kelompok</div>' +
         '<p class="login-subtitle">Manajemen Keuangan Jamaah</p>' +
-        '<div class="login-card">' +
-          msg +
-          '<button class="btn btn-primary" onclick="App.init()" style="width:100%;">🔄 Coba Lagi</button>' +
-          '<p style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:12px;">Aplikasi ini menggunakan <b>akun Google</b> Anda<br>untuk login otomatis.</p>' +
-        '</div>' +
+        '<div class="login-card">' + inner + '</div>' +
       '</div>';
   },
 
-  doLogin: function() {
-    var email = (document.getElementById('loginEmail').value || '').trim();
-    if (!email) {
-      document.getElementById('loginError').innerHTML = '<div class="error-box">Masukkan email Anda.</div>';
+  // Alias lama agar pemanggilan renderLogin() tetap aman.
+  renderLogin: function() { this.renderLoginEmail(); },
+
+  // Layar 1: masukkan email.
+  renderLoginEmail: function() {
+    var saved = this.getSavedEmail();
+    var trusted = !!this.getDeviceToken() && !!saved;
+    this._loginShell(
+      '<div class="form-group"><label>Email</label>' +
+        '<input type="email" id="loginEmail" class="form-control" inputmode="email" placeholder="email@contoh.com" value="' + this.escapeHtml(saved) + '"></div>' +
+      '<div id="loginError"></div>' +
+      '<button id="loginBtn" class="btn btn-primary" style="width:100%;" onclick="App.loginStart()">Lanjut →</button>' +
+      (trusted ? '<p style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:12px;">Perangkat ini terpercaya — Anda akan diminta <b>PIN</b>.</p>'
+               : '<p style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:12px;">Perangkat baru akan diverifikasi lewat <b>OTP email</b>.</p>')
+    );
+  },
+
+  loginStart: function() {
+    var email = (document.getElementById('loginEmail').value || '').trim().toLowerCase();
+    if (!email || email.indexOf('@') < 0) {
+      document.getElementById('loginError').innerHTML = '<div class="error-box">Masukkan email yang valid.</div>';
+      return;
+    }
+    this.setSavedEmail(email);
+    // Perangkat terpercaya untuk email ini → langsung PIN. Selain itu → OTP.
+    if (this.getDeviceToken() && this.getSavedEmail() === email) {
+      this.renderLoginPin(email);
+    } else {
+      this.requestOtpAndShow(email);
+    }
+  },
+
+  requestOtpAndShow: function(email) {
+    var self = this;
+    this._loginShell('<div class="info-box" style="display:flex;align-items:center;gap:8px;">' +
+      '<span style="display:inline-block;width:14px;height:14px;border:2px solid #BFDBFE;border-top-color:#2563EB;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></span>' +
+      'Mengirim OTP ke email…</div>');
+    google.script.run
+      .withSuccessHandler(function() { self.renderLoginOtp(email); })
+      .withFailureHandler(function() { self.renderLoginOtp(email); })
+      .apiRequestOtp(email);
+  },
+
+  // Layar 2a: input OTP (perangkat baru).
+  renderLoginOtp: function(email) {
+    this._loginShell(
+      '<div class="info-box" style="margin-bottom:12px;">Kode OTP dikirim ke <b>' + this.escapeHtml(email) + '</b> (bila terdaftar). Berlaku 5 menit.</div>' +
+      '<div class="form-group"><label>Kode OTP (6 digit)</label>' +
+        '<input type="text" id="otpCode" class="form-control" inputmode="numeric" maxlength="6" placeholder="000000"></div>' +
+      '<div id="loginError"></div>' +
+      '<button id="loginBtn" class="btn btn-primary" style="width:100%;" onclick="App.verifyOtpSubmit(\'' + this.escapeHtml(email).replace(/'/g, "\\'") + '\')">Verifikasi →</button>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:12px;font-size:12px;">' +
+        '<a href="#" onclick="App.requestOtpAndShow(\'' + this.escapeHtml(email).replace(/'/g, "\\'") + '\');return false;">Kirim ulang OTP</a>' +
+        '<a href="#" onclick="App.renderLoginEmail();return false;">Ganti email</a>' +
+      '</div>'
+    );
+  },
+
+  verifyOtpSubmit: function(email) {
+    var otp = (document.getElementById('otpCode').value || '').trim();
+    if (!/^\d{6}$/.test(otp)) {
+      document.getElementById('loginError').innerHTML = '<div class="error-box">OTP harus 6 digit.</div>';
       return;
     }
     var btn = document.getElementById('loginBtn');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Memeriksa akun...'; }
-    document.getElementById('loginError').innerHTML =
-      '<div class="info-box" style="display:flex;align-items:center;gap:8px;">' +
-        '<span style="display:inline-block;width:14px;height:14px;border:2px solid #BFDBFE;border-top-color:#2563EB;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></span>' +
-        'Memverifikasi akun, mohon tunggu...' +
-      '</div>';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Memverifikasi…'; }
     var self = this;
     google.script.run
       .withSuccessHandler(function(res) {
-        if (res.success) {
+        if (res && res.success) {
+          self.setDeviceToken(res.deviceToken);
+          self.setToken(res.sessionToken);
+          self.setSavedEmail(email);
+          self.currentUser = res.user;
+          self.renderSetPin(true);
+        } else {
+          if (btn) { btn.disabled = false; btn.textContent = 'Verifikasi →'; }
+          document.getElementById('loginError').innerHTML = '<div class="error-box">❌ ' + self.escapeHtml((res && res.message) || 'Verifikasi gagal.') + '</div>';
+        }
+      })
+      .withFailureHandler(function(err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Verifikasi →'; }
+        document.getElementById('loginError').innerHTML = '<div class="error-box">❌ Gagal terhubung. Coba lagi.</div>';
+      })
+      .apiVerifyOtp(email, otp, self._deviceName());
+  },
+
+  // Layar 2b: input PIN (perangkat terpercaya).
+  renderLoginPin: function(email) {
+    this._loginShell(
+      '<div class="info-box" style="margin-bottom:12px;">Masuk sebagai <b>' + this.escapeHtml(email) + '</b></div>' +
+      '<div class="form-group"><label>PIN (6 digit)</label>' +
+        '<input type="password" id="pinCode" class="form-control" inputmode="numeric" maxlength="6" placeholder="••••••"></div>' +
+      '<div id="loginError"></div>' +
+      '<button id="loginBtn" class="btn btn-primary" style="width:100%;" onclick="App.loginPinSubmit(\'' + this.escapeHtml(email).replace(/'/g, "\\'") + '\')">Masuk →</button>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:12px;font-size:12px;">' +
+        '<a href="#" onclick="App.requestOtpAndShow(\'' + this.escapeHtml(email).replace(/'/g, "\\'") + '\');return false;">Masuk dengan OTP</a>' +
+        '<a href="#" onclick="App.renderLoginEmail();return false;">Ganti email</a>' +
+      '</div>'
+    );
+  },
+
+  loginPinSubmit: function(email) {
+    var pin = (document.getElementById('pinCode').value || '').trim();
+    if (!/^\d{6}$/.test(pin)) {
+      document.getElementById('loginError').innerHTML = '<div class="error-box">PIN harus 6 digit.</div>';
+      return;
+    }
+    var btn = document.getElementById('loginBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Masuk…'; }
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res && res.success) {
+          self.setToken(res.sessionToken);
           self.currentUser = res.user;
           self.loadDashboard();
         } else {
           if (btn) { btn.disabled = false; btn.textContent = 'Masuk →'; }
-          document.getElementById('loginError').innerHTML = '<div class="error-box">❌ ' + res.message + '</div>';
+          var m = (res && res.message) || 'Login gagal.';
+          document.getElementById('loginError').innerHTML = '<div class="error-box">❌ ' + self.escapeHtml(m) + '</div>' +
+            (/perangkat tidak dikenali|belum diatur/i.test(m) ? '<button class="btn btn-outline mt-8" style="width:100%;" onclick="App.requestOtpAndShow(\'' + self.escapeHtml(email).replace(/'/g, "\\'") + '\')">Masuk dengan OTP</button>' : '');
         }
       })
-      .withFailureHandler(function(err) {
+      .withFailureHandler(function() {
         if (btn) { btn.disabled = false; btn.textContent = 'Masuk →'; }
-        document.getElementById('loginError').innerHTML = '<div class="error-box">❌ Gagal terhubung. Coba lagi.<br><small>' + err.message + '</small></div>';
+        document.getElementById('loginError').innerHTML = '<div class="error-box">❌ Gagal terhubung. Coba lagi.</div>';
       })
-      .loginWithEmail(email);
+      .apiLoginPin(email, pin, self.getDeviceToken());
+  },
+
+  // Layar 3: atur PIN (setelah OTP; boleh dilewati).
+  renderSetPin: function(optional) {
+    this._loginShell(
+      '<div class="info-box" style="margin-bottom:12px;">Atur <b>PIN 6 digit</b> untuk login cepat di perangkat ini berikutnya.</div>' +
+      '<div class="form-group"><label>PIN baru</label>' +
+        '<input type="password" id="pinNew" class="form-control" inputmode="numeric" maxlength="6" placeholder="••••••"></div>' +
+      '<div class="form-group"><label>Ulangi PIN</label>' +
+        '<input type="password" id="pinNew2" class="form-control" inputmode="numeric" maxlength="6" placeholder="••••••"></div>' +
+      '<div id="loginError"></div>' +
+      '<button class="btn btn-primary" style="width:100%;" onclick="App.setPinSubmit()">Simpan PIN</button>' +
+      (optional ? '<button class="btn btn-outline mt-8" style="width:100%;" onclick="App.loadDashboard()">Lewati</button>' : '')
+    );
+  },
+
+  setPinSubmit: function() {
+    var pin = (document.getElementById('pinNew').value || '').trim();
+    var pin2 = (document.getElementById('pinNew2').value || '').trim();
+    if (!/^\d{6}$/.test(pin)) { document.getElementById('loginError').innerHTML = '<div class="error-box">PIN harus 6 digit angka.</div>'; return; }
+    if (pin !== pin2) { document.getElementById('loginError').innerHTML = '<div class="error-box">PIN tidak sama.</div>'; return; }
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res && res.success) { self.toast('PIN tersimpan.'); self.loadDashboard(); }
+        else { document.getElementById('loginError').innerHTML = '<div class="error-box">❌ ' + self.escapeHtml((res && res.message) || 'Gagal menyimpan PIN.') + '</div>'; }
+      })
+      .withFailureHandler(function() { document.getElementById('loginError').innerHTML = '<div class="error-box">❌ Gagal terhubung.</div>'; })
+      .apiSetPin(self.getToken(), pin);
   },
 
   doLogout: function() {
     var self = this;
-    google.script.run
-      .withSuccessHandler(function() {
-        self.currentUser = null;
-        self.history = [];
-        self.renderLogin();
-      })
-      .withFailureHandler(function() {
-        self.renderLogin();
-      })
-      .logoutUser();
+    var token = this.getToken();
+    var done = function() {
+      self.clearSession(); // token perangkat dipertahankan → login berikutnya cukup PIN
+      self.currentUser = null;
+      self.history = [];
+      self.renderLoginEmail();
+    };
+    google.script.run.withSuccessHandler(done).withFailureHandler(done).apiLogout(token);
   },
 
   // ─────────────────────────────────────────────────
@@ -169,7 +347,7 @@ var App = {
       }
     }, 35000);
 
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         done = true;
         clearTimeout(timeout);
@@ -287,7 +465,7 @@ var App = {
     this.history.push('dashboard');
     this.showLoading('Memuat data transaksi...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(r) {
         if (r && r.success) {
           self.renderTransaksiForm('masuk', r.pemasukan || [], r.pengeluaran || [], r.anggota || []);
@@ -453,7 +631,7 @@ var App = {
     }
     document.getElementById('trxError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Transaksi berhasil disimpan ✓');
@@ -480,7 +658,7 @@ var App = {
     }
     this.showLoading('Memuat Buku IR...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) self.renderBukuIR(res.data, 'belum');
         else self.showError(res.message);
@@ -680,7 +858,7 @@ var App = {
     var self = this;
     var item = q[0];
 
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           q.shift();
@@ -795,7 +973,7 @@ var App = {
     this.history.push('kelolaBuku');
     this.showLoading('Memuat rekapitulasi...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var periodeOpen = res.periode && res.periode.status === 'OPEN';
@@ -868,7 +1046,7 @@ var App = {
     var self = this;
     self.showLoading('Memuat data...');
     var masterFn = trx.tipe === 'masuk' ? 'getMasterPemasukan' : 'getMasterPengeluaran';
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self._renderEditTrxModal(trx, res.data || []);
@@ -930,7 +1108,7 @@ var App = {
     var self = this;
     self.showLoading('Menyimpan...');
     document.getElementById('editTrxOverlay').remove();
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.pageRekapitulasi();
@@ -945,7 +1123,7 @@ var App = {
     if (!confirm('Hapus transaksi ini? Tindakan tidak dapat diurungkan.')) return;
     var self = this;
     self.showLoading('Menghapus...');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.pageRekapitulasi();
@@ -961,7 +1139,7 @@ var App = {
     this.history.push('kelolaBuku');
     this.showLoading('Memuat Kas Penerobos...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self._renderKasPenerobos(res);
@@ -1022,7 +1200,7 @@ var App = {
   _showFormKasPenerobos: function() {
     var self = this;
     self.showLoading('Memuat master...');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var opts = (res.data || []).filter(function(m) { return m.status !== 'Nonaktif'; }).map(function(m) {
@@ -1059,7 +1237,7 @@ var App = {
     var self = this;
     self.showLoading('Menyimpan...');
     document.getElementById('kpFormOverlay').remove();
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.pageKasPenerobos();
@@ -1105,7 +1283,7 @@ var App = {
     var self = this;
     self.showLoading('Membuat serah terima...');
     document.getElementById('stFormOverlay').remove();
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.showToast('Serah terima berhasil dibuat');
@@ -1122,7 +1300,7 @@ var App = {
     this.history.push('kelolaBuku');
     this.showLoading('Memuat serah terima...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var canKonfirmasi = App.can('serahterima.konfirmasi');
@@ -1160,7 +1338,7 @@ var App = {
     if (!confirm('Konfirmasi serah terima dari ' + dari + '?\nUang akan masuk ke kas sesuai tujuan.')) return;
     var self = this;
     self.showLoading('Memproses...');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.showToast('Serah terima dikonfirmasi, ' + (res.count || 1) + ' pemasukan dicatat otomatis');
@@ -1173,7 +1351,7 @@ var App = {
   _cetakSerahTerima: function(id) {
     var self = this;
     self.showLoading('Memuat rincian...');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var d = res.data;
@@ -1240,7 +1418,7 @@ var App = {
     }
     this.showLoading('Memuat data saldo...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var periode = res.periode;
@@ -1296,7 +1474,7 @@ var App = {
     if (!confirm('Tutup buku periode ini?\n\nSaldo Akhir:\n• Tunai: ' + App.formatNumber(saldoTunai) + '\n• Bank: ' + App.formatNumber(saldoBank) + '\n\nStatus periode akan diubah ke CLOSED. Lanjutkan?')) return;
     var self = this;
     self.showLoading('Menutup buku...');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         document.getElementById('app').innerHTML = self.pageWrapper('Tutup Buku',
@@ -1357,7 +1535,7 @@ var App = {
     if (!tglMulai) { alert('Tanggal mulai wajib diisi'); return; }
     var self = this;
     self.showLoading('Membuka periode...');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.showToast('Periode baru berhasil dibuka!');
@@ -1380,7 +1558,7 @@ var App = {
     this.history.push('dashboard');
     this.showLoading('Memuat setoran desa...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var data = res.data || [];
@@ -1478,7 +1656,7 @@ var App = {
     };
     document.getElementById('setoranError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Setoran berhasil diperbarui ✓');
@@ -1500,7 +1678,7 @@ var App = {
     this.history.push('dashboard');
     this.showLoading('Memuat saldo sistem...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.renderPemeriksaanSaldo(res);
@@ -1589,7 +1767,7 @@ var App = {
     };
     document.getElementById('psError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast(tutup ? 'Buku berhasil ditutup ✓' : 'Pemeriksaan tersimpan ✓');
@@ -1642,7 +1820,7 @@ var App = {
     // Buka tab baru dulu (sebelum async call) agar tidak diblokir popup blocker
     var win = window.open('', '_blank');
     if (win) win.document.write('<html><body style="font-family:Arial;padding:24px;color:#555;">⏳ Menyiapkan laporan...</body></html>');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (btn) { btn.disabled = false; btn.textContent = '📄 Buat & Unduh Laporan'; }
         if (!res.success) {
@@ -1683,7 +1861,7 @@ var App = {
     this.history.push('dashboard');
     this.showLoading('Memuat daftar patungan...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.renderPatunganList(res.data || []);
@@ -1731,7 +1909,7 @@ var App = {
     var self = this;
     // Load anggota with grade first
     self.showLoading('Memuat data jamaah...');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self._anggotaForPatungan = res.data || [];
@@ -1885,7 +2063,7 @@ var App = {
       gradeConfig: gradeConfig
     };
     document.getElementById('patError').innerHTML = '<div class="info-box">⏳ Membuat penerobosan...</div>';
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) {
           document.getElementById('patError').innerHTML = '<div class="error-box">' + res.message + '</div>';
@@ -1904,7 +2082,7 @@ var App = {
     this.history.push('patungan');
     this.showLoading('Memuat penerobosan...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.renderTagihanPatungan(res);
@@ -1995,7 +2173,7 @@ var App = {
   submitBayarPatungan: function(tagihanId) {
     var self = this;
     var catatan = (document.getElementById('bayarCatatan') || {}).value || '';
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) {
           document.getElementById('bayarError').innerHTML = '<div class="error-box">' + res.message + '</div>';
@@ -2013,7 +2191,7 @@ var App = {
   batalBayarPatungan: function(tagihanId) {
     if (!confirm('Batalkan status lunas?')) return;
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.toast(res.message); return; }
         self.toast('Status dibatalkan');
@@ -2030,7 +2208,7 @@ var App = {
     this.history.push('patungan');
     this.showLoading('Memuat jamaah...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.renderAturGrade(res.data || []);
@@ -2064,7 +2242,7 @@ var App = {
 
   simpanGrade: function(anggotaId, grade) {
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) self.toast('Grade disimpan ✓');
         else self.toast('Gagal: ' + res.message);
@@ -2084,7 +2262,7 @@ var App = {
     this.history.push('dashboard');
     this.showLoading('Memuat daftar jamaah...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         var data = res.data || [];
@@ -2172,7 +2350,7 @@ var App = {
     document.getElementById('jamaahFormError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
     var fn = isEdit ? 'updateAnggota' : 'addAnggota';
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast((isEdit ? 'Data diperbarui' : 'Jamaah ditambahkan') + ' ✓');
@@ -2190,7 +2368,7 @@ var App = {
   deleteJamaah: function(id) {
     if (!confirm('Hapus jamaah ini?')) return;
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) { self.toast('Jamaah dihapus'); self.pageJamaah(); }
         else self.toast('Gagal: ' + res.message);
@@ -2245,7 +2423,7 @@ var App = {
     if (!confirm('Pindahkan semua transaksi pemasukan dari user PENEROBOS ke Kas Penerobos?\n\nTindakan ini tidak bisa diurungkan.')) return;
     var self = this;
     self.showLoading('Memproses migrasi...');
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.showToast('Migrasi selesai: ' + res.count + ' transaksi dipindahkan');
@@ -2262,7 +2440,7 @@ var App = {
     this.history.push('setting');
     this.showLoading('Memuat hak akses...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.renderHakAkses(res);
@@ -2324,7 +2502,7 @@ var App = {
       matrix[r][cap] = (r === 'ADMIN') ? true : b.checked;
     }
     document.getElementById('hakAksesError').innerHTML = '<div class="info-box">⏳ Menyimpan...</div>';
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { document.getElementById('hakAksesError').innerHTML = '<div class="error-box">' + res.message + '</div>'; return; }
         self.toast('Hak akses tersimpan ✓');
@@ -2343,7 +2521,7 @@ var App = {
     this.history.push('setting');
     this.showLoading('Memuat user...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self._userRoles = res.roles || [];
@@ -2430,7 +2608,7 @@ var App = {
     }
     document.getElementById('userFormError').innerHTML = '<div class="info-box">⏳ Menyimpan...</div>';
     var fn = isEdit ? 'updateUser' : 'addUser';
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { document.getElementById('userFormError').innerHTML = '<div class="error-box">' + res.message + '</div>'; return; }
         self.toast('User tersimpan ✓');
@@ -2444,7 +2622,7 @@ var App = {
 
   toggleUserStatus: function(email, statusBaru) {
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.toast(res.message); return; }
         self.toast('Status diubah ✓');
@@ -2457,7 +2635,7 @@ var App = {
   hapusUser: function(email) {
     if (!confirm('Hapus user ' + email + '?')) return;
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.toast(res.message); return; }
         self.toast('User dihapus');
@@ -2472,7 +2650,7 @@ var App = {
     this._settingMode = 'pemasukan';
     this.showLoading('Memuat...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) { self.renderSettingList('Pos Pemasukan', res.data || [], 'pemasukan'); })
       .withFailureHandler(function(err) { self.showError(err.message); })
       .getMasterPemasukan();
@@ -2483,7 +2661,7 @@ var App = {
     this._settingMode = 'pengeluaran';
     this.showLoading('Memuat...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) { self.renderSettingList('Pos Pengeluaran', res.data || [], 'pengeluaran'); })
       .withFailureHandler(function(err) { self.showError(err.message); })
       .getMasterPengeluaran();
@@ -2494,7 +2672,7 @@ var App = {
     this._settingMode = 'posSetoran';
     this.showLoading('Memuat...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         self._pemasukanListForSetoran = res.pemasukanList || [];
         self._pengeluaranListForSetoran = res.pengeluaranList || [];
@@ -2509,7 +2687,7 @@ var App = {
     this._settingMode = 'musyawaroh';
     this.showLoading('Memuat...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) { self.renderSettingList('Hasil Musyawaroh', res.data || [], 'musyawaroh'); })
       .withFailureHandler(function(err) { self.showError(err.message); })
       .getMusyawaroh();
@@ -2658,7 +2836,7 @@ var App = {
     var fn = fnMap[mode];
     document.getElementById('settingFormError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Tersimpan ✓');
@@ -2686,7 +2864,7 @@ var App = {
       musyawaroh: 'deleteMusyawaroh'
     };
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Dihapus');
@@ -2712,7 +2890,7 @@ var App = {
     this.history.push('dashboard');
     this.showLoading('Memuat riwayat transaksi...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(r) {
         if (r && r.success) self.renderRiwayatSaya(r.data || []);
         else self.showError((r && r.message) || 'Gagal memuat riwayat');
@@ -2853,7 +3031,7 @@ var App = {
     this.history.push('kelolaBuku');
     this.showLoading('Memuat rekonsiliasi bank...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.renderRekonsiliasi(res);
@@ -2938,7 +3116,7 @@ var App = {
     };
     document.getElementById('rekonError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Rekonsiliasi tersimpan ✓');
@@ -2997,7 +3175,7 @@ var App = {
     };
     document.getElementById('pendingFormError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Pending ditambahkan ✓');
@@ -3019,7 +3197,7 @@ var App = {
     this.history.push('dashboard');
     this.showLoading('Menghitung laporan setoran...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.renderLaporanSetoran(res);
@@ -3134,7 +3312,7 @@ var App = {
     };
     document.getElementById('setoranDesaError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Setoran berhasil disimpan ✓');
@@ -3153,7 +3331,7 @@ var App = {
     this.history.push('laporanSetoran');
     this.showLoading('Memuat data jamaah...');
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
         self.renderJamaahBelumBayar(res, 'belum');
@@ -3225,7 +3403,7 @@ var App = {
     this.showLoading('Memuat data...');
     var self = this;
     if (activeTab === 'bukuir') {
-      google.script.run
+      App.srv()
         .withSuccessHandler(function(res) {
           if (!res.success) { self.showError(res.message); return; }
           self._bukuIRBelumSerah = res;
@@ -3234,7 +3412,7 @@ var App = {
         .withFailureHandler(function(err) { self.showError(err.message); })
         .getBukuIRBelumSerah();
     } else if (activeTab === 'infak') {
-      google.script.run
+      App.srv()
         .withSuccessHandler(function(res) {
           if (!res.success) { self.showError(res.message); return; }
           self._penerobosData = res;
@@ -3243,7 +3421,7 @@ var App = {
         .withFailureHandler(function(err) { self.showError(err.message); })
         .getTagihanPenerobos();
     } else {
-      google.script.run
+      App.srv()
         .withSuccessHandler(function(res) {
           if (!res.success) { self.showError(res.message); return; }
           self._pembelaanData = res;
@@ -3395,7 +3573,7 @@ var App = {
     if (nominal <= 0) { if(errEl) errEl.innerHTML = '<div class="error-box">Nominal harus lebih dari 0.</div>'; return; }
     if (errEl) errEl.innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Kesanggupan berhasil disimpan ✓');
@@ -3413,7 +3591,7 @@ var App = {
   markLunasPembelaan: function(id) {
     var self = this;
     if (!confirm('Tandai sebagai lunas?')) return;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Ditandai lunas ✓');
@@ -3481,7 +3659,7 @@ var App = {
 
   markPendingFound: function(id) {
     var self = this;
-    google.script.run
+    App.srv()
       .withSuccessHandler(function(res) {
         if (res.success) {
           self.toast('Status diperbarui menjadi Found ✓');
