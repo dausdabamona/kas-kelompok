@@ -252,14 +252,32 @@
       { grp:'Tata Kelola', items:[ ['users','🔑','Kelola User'], ['hakakses','🛡️','Hak Akses'], ['devices','📱','Perangkat &amp; Sesi'], ['master','🗂️','Master &amp; Pos'], ['periode','🗓️','Periode'], ['log','📜','Activity Log'] ] }
     ];
   }
-  var ACTIVE_VIEWS = { dashboard:1, users:1, devices:1, log:1 };
+  // Semua menu aktif. ep = endpoint (kosong = render tanpa fetch).
+  var VIEWS = {
+    dashboard:      { title:'Dashboard', run: function(h){ viewDashboard(h); } },
+    saldo:          { title:'Pemeriksaan Saldo', ep:'getPemeriksaanSaldo', run: renderSaldo },
+    pdf:            { title:'Laporan PDF', run: renderPdf },
+    bukuir:         { title:'Buku IR', ep:'getBukuIRData', run: renderBukuIR },
+    setorandesa:    { title:'Setoran Desa', ep:'getRekapSetoran', run: renderSetoranDesa },
+    bank:           { title:'Bank & Rekonsiliasi', ep:'getRekonsiliasiData', run: renderBank },
+    laporansetoran: { title:'Laporan Setoran', ep:'getLaporanSetoran', run: renderLaporanSetoran },
+    anggota:        { title:'Anggota', ep:'getAnggota', run: renderAnggota },
+    terobosan:      { title:'Terobosan Kelompok', ep:'getPatunganList', run: renderTerobosan },
+    serah:          { title:'Serah Terima', ep:'getSerahTerimaList', run: renderSerah },
+    users:          { title:'Kelola User', ep:'getUserListAdmin', run: viewUsers },
+    hakakses:       { title:'Hak Akses', ep:'getPermMatrix', run: renderHakAkses },
+    devices:        { title:'Perangkat & Sesi', ep:'getDeviceList', run: viewDevices },
+    master:         { title:'Master & Pos', ep:'getPosSetoranAll', run: renderMaster },
+    periode:        { title:'Periode', ep:'getAllPeriode', run: renderPeriode },
+    log:            { title:'Activity Log', ep:'getActivityLog', epArgs:[200], run: viewLog }
+  };
 
   function buildShell() {
     var d = STATE;
     var groups = menuDef().map(function(g) {
       var items = g.items.map(function(it) {
         var id = it[0], ico = it[1], label = it[2];
-        if (ACTIVE_VIEWS[id]) return '<div class="nav-item" data-view="' + id + '" onclick="go(\'' + id + '\')"><span class="ico">' + ico + '</span> ' + label + '</div>';
+        if (VIEWS[id]) return '<div class="nav-item" data-view="' + id + '" onclick="go(\'' + id + '\')"><span class="ico">' + ico + '</span> ' + label + '</div>';
         return '<div class="nav-item disabled" title="Segera hadir"><span class="ico">' + ico + '</span> ' + label + '<span class="soon">segera</span></div>';
       }).join('');
       return '<div class="nav-group"><div class="nav-label">' + g.grp + '</div>' + items + '</div>';
@@ -288,14 +306,187 @@
   function loadingBox() { return '<div class="loading" style="min-height:300px;">Memuat…</div>'; }
 
   function go(view) {
-    var host = document.getElementById('content');
-    if (!host) return;
-    if (view === 'dashboard') { setActive('dashboard','Dashboard'); viewDashboard(host); }
-    else if (view === 'users') { setActive('users','Kelola User'); host.innerHTML = loadingBox(); call('getUserListAdmin', [], function(res){ viewUsers(host, res); }); }
-    else if (view === 'devices') { setActive('devices','Perangkat & Sesi'); host.innerHTML = loadingBox(); call('getDeviceList', [], function(res){ viewDevices(host, res); }); }
-    else if (view === 'log') { setActive('log','Activity Log'); host.innerHTML = loadingBox(); call('getActivityLog', [200], function(res){ viewLog(host, res); }); }
+    var cfg = VIEWS[view]; if (!cfg) return;
+    var host = document.getElementById('content'); if (!host) return;
+    setActive(view, cfg.title);
+    if (!cfg.ep) { cfg.run(host); return; }
+    host.innerHTML = loadingBox();
+    call(cfg.ep, cfg.epArgs || [], function(res) { cfg.run(host, res); });
   }
   function errPanel(res) { return '<div class="panel"><div class="empty">' + esc((res && res.message) || 'Gagal memuat.') + '</div></div>'; }
+
+  // ── Helper render umum ──
+  function tableHtml(cols, bodyRows) {
+    var head = cols.map(function(c){ return '<th' + (c.r ? ' class="r"' : '') + '>' + c.t + '</th>'; }).join('');
+    var body = bodyRows || '<tr><td colspan="' + cols.length + '"><div class="empty">Tidak ada data.</div></td></tr>';
+    return '<div style="overflow-x:auto;"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  }
+  function panelBox(title, sub, inner) {
+    return '<div class="panel" style="margin-bottom:16px;"><div class="panel-head"><div class="panel-title">' + esc(title) + (sub ? ' <small>' + esc(sub) + '</small>' : '') + '</div></div>' + inner + '</div>';
+  }
+  function statCards(items) {
+    return '<div class="kpi-strip" style="grid-template-columns:repeat(' + Math.min(items.length, 6) + ',1fr);">' + items.map(function(s){
+      return '<div class="kpi"><div class="kpi-label"><span class="d" style="background:' + (s.color || 'var(--admin)') + '"></span> ' + esc(s.label) + '</div><div class="kpi-value"><span class="num">' + esc(s.val) + '</span></div></div>';
+    }).join('') + '</div>';
+  }
+  function statusBadge(s) {
+    var t = String(s || '').toLowerCase();
+    var cls = (t.indexOf('lunas') >= 0 || t.indexOf('aktif') >= 0 || t.indexOf('dikonfirmasi') >= 0 || t.indexOf('balance') >= 0 || t.indexOf('open') >= 0) ? 'b-ok'
+            : (t.indexOf('menunggu') >= 0 || t.indexOf('belum') >= 0 || t.indexOf('pending') >= 0) ? 'b-wait' : 'b-need';
+    return '<span class="badge ' + cls + '">' + esc(s || '-') + '</span>';
+  }
+  function num(n) { return Number(n || 0).toLocaleString('id-ID'); }
+
+  // ── VIEW: Pemeriksaan Saldo ──
+  function renderSaldo(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var s = res.saldoSistem || { tunai:0, bank:0, total:0 };
+    host.innerHTML = statCards([
+      { label:'Saldo Tunai (Sistem)', val: rp(s.tunai), color:'var(--tunai)' },
+      { label:'Saldo Bank (Sistem)', val: rp(s.bank), color:'var(--bank)' },
+      { label:'Total Kas', val: rp(s.total), color:'var(--admin)' }
+    ]) + panelBox('Pemeriksaan Saldo', res.periode ? res.periode.nama : '', '<div class="sec-body"><p style="color:var(--text-muted);padding:6px 0;">Input saldo aktual & tutup buku dilakukan di aplikasi.</p><a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl()) + '">Buka di Aplikasi →</a></div>');
+  }
+
+  // ── VIEW: Laporan PDF ──
+  function renderPdf(host) {
+    host.innerHTML = panelBox('Laporan PDF', '', '<div class="sec-body"><p style="color:var(--text-muted);padding:6px 0 14px;">Pembuatan & unduh berkas PDF laporan dilakukan lewat aplikasi.</p><a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl()) + '">📄 Buka Laporan PDF di Aplikasi →</a></div>');
+  }
+
+  // ── VIEW: Buku IR ──
+  function renderBukuIR(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var d = res.data || {};
+    function rowFn(t) {
+      return '<tr><td class="t-date">' + esc(t.tanggal) + '</td><td>' + esc((t.anggota && t.anggota.nama) || t.anggotaId || '-') + '</td><td class="r amt">' + num(t.nominal) + '</td><td>' + esc(t.sumberKas || '-') + '</td><td class="t-name">' + esc(t.catatan || '') + '</td></tr>';
+    }
+    var cols = [{t:'Tanggal'},{t:'Anggota'},{t:'Nominal',r:true},{t:'Sumber'},{t:'Catatan'}];
+    var belum = (d.belumDirincikan || []).map(rowFn).join('');
+    var sudah = (d.sudahDirincikan || []).map(rowFn).join('');
+    host.innerHTML = panelBox('Belum Dirincikan', (d.belumDirincikan || []).length + ' transaksi', tableHtml(cols, belum))
+      + panelBox('Sudah Dirincikan', (d.sudahDirincikan || []).length + ' transaksi', tableHtml(cols, sudah));
+  }
+
+  // ── VIEW: Setoran Desa ──
+  function renderSetoranDesa(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var cols = [{t:'Pos'},{t:'Sumber'},{t:'Target',r:true},{t:'Realisasi',r:true},{t:'Sisa',r:true},{t:'%',r:true},{t:'Status'}];
+    var rows = (res.data || []).map(function(p) {
+      return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td class="t-name">' + esc(p.sumberKet || '-') + '</td>'
+        + '<td class="r amt">' + num(p.target) + '</td><td class="r amt in">' + num(p.realisasi) + '</td><td class="r amt">' + num(p.sisa) + '</td>'
+        + '<td class="r">' + (p.persen || 0) + '%</td><td>' + statusBadge(p.status) + '</td></tr>';
+    }).join('');
+    host.innerHTML = panelBox('Setoran Desa', (res.data || []).length + ' pos', tableHtml(cols, rows));
+  }
+
+  // ── VIEW: Bank & Rekonsiliasi ──
+  function renderBank(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var cards = statCards([
+      { label:'Saldo Bank (Sistem)', val: rp(res.saldoSystem), color:'var(--bank)' },
+      { label:'Saldo Bank (Aktual)', val: rp(res.saldoBankAktual), color:'var(--admin)' },
+      { label:'Selisih', val: rp(res.selisih), color: (res.selisih ? 'var(--danger)' : 'var(--success)') },
+      { label:'Total Pending', val: rp(res.totalPending), color:'var(--warning)' }
+    ]);
+    var colD = [{t:'Tanggal'},{t:'Saldo Awal',r:true},{t:'Masuk',r:true},{t:'Keluar',r:true},{t:'Saldo Aktual',r:true},{t:'Selisih',r:true},{t:'Status'}];
+    var rowsD = (res.bankDaily || []).map(function(b) {
+      return '<tr><td class="t-date">' + esc(b.tanggal) + '</td><td class="r amt">' + num(b.saldoAwal) + '</td><td class="r amt in">' + num(b.pemasukan) + '</td><td class="r amt out">' + num(b.pengeluaran) + '</td><td class="r amt">' + num(b.saldoAkhirActual) + '</td><td class="r amt">' + num(b.selisih) + '</td><td>' + statusBadge(b.status) + '</td></tr>';
+    }).join('');
+    var colP = [{t:'Tanggal'},{t:'Keterangan'},{t:'Nominal',r:true},{t:'Status'}];
+    var rowsP = (res.bankPending || []).map(function(p) {
+      return '<tr><td class="t-date">' + esc(p.tanggal) + '</td><td class="t-name">' + esc(p.keterangan || '-') + '</td><td class="r amt">' + num(p.nominal) + '</td><td>' + statusBadge(p.status) + '</td></tr>';
+    }).join('');
+    host.innerHTML = cards + panelBox('Rekonsiliasi Harian', (res.bankDaily || []).length + ' hari', tableHtml(colD, rowsD))
+      + panelBox('Transaksi Pending', (res.bankPending || []).length + ' item', tableHtml(colP, rowsP));
+  }
+
+  // ── VIEW: Laporan Setoran ──
+  function renderLaporanSetoran(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var sm = res.summary || {};
+    var cards = statCards([
+      { label:'Total Target', val: rp(sm.totalTarget), color:'var(--admin)' },
+      { label:'Sudah Setor', val: rp(sm.totalSudahSetor), color:'var(--success)' },
+      { label:'Sisa', val: rp(sm.totalSisa), color:'var(--danger)' }
+    ]);
+    var cols = [{t:'Jenis'},{t:'Kewajiban',r:true},{t:'Sudah Setor',r:true},{t:'Sisa',r:true},{t:'%',r:true},{t:'Status'}];
+    var rows = (res.data || []).map(function(p) {
+      return '<tr><td class="t-jenis">' + esc(p.nama || p.kode || '-') + '</td><td class="r amt">' + num(p.kewajiban || p.target) + '</td><td class="r amt in">' + num(p.sudahSetor) + '</td><td class="r amt">' + num(p.sisa) + '</td><td class="r">' + (p.persen || 0) + '%</td><td>' + statusBadge(p.status) + '</td></tr>';
+    }).join('');
+    host.innerHTML = cards + panelBox('Laporan Setoran', res.periode ? res.periode.nama : '', tableHtml(cols, rows));
+  }
+
+  // ── VIEW: Anggota ──
+  function renderAnggota(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var cols = [{t:'Nama'},{t:'No. Telp'},{t:'Alamat'},{t:'Status'},{t:'IR',r:true},{t:'1/10 IR',r:true},{t:'Index',r:true},{t:'Infak',r:true}];
+    var rows = (res.data || []).map(function(a) {
+      return '<tr><td class="t-jenis">' + esc(a.nama) + '</td><td class="t-name">' + esc(a.noTelp || '-') + '</td><td class="t-name">' + esc(a.alamat || '-') + '</td><td>' + statusBadge(a.status) + '</td>'
+        + '<td class="r amt">' + num(a.ir) + '</td><td class="r amt">' + num(a.ir10) + '</td><td class="r amt">' + num(a.index) + '</td><td class="r amt">' + num(a.infakDaerah) + '</td></tr>';
+    }).join('');
+    host.innerHTML = panelBox('Anggota / Jamaah', (res.data || []).length + ' orang', tableHtml(cols, rows));
+  }
+
+  // ── VIEW: Terobosan Kelompok ──
+  function renderTerobosan(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var cols = [{t:'Nama'},{t:'Tanggal'},{t:'Status'},{t:'Catatan'}];
+    var rows = (res.data || []).map(function(p) {
+      return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td class="t-date">' + esc(p.tanggal) + '</td><td>' + statusBadge(p.status) + '</td><td class="t-name">' + esc(p.catatan || '') + '</td></tr>';
+    }).join('');
+    host.innerHTML = panelBox('Terobosan Kelompok', (res.data || []).length + ' program', tableHtml(cols, rows));
+  }
+
+  // ── VIEW: Serah Terima ──
+  function renderSerah(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var cols = [{t:'Tanggal'},{t:'Penerobos'},{t:'Total',r:true},{t:'Tujuan'},{t:'Status'}];
+    var rows = (res.data || []).map(function(s) {
+      return '<tr><td class="t-date">' + esc(s.tanggalSerah) + '</td><td class="t-name">' + esc(s.penerobosEmail) + '</td><td class="r amt">' + num(s.total) + '</td><td>' + esc(s.sumberTujuan || '-') + '</td><td>' + statusBadge(s.status) + '</td></tr>';
+    }).join('');
+    host.innerHTML = panelBox('Serah Terima', (res.data || []).length + ' penyerahan', tableHtml(cols, rows));
+  }
+
+  // ── VIEW: Hak Akses (matriks) ──
+  function renderHakAkses(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var roles = res.roles || [];
+    var matrix = res.matrix || {};
+    var cols = [{t:'Hak Akses'}].concat(roles.map(function(r){ return { t: esc(r.replace(/_/g,' ')) }; }));
+    var rows = (res.capabilities || []).map(function(c) {
+      var cells = roles.map(function(r) {
+        var on = matrix[r] && matrix[r][c.code];
+        return '<td>' + (on ? '<span style="color:var(--success);font-weight:800;">✓</span>' : '<span style="color:var(--border);">–</span>') + '</td>';
+      }).join('');
+      return '<tr><td class="t-jenis">' + esc(c.label) + '</td>' + cells + '</tr>';
+    }).join('');
+    host.innerHTML = panelBox('Hak Akses (Capability × Role)', 'ubah di aplikasi', tableHtml(cols, rows));
+  }
+
+  // ── VIEW: Master & Pos ──
+  function renderMaster(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var cols = [{t:'Nama Pos'},{t:'Sumber Tipe'},{t:'Sumber Ref'},{t:'Target',r:true},{t:'Status'}];
+    var rows = (res.data || []).map(function(p) {
+      return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td>' + esc(p.sumberTipe || '-') + '</td><td class="t-name">' + esc(p.sumberRef || '-') + '</td><td class="r amt">' + num(p.target) + '</td><td>' + statusBadge(p.status) + '</td></tr>';
+    }).join('');
+    var pmCols = [{t:'Kode'},{t:'Nama'}];
+    var pmRows = (res.pemasukanList || []).map(function(x){ return '<tr><td class="t-name">' + esc(x.kode) + '</td><td class="t-jenis">' + esc(x.nama) + '</td></tr>'; }).join('');
+    var pkRows = (res.pengeluaranList || []).map(function(x){ return '<tr><td class="t-name">' + esc(x.kode) + '</td><td class="t-jenis">' + esc(x.nama) + '</td></tr>'; }).join('');
+    host.innerHTML = panelBox('Pos Setoran', (res.data || []).length + ' pos', tableHtml(cols, rows))
+      + panelBox('Master Pemasukan', (res.pemasukanList || []).length + ' jenis', tableHtml(pmCols, pmRows))
+      + panelBox('Master Pengeluaran', (res.pengeluaranList || []).length + ' jenis', tableHtml(pmCols, pkRows));
+  }
+
+  // ── VIEW: Periode ──
+  function renderPeriode(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var cols = [{t:'Nama Periode'},{t:'Mulai'},{t:'Status'}];
+    var rows = (res.data || []).map(function(p) {
+      return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td class="t-date">' + esc(p.tanggalMulai || '-') + '</td><td>' + statusBadge(p.status) + '</td></tr>';
+    }).join('');
+    host.innerHTML = panelBox('Periode', (res.data || []).length + ' periode', tableHtml(cols, rows));
+  }
 
   // Sparkline SVG dari array angka.
   function sparkSvg(pts, color, w, h) {
