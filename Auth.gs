@@ -747,6 +747,42 @@ function apiCurrentUser(token) {
   return { success: true, user: user };
 }
 
+// Cek apakah email sudah punya PIN → tentukan jalur login (PIN vs OTP).
+// Tidak membocorkan status: email tak terdaftar juga diarahkan ke OTP (netral).
+function apiCheckLogin(email) {
+  try {
+    var norm = String(email || '').toLowerCase().trim();
+    var user = getUserByEmail_(norm);
+    if (!user || String(user.status || 'Aktif').toLowerCase() === 'nonaktif') return { ok: true, needOtp: true };
+    var chk = verifyPin_(norm, '__cek__'); // hanya untuk cek ada/tidaknya PIN
+    return { ok: true, needOtp: !!chk.noPin };
+  } catch(e) {
+    return { ok: true, needOtp: true };
+  }
+}
+
+// Login harian TANPA token perangkat: cukup Email + PIN (server-verified).
+// Faktor "perangkat" dilepas karena storage iframe GAS di HP sering terhapus;
+// tetap ada proteksi lockout (5x gagal → kunci 15 menit).
+function apiLoginEmailPin(email, pin) {
+  try {
+    var norm = String(email || '').toLowerCase().trim();
+    if (isAuthLocked_(norm)) return { success: false, message: 'Terlalu banyak percobaan. Coba lagi dalam 15 menit.' };
+    var chk = verifyPin_(norm, pin);
+    if (chk.noPin) return { success: false, needOtp: true, message: 'PIN belum diatur. Masuk via OTP lalu atur PIN.' };
+    if (!chk.ok) { recordAuthFail_(norm); return { success: false, message: 'PIN salah.' }; }
+    clearAuthFail_(norm);
+    var user = getUserByEmail_(norm);
+    if (!user || String(user.status || 'Aktif').toLowerCase() === 'nonaktif') return { success: false, message: 'Akun tidak aktif.' };
+    var sess = issueSession_(user.email, 'web');
+    logActivity(user.email, 'LOGIN_PIN', 'Email + PIN');
+    user.perms = getPermsForRole_(user.role);
+    return { success: true, sessionToken: sess.sessionToken, user: user };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 // ════════════════════════════════════════════════════════
 // FASE 4 — KELOLA PERANGKAT (Admin) + HOUSEKEEPING SESI
 // Endpoint dipanggil lewat dispatcher apiCall (token-aware); tetap

@@ -160,14 +160,12 @@ var App = {
   // Layar 1: masukkan email.
   renderLoginEmail: function() {
     var saved = this.getSavedEmail();
-    var trusted = !!this.getDeviceToken() && !!saved;
     this._loginShell(
       '<div class="form-group"><label>Email</label>' +
         '<input type="email" id="loginEmail" class="form-control" inputmode="email" placeholder="email@contoh.com" value="' + this.escapeHtml(saved) + '"></div>' +
       '<div id="loginError"></div>' +
       '<button id="loginBtn" class="btn btn-primary" style="width:100%;" onclick="App.loginStart()">Lanjut →</button>' +
-      (trusted ? '<p style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:12px;">Perangkat ini terpercaya — Anda akan diminta <b>PIN</b>.</p>'
-               : '<p style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:12px;">Perangkat baru akan diverifikasi lewat <b>OTP email</b>.</p>')
+      '<p style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:12px;">Sudah punya PIN? cukup <b>Email + PIN</b>.<br>Pertama kali diverifikasi lewat <b>OTP email</b>.</p>'
     );
   },
 
@@ -178,12 +176,21 @@ var App = {
       return;
     }
     this.setSavedEmail(email);
-    // Perangkat terpercaya untuk email ini → langsung PIN. Selain itu → OTP.
-    if (this.getDeviceToken() && this.getSavedEmail() === email) {
-      this.renderLoginPin(email);
-    } else {
-      this.requestOtpAndShow(email);
-    }
+    var btn = document.getElementById('loginBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Memeriksa…'; }
+    var self = this;
+    // Tanya server: email ini sudah punya PIN? Jika ya → PIN; jika belum → OTP.
+    // Tidak bergantung token perangkat (yang sering hilang di iframe GAS/incognito).
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res && res.needOtp) self.requestOtpAndShow(email);
+        else self.renderLoginPin(email);
+      })
+      .withFailureHandler(function() {
+        if (btn) { btn.disabled = false; btn.textContent = 'Lanjut →'; }
+        document.getElementById('loginError').innerHTML = '<div class="error-box">❌ Gagal terhubung. Coba lagi.</div>';
+      })
+      .apiCheckLogin(email);
   },
 
   requestOtpAndShow: function(email) {
@@ -241,7 +248,7 @@ var App = {
       .apiVerifyOtp(email, otp, self._deviceName());
   },
 
-  // Layar 2b: input PIN (perangkat terpercaya).
+  // Layar 2b: input PIN (Email + PIN, tanpa token perangkat).
   renderLoginPin: function(email) {
     this._loginShell(
       '<div class="info-box" style="margin-bottom:12px;">Masuk sebagai <b>' + this.escapeHtml(email) + '</b></div>' +
@@ -275,14 +282,14 @@ var App = {
           if (btn) { btn.disabled = false; btn.textContent = 'Masuk →'; }
           var m = (res && res.message) || 'Login gagal.';
           document.getElementById('loginError').innerHTML = '<div class="error-box">❌ ' + self.escapeHtml(m) + '</div>' +
-            (/perangkat tidak dikenali|belum diatur/i.test(m) ? '<button class="btn btn-outline mt-8" style="width:100%;" onclick="App.requestOtpAndShow(\'' + self.escapeHtml(email).replace(/'/g, "\\'") + '\')">Masuk dengan OTP</button>' : '');
+            ((res && res.needOtp) || /belum diatur/i.test(m) ? '<button class="btn btn-outline mt-8" style="width:100%;" onclick="App.requestOtpAndShow(\'' + self.escapeHtml(email).replace(/'/g, "\\'") + '\')">Masuk dengan OTP</button>' : '');
         }
       })
       .withFailureHandler(function() {
         if (btn) { btn.disabled = false; btn.textContent = 'Masuk →'; }
         document.getElementById('loginError').innerHTML = '<div class="error-box">❌ Gagal terhubung. Coba lagi.</div>';
       })
-      .apiLoginPin(email, pin, self.getDeviceToken());
+      .apiLoginEmailPin(email, pin);
   },
 
   // Layar 3: atur PIN (setelah OTP; boleh dilewati).
