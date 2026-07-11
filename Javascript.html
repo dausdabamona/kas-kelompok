@@ -38,13 +38,13 @@ var App = {
   srv: function() {
     var self = this;
     var handlers = { s: null, f: null };
-    var api = {
-      withSuccessHandler: function(cb) { handlers.s = cb; return api; },
-      withFailureHandler: function(cb) { handlers.f = cb; return api; }
-    };
-    return new Proxy(api, {
+    // PENTING: withSuccessHandler/withFailureHandler harus mengembalikan PROXY
+    // (bukan objek biasa) agar rantai .withSuccessHandler().withFailureHandler()
+    // .namaFungsi() tetap utuh sampai method terminal.
+    var proxy = new Proxy({}, {
       get: function(target, prop) {
-        if (prop in target) return target[prop];
+        if (prop === 'withSuccessHandler') return function(cb) { handlers.s = cb; return proxy; };
+        if (prop === 'withFailureHandler') return function(cb) { handlers.f = cb; return proxy; };
         if (typeof prop !== 'string') return undefined;
         return function() {
           var args = Array.prototype.slice.call(arguments);
@@ -59,6 +59,7 @@ var App = {
         };
       }
     });
+    return proxy;
   },
 
   // Baca nilai angka dari input (buang pemisah ribuan/titik). Terima id (string) atau elemen.
