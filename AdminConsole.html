@@ -169,6 +169,16 @@
   .gate-card h2 { font-size: 18px; margin-bottom: 8px; } .gate-card p { color: var(--text-muted); margin-bottom: 18px; }
   .loading { min-height: 100vh; display: grid; place-items: center; color: var(--text-muted); font-weight: 600; }
 
+  .nav-item.disabled { opacity: .4; cursor: not-allowed; }
+  .nav-item.disabled:hover { background: transparent; color: #BCD6D2; }
+  .nav-item .soon { margin-left: auto; font-size: 8.5px; text-transform: uppercase; letter-spacing: .5px; background: rgba(255,255,255,.12); color: #9FC7C1; padding: 2px 6px; border-radius: 99px; font-weight: 700; }
+  .abtn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-family: inherit; font-weight: 700; font-size: 11.5px; cursor: pointer; color: var(--text); }
+  .abtn:hover { border-color: var(--admin); color: var(--admin); }
+  .abtn.danger { color: var(--danger); border-color: #F3C7C7; } .abtn.danger:hover { background: #FEE2E2; }
+  .asel { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); font-family: inherit; font-size: 12px; background: var(--card); cursor: pointer; }
+  .toastc { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--admin-ink); color: #fff; padding: 10px 18px; border-radius: 10px; font-weight: 600; font-size: 13px; z-index: 99; opacity: 0; transition: opacity .2s; box-shadow: var(--shadow-lg); }
+  .toastc.show { opacity: 1; }
+
   .small-note { display: none; }
   @media (max-width: 1180px) {
     .kpi-strip { grid-template-columns: repeat(3, 1fr); }
@@ -202,22 +212,90 @@
       '<a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl()) + '">Buka Aplikasi →</a></div></div>';
   }
 
-  function load() {
-    var token = '';
-    try { token = localStorage.getItem('kk_session') || ''; } catch(e) {}
-    if (!token) { gate('Silakan masuk terlebih dulu lewat aplikasi (di perangkat/browser yang sama).'); return; }
+  var STATE = null;
+  var USERS = {};
+
+  function tk() { try { return localStorage.getItem('kk_session') || ''; } catch(e) { return ''; } }
+
+  // Panggilan server lewat dispatcher token.
+  function call(fn, args, ok) {
     google.script.run
       .withSuccessHandler(function(res) {
-        if (!res || res.success === false) {
-          var m = (res && res.message) || 'Gagal memuat.';
-          gate(/belum login|sesi/i.test(m) ? 'Sesi berakhir. Masuk lagi lewat aplikasi.' : m);
-          return;
-        }
-        render(res);
+        if (res && res.success === false && /belum login|sesi/i.test(res.message || '')) { gate('Sesi berakhir. Masuk lagi lewat aplikasi.'); return; }
+        ok(res);
       })
-      .withFailureHandler(function(e) { gate('Gagal terhubung. ' + ((e && e.message) || '')); })
-      .apiCall(token, 'getAdminConsole', []);
+      .withFailureHandler(function(e) { toast('Gagal terhubung. ' + ((e && e.message) || '')); })
+      .apiCall(tk(), fn, args || []);
   }
+
+  function toast(msg) {
+    var el = document.createElement('div'); el.className = 'toastc'; el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function(){ el.classList.add('show'); }, 10);
+    setTimeout(function(){ el.classList.remove('show'); setTimeout(function(){ if (el.parentNode) el.remove(); }, 250); }, 2600);
+  }
+
+  function load() {
+    if (!tk()) { gate('Silakan masuk terlebih dulu lewat aplikasi (di perangkat/browser yang sama).'); return; }
+    call('getAdminConsole', [], function(res) {
+      if (!res || res.success === false) { gate((res && res.message) || 'Gagal memuat. Khusus Admin.'); return; }
+      STATE = res; buildShell(); go('dashboard');
+    });
+  }
+
+  // Definisi menu; hanya sebagian aktif (sisanya "segera").
+  function menuDef() {
+    return [
+      { grp:'Ringkasan', items:[ ['dashboard','📊','Dashboard'], ['saldo','🧮','Pemeriksaan Saldo'], ['pdf','📄','Laporan PDF'] ] },
+      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'] ] },
+      { grp:'Jamaah', items:[ ['anggota','👥','Anggota'], ['terobosan','🤝','Terobosan Kelompok'], ['serah','🤲','Serah Terima'] ] },
+      { grp:'Tata Kelola', items:[ ['users','🔑','Kelola User'], ['hakakses','🛡️','Hak Akses'], ['devices','📱','Perangkat &amp; Sesi'], ['master','🗂️','Master &amp; Pos'], ['periode','🗓️','Periode'], ['log','📜','Activity Log'] ] }
+    ];
+  }
+  var ACTIVE_VIEWS = { dashboard:1, users:1, devices:1, log:1 };
+
+  function buildShell() {
+    var d = STATE;
+    var groups = menuDef().map(function(g) {
+      var items = g.items.map(function(it) {
+        var id = it[0], ico = it[1], label = it[2];
+        if (ACTIVE_VIEWS[id]) return '<div class="nav-item" data-view="' + id + '" onclick="go(\'' + id + '\')"><span class="ico">' + ico + '</span> ' + label + '</div>';
+        return '<div class="nav-item disabled" title="Segera hadir"><span class="ico">' + ico + '</span> ' + label + '<span class="soon">segera</span></div>';
+      }).join('');
+      return '<div class="nav-group"><div class="nav-label">' + g.grp + '</div>' + items + '</div>';
+    }).join('');
+    document.getElementById('root').innerHTML =
+      '<div class="layout"><aside class="sidebar">'
+      + '<div class="brand"><div class="brand-mark">🕌</div><div><div class="brand-name">Kas Kelompok</div><div class="brand-sub">Admin Console</div></div></div>'
+      + '<nav class="nav">' + groups + '</nav>'
+      + '<div class="sidebar-foot"><div class="sf-avatar">' + esc((d.user && d.user.inisial) || 'A') + '</div><div style="flex:1; min-width:0;"><div class="sf-name">' + esc((d.user && d.user.nama) || 'Admin') + '</div><div class="sf-role">' + esc((d.user && d.user.role) || 'ADMIN') + '</div></div><a href="' + esc(appUrl()) + '" title="Aplikasi" style="font-size:14px;text-decoration:none;">⏻</a></div>'
+      + '</aside><div class="main">'
+      + '<header class="topbar"><div class="crumb" id="crumb"><b>Dashboard</b><span class="sep">/</span>' + esc(d.namaKelompok) + '</div>'
+      + '<div class="tb-spacer"></div>'
+      + '<div class="period-chip"><span class="dot"></span> ' + esc((d.periode && d.periode.nama) || 'Tanpa periode') + '</div>'
+      + '<a class="qbtn ghost" href="' + esc(appUrl()) + '">📱 Versi Mobile</a>'
+      + '<a class="qbtn primary" href="' + esc(appUrl()) + '">＋ Input Transaksi</a></header>'
+      + '<div class="content" id="content"></div></div></div>';
+  }
+
+  function setActive(view, title) {
+    var items = document.querySelectorAll('.nav-item[data-view]');
+    for (var i = 0; i < items.length; i++) { items[i].classList.toggle('active', items[i].getAttribute('data-view') === view); }
+    var cr = document.getElementById('crumb');
+    if (cr) cr.innerHTML = '<b>' + esc(title) + '</b><span class="sep">/</span>' + esc(STATE.namaKelompok);
+  }
+
+  function loadingBox() { return '<div class="loading" style="min-height:300px;">Memuat…</div>'; }
+
+  function go(view) {
+    var host = document.getElementById('content');
+    if (!host) return;
+    if (view === 'dashboard') { setActive('dashboard','Dashboard'); viewDashboard(host); }
+    else if (view === 'users') { setActive('users','Kelola User'); host.innerHTML = loadingBox(); call('getUserListAdmin', [], function(res){ viewUsers(host, res); }); }
+    else if (view === 'devices') { setActive('devices','Perangkat & Sesi'); host.innerHTML = loadingBox(); call('getDeviceList', [], function(res){ viewDevices(host, res); }); }
+    else if (view === 'log') { setActive('log','Activity Log'); host.innerHTML = loadingBox(); call('getActivityLog', [200], function(res){ viewLog(host, res); }); }
+  }
+  function errPanel(res) { return '<div class="panel"><div class="empty">' + esc((res && res.message) || 'Gagal memuat.') + '</div></div>'; }
 
   // Sparkline SVG dari array angka.
   function sparkSvg(pts, color, w, h) {
@@ -237,7 +315,8 @@
     return '<span class="kpi-delta flat">0%</span>';
   }
 
-  function render(d) {
+  function viewDashboard(host) {
+    var d = STATE;
     var arus = d.arus6 || [];
     var sparkIn = arus.map(function(a){ return a.masuk; });
     var sparkOut = arus.map(function(a){ return a.keluar; });
@@ -311,17 +390,8 @@
 
     var periodeOpen = d.periode && String(d.periode.status).toUpperCase() === 'OPEN';
 
-    document.getElementById('root').innerHTML =
-    '<div class="layout">'
-    + sidebar(d)
-    + '<div class="main"><header class="topbar">'
-      + '<div class="crumb"><b>Dashboard</b><span class="sep">/</span>' + esc(d.namaKelompok) + '</div>'
-      + '<div class="tb-spacer"></div>'
-      + '<div class="period-chip"><span class="dot"></span> ' + esc((d.periode && d.periode.nama) || 'Tanpa periode') + '</div>'
-      + '<a class="qbtn ghost" href="' + esc(appUrl()) + '">📱 Versi Mobile</a>'
-      + '<a class="qbtn primary" href="' + esc(appUrl()) + '">＋ Input Transaksi</a>'
-    + '</header><div class="content">'
-      + '<div class="small-note">💡 Konsol ini dirancang untuk layar lebar. Untuk HP, gunakan versi mobile.</div>'
+    host.innerHTML =
+      '<div class="small-note">💡 Konsol ini dirancang untuk layar lebar. Untuk HP, gunakan versi mobile.</div>'
       + '<div class="kpi-strip">' + kpis + '</div>'
       + '<div class="grid-main"><div class="stack">'
         + '<div class="panel"><div class="panel-head"><div class="panel-title">Arus Kas <small>6 bulan terakhir</small></div></div>'
@@ -354,9 +424,8 @@
         + '<div class="panel"><div class="panel-head"><div class="panel-title">Komposisi Pemasukan</div></div><div class="donut-wrap"><div class="donut">' + donutHtml + '</div><div style="flex:1;">' + legend + '</div></div></div>'
         + '<div class="panel"><div class="panel-head"><div class="panel-title">Pengguna &amp; Peran</div><a class="link" style="margin-left:auto;" href="' + esc(appUrl()) + '">Kelola user</a></div><div class="sec-body"><div style="padding:4px 0 8px;">' + roleChips + '</div>'
           + '<div class="stat-row" style="border-top:1px solid var(--border-soft)"><div class="stat-ico">👤</div><div><div class="stat-name">Total pengguna aktif</div><div class="stat-sub">' + d.userNonaktif + ' nonaktif</div></div><div class="stat-val">' + d.userAktif + '</div></div></div></div>'
-        + '<div class="panel"><div class="panel-head"><div class="panel-title">Aktivitas Terbaru</div><a class="link" style="margin-left:auto;" href="' + esc(appUrl()) + '">Semua log</a></div><div class="sec-body">' + logHtml + '</div></div>'
-      + '</div>'
-    + '</div></div></div>';
+        + '<div class="panel"><div class="panel-head"><div class="panel-title">Aktivitas Terbaru</div><span class="link" onclick="go(\'log\')">Semua log</span></div><div class="sec-body">' + logHtml + '</div></div>'
+      + '</div>';
 
     // Animasikan bar setelah render
     setTimeout(function() {
@@ -380,17 +449,81 @@
     svg+='</svg>';
     return svg + '<div class="donut-center"><b>' + jt(total) + '</b><small>total masuk</small></div>';
   }
-  function sidebar(d) {
-    var app = esc(appUrl());
-    function item(ico, label, active) { return '<a class="nav-item' + (active?' active':'') + '" href="' + app + '"><span class="ico">' + ico + '</span> ' + label + '</a>'; }
-    return '<aside class="sidebar"><div class="brand"><div class="brand-mark">🕌</div><div><div class="brand-name">Kas Kelompok</div><div class="brand-sub">Admin Console</div></div></div>'
-      + '<nav class="nav">'
-        + '<div class="nav-group"><div class="nav-label">Ringkasan</div>' + item('📊','Dashboard', true) + item('🧮','Pemeriksaan Saldo') + item('📄','Laporan PDF') + '</div>'
-        + '<div class="nav-group"><div class="nav-label">Keuangan</div>' + item('📖','Buku IR') + item('🏘️','Setoran Desa') + item('🏦','Bank &amp; Rekonsiliasi') + item('📈','Laporan Setoran') + '</div>'
-        + '<div class="nav-group"><div class="nav-label">Jamaah</div>' + item('👥','Anggota') + item('🤝','Terobosan Kelompok') + item('🤲','Serah Terima') + '</div>'
-        + '<div class="nav-group"><div class="nav-label">Tata Kelola</div>' + item('🔑','Kelola User') + item('🛡️','Hak Akses') + item('📱','Perangkat &amp; Sesi') + item('🗂️','Master &amp; Pos') + item('🗓️','Periode') + item('📜','Activity Log') + '</div>'
-      + '</nav>'
-      + '<div class="sidebar-foot"><div class="sf-avatar">' + esc((d.user && d.user.inisial) || 'A') + '</div><div style="flex:1; min-width:0;"><div class="sf-name">' + esc((d.user && d.user.nama) || 'Admin') + '</div><div class="sf-role">' + esc((d.user && d.user.role) || 'ADMIN') + '</div></div><a href="' + app + '" style="cursor:pointer;font-size:14px;text-decoration:none;" title="Aplikasi">⏻</a></div></aside>';
+  // ── VIEW: Kelola User ──
+  function viewUsers(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var roles = res.roles || [];
+    USERS = {};
+    (res.data || []).forEach(function(u) { USERS[u.email.toLowerCase()] = u; });
+    var rows = (res.data || []).map(function(u) {
+      var aktif = String(u.status || 'Aktif').toLowerCase() !== 'nonaktif';
+      var eS = esc(u.email).replace(/'/g, "\\'");
+      var roleSel = '<select class="asel" onchange="chgRole(\'' + eS + '\', this.value)">' + roles.map(function(r){ return '<option value="' + esc(r) + '"' + (r === u.role ? ' selected' : '') + '>' + esc(r) + '</option>'; }).join('') + '</select>';
+      return '<tr><td class="t-jenis">' + esc(u.nama || '-') + '</td>'
+        + '<td class="t-name">' + esc(u.email) + '</td>'
+        + '<td>' + roleSel + '</td>'
+        + '<td><span class="badge ' + (aktif ? 'b-ok' : 'b-need') + '">' + (aktif ? 'Aktif' : 'Nonaktif') + '</span></td>'
+        + '<td class="t-date">' + esc(u.created || '') + '</td>'
+        + '<td style="white-space:nowrap;"><button class="abtn" onclick="toggleUser(\'' + eS + '\',' + aktif + ')">' + (aktif ? 'Nonaktifkan' : 'Aktifkan') + '</button> '
+        + '<button class="abtn danger" onclick="delUser(\'' + eS + '\')">Hapus</button></td></tr>';
+    }).join('') || '<tr><td colspan="6"><div class="empty">Belum ada user.</div></td></tr>';
+    host.innerHTML = '<div class="panel"><div class="panel-head"><div class="panel-title">Kelola User <small>' + (res.data || []).length + ' pengguna</small></div></div>'
+      + '<div style="overflow-x:auto;"><table><thead><tr><th>Nama</th><th>Email</th><th>Role</th><th>Status</th><th>Dibuat</th><th>Aksi</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+  }
+  function chgRole(email, role) {
+    var u = USERS[String(email).toLowerCase()]; if (!u) return;
+    call('updateUser', [{ email: u.email, nama: u.nama, role: role, status: u.status }], function(res) {
+      if (res && res.success) { toast('Role diperbarui.'); go('users'); } else { toast((res && res.message) || 'Gagal.'); go('users'); }
+    });
+  }
+  function toggleUser(email, aktif) {
+    call('setUserStatus', [email, aktif ? 'Nonaktif' : 'Aktif'], function(res) {
+      if (res && res.success) { toast('Status diperbarui.'); go('users'); } else toast((res && res.message) || 'Gagal.');
+    });
+  }
+  function delUser(email) {
+    if (!confirm('Hapus user ' + email + '? Tindakan ini permanen.')) return;
+    call('deleteUser', [email], function(res) {
+      if (res && res.success) { toast('User dihapus.'); go('users'); } else toast((res && res.message) || 'Gagal.');
+    });
+  }
+
+  // ── VIEW: Perangkat & Sesi ──
+  function viewDevices(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var rows = (res.data || []).map(function(dv) {
+      var aktif = String(dv.status).toLowerCase() === 'aktif';
+      var idS = esc(dv.id).replace(/'/g, "\\'");
+      var namaS = esc(dv.nama).replace(/'/g, "\\'");
+      return '<tr><td class="t-jenis">' + esc(dv.nama) + '</td>'
+        + '<td class="t-name">' + esc(dv.email) + '</td>'
+        + '<td class="t-date">' + esc(dv.dibuat) + '</td>'
+        + '<td class="t-date">' + esc(dv.terakhir) + '</td>'
+        + '<td><span class="badge ' + (aktif ? 'b-ok' : 'b-need') + '">' + esc(dv.status) + '</span></td>'
+        + '<td>' + (aktif ? '<button class="abtn danger" onclick="revoke(\'' + idS + '\',\'' + namaS + '\')">Cabut</button>' : '—') + '</td></tr>';
+    }).join('') || '<tr><td colspan="6"><div class="empty">Belum ada perangkat.</div></td></tr>';
+    host.innerHTML = '<div class="panel"><div class="panel-head"><div class="panel-title">Perangkat &amp; Sesi <small>' + (res.data || []).length + ' perangkat</small></div></div>'
+      + '<div class="small-note" style="display:block;margin:12px 16px 0;">Cabut perangkat yang hilang/tidak dikenal — sesi aktifnya langsung berakhir.</div>'
+      + '<div style="overflow-x:auto;padding-top:8px;"><table><thead><tr><th>Perangkat</th><th>Email</th><th>Dibuat</th><th>Terakhir</th><th>Status</th><th>Aksi</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+  }
+  function revoke(id, nama) {
+    if (!confirm('Cabut perangkat "' + nama + '"? Sesi aktifnya akan berakhir.')) return;
+    call('revokeDevice', [id], function(res) {
+      if (res && res.success) { toast('Perangkat dicabut (' + (res.sesiDicabut || 0) + ' sesi).'); go('devices'); } else toast((res && res.message) || 'Gagal.');
+    });
+  }
+
+  // ── VIEW: Activity Log ──
+  function viewLog(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var rows = (res.data || []).map(function(l) {
+      return '<tr><td class="t-date">' + esc(l.waktu) + '</td>'
+        + '<td class="t-jenis">' + esc(l.user) + '</td>'
+        + '<td><span class="badge" style="background:var(--admin-soft);color:var(--admin-dark);">' + esc((l.action || '').replace(/_/g, ' ')) + '</span></td>'
+        + '<td class="t-name">' + esc(l.detail) + '</td></tr>';
+    }).join('') || '<tr><td colspan="4"><div class="empty">Belum ada aktivitas.</div></td></tr>';
+    host.innerHTML = '<div class="panel"><div class="panel-head"><div class="panel-title">Activity Log <small>' + (res.data || []).length + ' terbaru</small></div></div>'
+      + '<div style="overflow-x:auto;"><table><thead><tr><th>Waktu</th><th>User</th><th>Aksi</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
   }
 
   load();

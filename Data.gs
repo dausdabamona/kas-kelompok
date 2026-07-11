@@ -917,6 +917,38 @@ function getAdminConsole() {
   }
 }
 
+// Activity Log terbaru (KHUSUS ADMIN) untuk halaman konsol.
+function getActivityLog(limit) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    if (auth.user.role !== CONFIG.ROLES.ADMIN) return { success: false, message: 'Khusus Admin.' };
+    var max = Math.min(Number(limit) || 100, 300);
+    var ss = getSS_();
+    // Peta email → nama
+    var namaUser = {};
+    getUserList_().forEach(function(u) { namaUser[u.email.toLowerCase()] = u.nama || u.email; });
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.LOG);
+    if (!sheet) return { success: true, data: [] };
+    var rows = sheet.getDataRange().getValues();
+    var out = [];
+    for (var i = rows.length - 1; i >= 1 && out.length < max; i--) {
+      if (!rows[i][0]) continue;
+      var em = String(rows[i][1] || '').toLowerCase();
+      out.push({
+        waktu: toDateStr_(rows[i][0]),
+        user: namaUser[em] || rows[i][1] || 'Sistem',
+        email: String(rows[i][1] || ''),
+        action: String(rows[i][2] || ''),
+        detail: String(rows[i][3] || '')
+      });
+    }
+    return { success: true, data: out };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 // ──────────────────────────────────────────────────────
 // MASTER DATA
 // ──────────────────────────────────────────────────────
