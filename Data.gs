@@ -338,14 +338,29 @@ function tutupBuku(data) {
       }
     }
 
+    // Otomatis buka periode baru agar SELALU ada periode aktif.
+    // Saldo awal periode baru = saldo akhir aktual periode yang ditutup.
+    var newPeriode = null;
+    if (sheetPeriod) {
+      var bulanID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+      var namaBaru = (data.namaPeriodeBaru && String(data.namaPeriodeBaru).trim())
+        || ('Periode ' + bulanID[now.getMonth()] + ' ' + now.getFullYear());
+      var newId = generateID('PER');
+      // Urutan kolom sama seperti bukaPeriode:
+      // [Periode, Nama, Tgl Mulai, Tgl Tutup, Status, Saldo Awal Tunai, Saldo Awal Bank, Catatan]
+      sheetPeriod.appendRow([newId, namaBaru, toDateStr_(now), '', CONFIG.STATUS.OPEN,
+        saldoTunai, saldoBank, 'Lanjutan dari ' + periode.nama]);
+      newPeriode = { id: newId, nama: namaBaru, saldoAwalTunai: saldoTunai, saldoAwalBank: saldoBank };
+    }
+
     try {
       var c = CacheService.getScriptCache();
       c.remove('dashboard_saldo');
       c.remove('master_trx_data');
     } catch(e) {}
 
-    logActivity(auth.user.email, 'TUTUP_BUKU', 'Periode: ' + periode.nama + ' | Tunai: ' + saldoTunai + ' Bank: ' + saldoBank);
-    return { success: true, id: sldId };
+    logActivity(auth.user.email, 'TUTUP_BUKU', 'Tutup: ' + periode.nama + ' | Tunai: ' + saldoTunai + ' Bank: ' + saldoBank + (newPeriode ? ' | Buka: ' + newPeriode.nama : ''));
+    return { success: true, id: sldId, newPeriode: newPeriode };
     });
   } catch(e) {
     return { success: false, message: e.message };

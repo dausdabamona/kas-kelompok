@@ -1496,15 +1496,13 @@ var App = {
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
+        var np = res.newPeriode;
         document.getElementById('app').innerHTML = self.pageWrapper('Tutup Buku',
           '<div class="info-box" style="background:#d4edda;border-color:#28a745;color:#155724;margin-top:20px;">' +
-            '✅ Buku berhasil ditutup!<br><br>Periode telah diubah ke status <strong>CLOSED</strong>. Silakan buka periode baru untuk melanjutkan transaksi.' +
+            '✅ Buku berhasil ditutup — periode lama <strong>CLOSED</strong>.' +
+            (np ? '<br><br>Periode baru otomatis dibuka: <strong>' + self.escapeHtml(np.nama) + '</strong><br>Saldo awal → Tunai ' + self.formatNumber(np.saldoAwalTunai) + ', Bank ' + self.formatNumber(np.saldoAwalBank) + '. Anda bisa mengganti namanya di menu Periode.' : '') +
           '</div>' +
-          '<div class="kelola-menu-item" onclick="App.pageBukaPeriode()" style="background:#fff;margin-top:16px;">' +
-            '<div class="kelola-menu-icon">📅</div>' +
-            '<div class="kelola-menu-text"><div class="kelola-menu-title">Buka Periode Baru</div><div class="kelola-menu-desc">Buat periode baru dengan saldo awal</div></div>' +
-            '<span>›</span>' +
-          '</div>'
+          '<button class="btn btn-primary mt-16" style="width:100%;" onclick="App.loadDashboard()">Ke Dashboard</button>'
         );
       })
       .withFailureHandler(function(err) { self.showError(err.message); })
@@ -1813,7 +1811,7 @@ var App = {
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res || !res.success) { self.showError((res && res.message) || 'Gagal tutup buku'); return; }
-        self.toast('Buku berhasil ditutup ✓');
+        self.toast(res.newPeriode ? ('Buku ditutup ✓ Periode baru: ' + res.newPeriode.nama) : 'Buku berhasil ditutup ✓');
         self.loadDashboard();
       })
       .withFailureHandler(function(err) { self.showError((err && err.message) || 'Gagal terhubung'); })
