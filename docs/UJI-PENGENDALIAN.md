@@ -19,11 +19,13 @@ Checklist uji manual per fase. Jalankan di **deployment staging** setelah
 - **Filter `Dibatalkan`** di pembaca: `calculateSaldo`, `getRekapitulasiData` (→ PDF), `getAdminConsole`, `getRiwayatTransaksiSaya`.
 - **Guard saldo negatif** di `submitTransaksi` (pengeluaran & mutasi) + override ADMIN (`data.override` + `data.alasanOverride`, dicatat `OVERRIDE_SALDO`).
 
-**Sisa audit Fase 1 (perlu dilengkapi sebelum tandai selesai):**
-- `assertPeriodeOpen_` di `bayarTagihanPatungan`/`batalBayarTagihanPatungan` (via periode patungan), `updatePendingStatus`, `submitRealisasiSetoran`.
-- Validasi nominal di `addBankTransaction`, `addPendingTransaction`, `addPatungan` (dan `submitPemeriksaanSaldo`/`tutupBuku` = angka saldo, dibahas Fase 2). `addManualBankIncome` sudah aman (delegasi ke `submitTransaksi`).
-- Filter `Dibatalkan` di pembaca sekunder: `getRekapSetoran`, `getLaporanSetoran`, `getBukuIRBelumSerah`, `getKasPenerobos`, `getTagihanPenerobos`. (Tambahkan `if (barisDibatalkan_(row, h)) continue;` — pola sama.)
-- Buku IR yang penerimaannya dibatalkan: rincian terkait perlu ikut diabaikan di perhitungan setoran (linkage `transaksiId`).
+**Sisa audit Fase 1 — SUDAH DILENGKAPI:**
+- ✅ `assertPeriodeOpen_` di `updatePendingStatus`, `bayar`/`batalBayarTagihanPatungan` (via `getPatunganPeriodeId_`). `submitRealisasiSetoran` operasi pada periode aktif + validasi realisasi ≥ 0.
+- ✅ Validasi nominal/tanggal di `addPendingTransaction`, `addBankTransaction` (tanggal + non-negatif), `addPatungan` (nominal grade ≥ 0, min. satu > 0). `addManualBankIncome` aman (delegasi `submitTransaksi`).
+- ✅ Filter `Dibatalkan` di `getRekapSetoran`, `getLaporanSetoran`, `getBukuIRBelumSerah`, `getKasPenerobos`, `getTagihanPenerobos`.
+
+**Residual (1, frekuensi rendah — untuk Fase 2/kecil):**
+- Bila sebuah **penerimaan yang punya rincian Buku IR dibatalkan**, baris rincian di `Detail Buku IR` (sheet tanpa soft-delete) masih terhitung di rekap Setoran Desa. Solusi: reader Buku IR menyaring rincian yang `transaksiId`-nya menunjuk penerimaan berstatus `Dibatalkan`. Dicatat untuk ditangani.
 
 ### Checklist uji manual
 

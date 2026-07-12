@@ -129,6 +129,21 @@ function logActivityWajib_(user, action, detail) {
   sheet.appendRow([new Date(), user, action, detail]);
 }
 
+// Periode ID sebuah patungan/terobosan (untuk kunci periode tagihan).
+function getPatunganPeriodeId_(patunganId) {
+  try {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PATUNGAN);
+    if (!sheet) return '';
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) === String(patunganId)) return String(hGet_(rows[i], h, 'periodeid', 3) || '');
+    }
+    return '';
+  } catch(e) { return ''; }
+}
+
 // Guard saldo negatif (T13): pastikan saldo sumber kas cukup untuk pengeluaran
 // atau mutasi. override=true (khusus ADMIN + alasan) melewati guard.
 function cekSaldoCukup_(periode, sumberKas, nominal) {
@@ -1344,6 +1359,15 @@ function addPatungan(data) {
     if (!data.nama) return { success: false, message: 'Nama patungan wajib diisi' };
     if (!data.gradeConfig || Object.keys(data.gradeConfig).length === 0)
       return { success: false, message: 'Konfigurasi grade wajib diisi' };
+    // Nominal tiap grade: bilangan bulat >= 0, minimal satu > 0.
+    var adaNominal = false;
+    var gradeKeys = Object.keys(data.gradeConfig);
+    for (var gi = 0; gi < gradeKeys.length; gi++) {
+      var gv = Number(data.gradeConfig[gradeKeys[gi]]);
+      if (!isFinite(gv) || gv < 0 || Math.floor(gv) !== gv) return { success: false, message: 'Nominal grade harus bilangan bulat ≥ 0.' };
+      if (gv > 0) adaNominal = true;
+    }
+    if (!adaNominal) return { success: false, message: 'Minimal satu grade memiliki nominal > 0.' };
 
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.PATUNGAN);
@@ -1483,6 +1507,8 @@ function bayarTagihanPatungan(tagihanId, catatan) {
     var today = toDateStr_(new Date());
     for (var i = 1; i < rows.length; i++) {
       if (String(hGet_(rows[i], h, 'id', 0)) === tagihanId) {
+        var apPat = assertPeriodeOpen_(getPatunganPeriodeId_(String(hGet_(rows[i], h, 'patunganid', 1) || ''))); // T2
+        if (!apPat.ok) return { success: false, message: apPat.message };
         var colStatus = (h['statusbayar'] !== undefined ? h['statusbayar'] : 6) + 1;
         var colTgl = (h['tanggalbayar'] !== undefined ? h['tanggalbayar'] : 7) + 1;
         var colCat = (h['catatan'] !== undefined ? h['catatan'] : 8) + 1;
@@ -1511,6 +1537,8 @@ function batalBayarTagihanPatungan(tagihanId) {
     var h = headerMap_(rows[0]);
     for (var i = 1; i < rows.length; i++) {
       if (String(hGet_(rows[i], h, 'id', 0)) === tagihanId) {
+        var apPat2 = assertPeriodeOpen_(getPatunganPeriodeId_(String(hGet_(rows[i], h, 'patunganid', 1) || ''))); // T2
+        if (!apPat2.ok) return { success: false, message: apPat2.message };
         var colStatus = (h['statusbayar'] !== undefined ? h['statusbayar'] : 6) + 1;
         var colTgl = (h['tanggalbayar'] !== undefined ? h['tanggalbayar'] : 7) + 1;
         sheet.getRange(i + 1, colStatus).setValue('Belum');
@@ -2245,6 +2273,7 @@ function getRekapSetoran() {
       var pmH = headerMap_(pmRows[0]);
       for (var k = 1; k < pmRows.length; k++) {
         if (!hGet_(pmRows[k], pmH, 'id', 0)) continue;
+        if (barisDibatalkan_(pmRows[k], pmH)) continue; // T3
         if (periodeId && String(hGet_(pmRows[k], pmH, 'periodeid', 1)) !== periodeId) continue;
         var jid = String(hGet_(pmRows[k], pmH, 'jenisid', 2) || '');
         if (!jid) continue;
@@ -2333,6 +2362,7 @@ function submitRealisasiSetoran(data) {
     ensureColumns_(sheet, ['Sumber Kas', 'Pengeluaran ID', 'Updated By', 'Updated At']);
 
     var realisasi = Number(data.realisasi) || 0;
+    if (realisasi < 0 || Math.floor(realisasi) !== realisasi) return { success: false, message: 'Realisasi harus bilangan bulat ≥ 0.' };
     var sumberKas = data.sumberKas === 'Bank' ? 'Bank' : 'Tunai';
 
     // Cari nama pos + pengeluaran ref untuk mencatat pengeluaran kas
@@ -2832,10 +2862,15 @@ function addBankTransaction(data) {
       sheet = ss.insertSheet(CONFIG.SHEETS.BANK_DAILY);
       sheet.appendRow(['ID', 'PeriodeID', 'Tanggal', 'Saldo Awal', 'Pemasukan', 'Pengeluaran', 'Saldo Akhir Teoritis', 'Saldo Akhir Actual', 'Selisih', 'Status', 'Catatan', 'Last Updated']);
     }
+    var tglCekBnk = validasiTanggalPeriode_(data.tanggal, data.periodeId);
+    if (!tglCekBnk.ok) return { success: false, message: tglCekBnk.message };
+    if ([data.saldoAwal, data.pemasukan, data.pengeluaran, data.saldoAkhirActual].some(function(v) { return Number(v) < 0; })) {
+      return { success: false, message: 'Nilai saldo/mutasi bank tidak boleh negatif.' };
+    }
     var id = generateID('BNK');
     var saldoAkhirTeoritis = (Number(data.saldoAwal) || 0) + (Number(data.pemasukan) || 0) - (Number(data.pengeluaran) || 0);
     var selisih = (Number(data.saldoAkhirActual) || 0) - saldoAkhirTeoritis;
-    sheet.appendRow([id, data.periodeId, toDateStr_(data.tanggal),
+    sheet.appendRow([id, data.periodeId, tglCekBnk.tgl,
       Number(data.saldoAwal) || 0, Number(data.pemasukan) || 0, Number(data.pengeluaran) || 0,
       saldoAkhirTeoritis, Number(data.saldoAkhirActual) || 0, selisih,
       selisih === 0 ? 'Balance' : 'Selisih', data.catatan || '', toDateStr_(new Date())]);
@@ -2933,8 +2968,12 @@ function addPendingTransaction(data) {
     }
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+    var nomCekPnd = validasiNominal_(data.nominal);
+    if (!nomCekPnd.ok) return { success: false, message: nomCekPnd.message };
+    var tglCekPnd = validasiTanggalPeriode_(data.tanggal ? data.tanggal : new Date(), periode.id);
+    if (!tglCekPnd.ok) return { success: false, message: tglCekPnd.message };
     var id = generateID('PND');
-    sheet.appendRow([id, periode.id, toDateStr_(data.tanggal), data.keterangan, Number(data.nominal) || 0,
+    sheet.appendRow([id, periode.id, tglCekPnd.tgl, data.keterangan, nomCekPnd.nilai,
       data.sumber || 'Manual', 'Pending', '', data.catatan || '', toDateStr_(new Date())]);
     try { CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     return { success: true, id: id };
@@ -3020,8 +3059,11 @@ function updatePendingStatus(id, status, catatan) {
     var sheet = ss.getSheetByName(CONFIG.SHEETS.BANK_PENDING);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
+    var hpnd = headerMap_(rows[0]);
     for (var i = 1; i < rows.length; i++) {
       if (rows[i][0] === id) {
+        var apPnd = assertPeriodeOpen_(String(hGet_(rows[i], hpnd, 'periodeid', 1) || '')); // T2
+        if (!apPnd.ok) return { success: false, message: apPnd.message };
         sheet.getRange(i + 1, 7, 1, 4).setValues([[
           status,
           status === 'Found' ? toDateStr_(new Date()) : toDateStr_(rows[i][7]),
@@ -3164,6 +3206,7 @@ function getLaporanSetoran() {
       var pH = headerMap_(pRows[0]);
       for (var i = 1; i < pRows.length; i++) {
         if (!hGet_(pRows[i], pH, 'id', 0)) continue;
+        if (barisDibatalkan_(pRows[i], pH)) continue; // T3
         if (String(hGet_(pRows[i], pH, 'periodeid', 1)) !== periodeId) continue;
         var jid = String(hGet_(pRows[i], pH, 'jenisid', 2) || '');
         var nom = Number(hGet_(pRows[i], pH, 'nominal', 5)) || 0;
@@ -3380,6 +3423,7 @@ function getTagihanPenerobos() {
       var pH = headerMap_(pRows[0]);
       for (var i = 1; i < pRows.length; i++) {
         if (!hGet_(pRows[i], pH, 'id', 0)) continue;
+        if (barisDibatalkan_(pRows[i], pH)) continue; // T3
         if (String(hGet_(pRows[i], pH, 'periodeid', 1)) !== periodeId) continue;
         var jId = String(hGet_(pRows[i], pH, 'jenisid', 2) || '');
         var aId = String(hGet_(pRows[i], pH, 'anggotaid', 3) || '');
@@ -3468,6 +3512,7 @@ function getBukuIRBelumSerah() {
       var pH = headerMap_(pRows[0]);
       for (var i = 1; i < pRows.length; i++) {
         if (!hGet_(pRows[i], pH, 'id', 0)) continue;
+        if (barisDibatalkan_(pRows[i], pH)) continue; // T3
         if (String(hGet_(pRows[i], pH, 'periodeid', 1)) !== periodeId) continue;
         if (bukuIRIds.indexOf(String(hGet_(pRows[i], pH, 'jenisid', 2))) === -1) continue;
         var trxId = String(hGet_(pRows[i], pH, 'id', 0));
@@ -3664,6 +3709,7 @@ function getJamaahBelumBayar(jenisId) {
       var pH = headerMap_(pRows[0]);
       for (var i = 1; i < pRows.length; i++) {
         if (!hGet_(pRows[i], pH, 'id', 0)) continue;
+        if (barisDibatalkan_(pRows[i], pH)) continue; // T3
         if (String(hGet_(pRows[i], pH, 'periodeid', 1)) !== periodeId) continue;
         if (String(hGet_(pRows[i], pH, 'jenisid', 2)) !== String(jenisId)) continue;
         var aId = String(hGet_(pRows[i], pH, 'anggotaid', 3) || '');
