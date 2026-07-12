@@ -320,8 +320,8 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.SALDO_TUTUP_BUKU,
-      headers: ['ID', 'Periode ID', 'Tanggal Tutup', 'Saldo Tunai Akhir', 'Saldo Bank Akhir', 'Total Kas', 'Status', 'Catatan', 'Created By', 'Created At'],
-      note: 'JANGAN edit manual — diisi saat Tutup Buku'
+      headers: ['ID', 'Periode ID', 'Tanggal Tutup', 'Saldo Tunai Akhir', 'Saldo Bank Akhir', 'Total Kas', 'Status', 'Catatan', 'Created By', 'Created At', 'Saldo Tunai Sistem', 'Saldo Bank Sistem', 'Selisih Tunai', 'Selisih Bank', 'Selisih Total', 'Alasan Selisih', 'Arsip File ID', 'Arsip URL', 'Arsip Hash'],
+      note: 'JANGAN edit manual — diisi saat Tutup Buku | Saldo *Akhir = aktual (cash count), *Sistem = hitungan aplikasi, Selisih = aktual − sistem'
     },
     {
       name: CONFIG.SHEETS.PATUNGAN,
@@ -429,6 +429,13 @@ function migrasiKeamanan() {
 // sheet transaksi. Tidak menghapus/mengubah data lama. Baris lama tanpa
 // Status dianggap 'Aktif' oleh pembaca (barisDibatalkan_).
 // ══════════════════════════════════════════════════════
+function _adaKode_(sheet, kode) {
+  if (!sheet || sheet.getLastRow() < 1) return false;
+  var col = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
+  for (var i = 0; i < col.length; i++) { if (String(col[i][0]) === String(kode)) return true; }
+  return false;
+}
+
 function migrasiPengendalian() {
   if (!_setupAccessOk_()) return { success: false, message: 'Akses ditolak.' };
   var ss = SpreadsheetApp.openById(getSpreadsheetId());
@@ -439,6 +446,20 @@ function migrasiPengendalian() {
     if (sh) { ensureColumns_(sh, kolomBatal); log.push('🔧 Kolom soft-delete dipastikan → ' + nm); }
     else log.push('⚠️ Sheet tidak ditemukan → ' + nm);
   });
+
+  // FASE 2: kolom tutup buku bermakna (selisih + arsip).
+  var shSTB = ss.getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+  if (shSTB) {
+    ensureColumns_(shSTB, ['Saldo Tunai Sistem', 'Saldo Bank Sistem', 'Selisih Tunai', 'Selisih Bank', 'Selisih Total', 'Alasan Selisih', 'Arsip File ID', 'Arsip URL', 'Arsip Hash']);
+    log.push('🔧 Kolom selisih/arsip dipastikan → ' + CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+  }
+
+  // FASE 2: jenis khusus "Selisih Kas" di master (untuk baris penyesuaian tutup buku).
+  var jm = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+  if (jm && !_adaKode_(jm, 'SELISIH_KAS')) { jm.appendRow(['SELISIH_KAS', 'Selisih Kas', 'Umum', 100, 0, 0, 'Umum', 'Aktif']); log.push('➕ Jenis Selisih Kas → Master Pemasukan'); }
+  var jk = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
+  if (jk && !_adaKode_(jk, 'SELISIH_KAS')) { jk.appendRow(['SELISIH_KAS', 'Selisih Kas', 'Umum', 'Aktif']); log.push('➕ Jenis Selisih Kas → Master Pengeluaran'); }
+
   Logger.log(log.join('\n'));
   try { SpreadsheetApp.getUi().alert('Migrasi Pengendalian Selesai ✅', log.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK); } catch(e) {}
   return { success: true, log: log };

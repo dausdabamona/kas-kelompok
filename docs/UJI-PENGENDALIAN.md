@@ -50,5 +50,28 @@ Checklist uji manual per fase. Jalankan di **deployment staging** setelah
 
 ---
 
-## FASE 2–5
-*(diisi saat fase terkait dikerjakan.)*
+## FASE 2 — Integritas Periode & Saldo (T1, T5, T14)
+
+### Prasyarat
+- `migrasiPengendalian` **dijalankan ulang** (menambah kolom selisih/arsip di `Saldo Tutup Buku` + jenis `Selisih Kas` di master).
+- (Opsional, untuk arsip) Script Property **`FOLDER_ARSIP_ID`** = ID folder Drive tempat menyimpan PDF; setujui izin **Drive** saat run pertama. Tanpa ini, tutup buku tetap jalan tetapi tanpa arsip.
+
+### Implementasi
+- **T5 tutup buku bermakna:** `cekSyaratTutupBuku_` (tolak bila ada Bank Pending, Buku IR belum dirinci, Kas Penerobos Aktif, Serah Terima Menunggu). `tutupBuku` menghitung **saldo sistem** (server), menyimpan sistem+aktual+**selisih** (Tunai/Bank/Total), **menolak** bila selisih ≠ 0 tanpa alasan, dan membuat **baris penyesuaian `Selisih Kas`** agar sistem = aktual.
+- **T1 rollforward:** `bukaPeriode` mengunci saldo awal = saldo akhir periode CLOSED terakhir (`saldoAkhirTerakhir_`); beda → wajib `overrideRollforward`+alasan, selisih jadi penyesuaian eksplisit. Auto-open dari `tutupBuku` sudah rollforward = aktual.
+- **T14 snapshot:** `arsipkanLaporan_` simpan PDF ke Drive + `Arsip File ID/URL/Hash`. `generatePDF(periodeId)` untuk periode CLOSED **selalu** kembalikan `arsipUrl` (bukan regen). Tombol "Laporan (arsip)" di menu Periode.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | Tutup buku saat masih ada **Serah Terima Menunggu** | Ditolak: "Masih ada Serah Terima berstatus Menunggu…". |
+| 2 | Tutup buku saat masih ada **Kas Penerobos Aktif** | Ditolak. |
+| 3 | Tutup buku saat masih ada **Buku IR belum dirinci** | Ditolak (jumlahnya disebut). |
+| 4 | Tutup buku dengan saldo aktual **beda** dari sistem, batal saat diminta alasan | Tidak jadi tutup. |
+| 5 | Idem #4, isi alasan | Berhasil. Cek `Saldo Tutup Buku`: kolom Sistem, Selisih, Alasan terisi; ada baris `Selisih Kas` di penerimaan/pengeluaran; saldo periode baru = aktual. |
+| 6 | Tutup buku **tanpa selisih** (aktual = sistem) | Berhasil tanpa minta alasan; tak ada baris penyesuaian. |
+| 7 | Setelah tutup, **Buka Periode Baru manual** dengan saldo awal ≠ saldo akhir sebelumnya, tanpa override | Ditolak: "Saldo awal harus = saldo akhir periode sebelumnya…". |
+| 8 | (Jika `FOLDER_ARSIP_ID` diset) Menu **Periode** → periode CLOSED → **Laporan (arsip)** | Membuka berkas PDF arsip di Drive. |
+| 9 | Buka `generatePDF(periodeIdCLOSED)` saat arsip belum diset | Balas: "Laporan periode tertutup tidak diarsipkan…". |
+
+**Residual Fase 1 (rincian Buku IR dari penerimaan dibatalkan)** — belum ditangani; dianjurkan sebelum produksi.
