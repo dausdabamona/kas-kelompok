@@ -427,8 +427,6 @@ var App = {
 
       '<button class="btn btn-secondary mb-16" onclick="App.pageRiwayatSaya()">🧾 Riwayat Transaksi Saya</button>' +
 
-      (App.can('trx.input') ? '<button class="btn btn-outline mb-16" onclick="App.pageImportCsv()">📥 Input CSV (impor bank)</button>' : '') +
-
       (u.role === 'ADMIN' ? '<button class="btn btn-outline mb-16" onclick="App.openAdminConsole()">🖥️ Admin Console (desktop)</button>' : '') +
 
       this._renderMenuGroups(data) +
@@ -1732,7 +1730,7 @@ var App = {
         '<div class="form-group"><label>Catatan</label><textarea id="psCatatan" placeholder="Opsional — alasan selisih, dll"></textarea></div>' +
         '<div id="psError"></div>' +
         '<button class="btn btn-primary" onclick="App.submitPemeriksaanSaldo(false)">💾 Simpan Pemeriksaan</button>' +
-        '<button class="btn btn-outline mt-8" onclick="App.konfirmasiTutupBuku()">🔒 Tutup Buku Periode Ini</button>' +
+        '<button class="btn btn-outline mt-8" onclick="App.konfirmasiTutupSaldo()">🔒 Tutup Buku Periode Ini</button>' +
       '</div>';
 
     var html = self.pageWrapper('Pemeriksaan Saldo',
@@ -1795,10 +1793,23 @@ var App = {
       .submitPemeriksaanSaldo(data);
   },
 
-  konfirmasiTutupBuku: function() {
-    if (confirm('Tutup buku akan mencatat saldo akhir periode ini sebagai final. Pastikan saldo aktual sudah benar. Lanjutkan?')) {
-      this.submitPemeriksaanSaldo(true);
-    }
+  // Tutup buku dari halaman Pemeriksaan Saldo (pakai input ps*).
+  // Memanggil tutupBuku yang benar-benar mengubah status periode → CLOSED.
+  konfirmasiTutupSaldo: function() {
+    var saldoTunai = App.num('psTunai');
+    var saldoBank  = App.num('psBank');
+    var catatan    = (document.getElementById('psCatatan') || {}).value || '';
+    if (!confirm('Tutup buku periode ini?\n\nSaldo akhir dicatat final & status periode diubah ke CLOSED. Lanjutkan?')) return;
+    var self = this;
+    self.showLoading('Menutup buku...');
+    App.srv()
+      .withSuccessHandler(function(res) {
+        if (!res || !res.success) { self.showError((res && res.message) || 'Gagal tutup buku'); return; }
+        self.toast('Buku berhasil ditutup ✓');
+        self.loadDashboard();
+      })
+      .withFailureHandler(function(err) { self.showError((err && err.message) || 'Gagal terhubung'); })
+      .tutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan });
   },
 
   // ─────────────────────────────────────────────────
@@ -2412,6 +2423,10 @@ var App = {
         '<div class="kelola-menu-icon">🤝</div>' +
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Hasil Musyawaroh</div><div class="kelola-menu-desc">Kelola keputusan musyawarah</div></div><span>›</span>' +
       '</div>' +
+      (App.can('trx.input') ? '<div class="kelola-menu-item" onclick="App.pageImportCsv()">' +
+        '<div class="kelola-menu-icon">📥</div>' +
+        '<div class="kelola-menu-text"><div class="kelola-menu-title">Input CSV</div><div class="kelola-menu-desc">Impor banyak transaksi (mis. rekening bank) sekaligus</div></div><span>›</span>' +
+      '</div>' : '') +
       '<div class="kelola-menu-item" onclick="App.pageHakAkses()">' +
         '<div class="kelola-menu-icon">🔐</div>' +
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Kelola Hak Akses</div><div class="kelola-menu-desc">Atur hak akses tiap role</div></div><span>›</span>' +
@@ -3011,7 +3026,7 @@ var App = {
   // IMPOR CSV (rekening koran / banyak transaksi bank)
   // ─────────────────────────────────────────────────
   pageImportCsv: function() {
-    this.history.push('dashboard');
+    this.history.push('setting');
     this.showLoading('Memuat data...');
     var self = this;
     App.srv()
