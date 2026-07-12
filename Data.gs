@@ -222,6 +222,37 @@ function getAllPeriode() {
 // ──────────────────────────────────────────────────────
 // DASHBOARD
 // ──────────────────────────────────────────────────────
+// T7: kas yang masih di tangan penerobos (status Aktif) + aging per penerobos.
+function kasPenerobosAktif_(periodeId) {
+  var ss = getSS_();
+  var out = { total: 0, perPenerobos: [] };
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+  if (!sheet || sheet.getLastRow() < 2) return out;
+  var namaUser = {};
+  try { getUserList_().forEach(function(u) { namaUser[u.email.toLowerCase()] = u.nama || u.email; }); } catch(e) {}
+  var rows = sheet.getDataRange().getValues();
+  var h = headerMap_(rows[0]);
+  var today = new Date();
+  var map = {};
+  for (var i = 1; i < rows.length; i++) {
+    if (String(hGet_(rows[i], h, 'status', 9)) !== 'Aktif') continue;
+    if (periodeId && String(hGet_(rows[i], h, 'periodeid', 1)) !== periodeId) continue;
+    var email = String(hGet_(rows[i], h, 'penerobosemail', 8) || '');
+    var nominal = Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
+    var tglStr = toDateStr_(hGet_(rows[i], h, 'tanggal', 2));
+    var umur = 0;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(tglStr)) { umur = Math.floor((today.getTime() - new Date(tglStr).getTime()) / 86400000); if (umur < 0) umur = 0; }
+    out.total += nominal;
+    var key = email.toLowerCase();
+    if (!map[key]) map[key] = { email: email, nama: namaUser[key] || email, total: 0, tertuaHari: 0 };
+    map[key].total += nominal;
+    if (umur > map[key].tertuaHari) map[key].tertuaHari = umur;
+  }
+  Object.keys(map).forEach(function(k) { out.perPenerobos.push(map[k]); });
+  out.perPenerobos.sort(function(a, b) { return b.tertuaHari - a.tertuaHari; });
+  return out;
+}
+
 function getDashboardData() {
   try {
     var auth = checkAuth();
@@ -262,6 +293,12 @@ function getDashboardData() {
       }
     } catch(e) {}
 
+    // T7: pos ketiga — kas di tangan penerobos (belum masuk kas kelompok).
+    var kp = { total: 0, perPenerobos: [] };
+    try { kp = kasPenerobosAktif_(periodeId); } catch(e) {}
+    var agingHari = 7;
+    try { var av = PropertiesService.getScriptProperties().getProperty('AGING_HARI'); if (av) agingHari = Number(av) || 7; } catch(e) {}
+
     return {
       success: true,
       user: auth.user,
@@ -269,7 +306,11 @@ function getDashboardData() {
       namaKelompok: saldoData.namaKelompok,
       kasTunai: saldoData.tunai,
       kasBank: saldoData.bank,
-      totalKas: saldoData.tunai + saldoData.bank,
+      kasKelompok: saldoData.tunai + saldoData.bank,
+      kasPenerobos: kp.total,
+      penerobosDetail: kp.perPenerobos,
+      agingHari: agingHari,
+      totalKas: saldoData.tunai + saldoData.bank + kp.total,
       belumDirincikanCount: belumCount
     };
   } catch(e) {
@@ -2619,22 +2660,36 @@ function upsertSetoranPengeluaran_(existingId, info) {
   var c_kas = h['sumberkas'] !== undefined ? h['sumberkas'] : 5;
   var c_cat = h['catatan'] !== undefined ? h['catatan'] : 6;
 
+  // T9: KOREKSI, bukan overwrite. Bila baris lama ada & nilainya BERUBAH,
+  // batalkan baris lama (soft delete, alasan otomatis) lalu buat baris baru.
+  // Tanggal baris lama TIDAK PERNAH diubah.
   if (existingId) {
     for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][c_id]) === String(existingId)) {
-        sheet.getRange(i + 1, c_jid + 1).setValue(info.jenisId);
-        sheet.getRange(i + 1, c_nom + 1).setValue(info.nominal);
-        sheet.getRange(i + 1, c_kas + 1).setValue(info.sumberKas);
+      if (String(rows[i][c_id]) !== String(existingId)) continue;
+      if (barisDibatalkan_(rows[i], h)) break; // sudah dibatalkan → buat baru
+      var samaNominal = (Number(rows[i][c_nom]) || 0) === (Number(info.nominal) || 0);
+      var samaJenis = String(rows[i][c_jid]) === String(info.jenisId);
+      var samaKas = String(rows[i][c_kas]) === String(info.sumberKas);
+      if (samaNominal && samaJenis && samaKas) {
+        // Tidak ada perubahan material → cukup perbarui catatan.
         sheet.getRange(i + 1, c_cat + 1).setValue(info.catatan);
-        sheet.getRange(i + 1, c_tgl + 1).setValue(toDateStr_(new Date()));
         return existingId;
       }
+      // Ada perubahan → batalkan baris lama (jejak tetap ada).
+      if (h['status'] !== undefined) {
+        sheet.getRange(i + 1, h['status'] + 1).setValue('Dibatalkan');
+        if (h['dibatalkanby'] !== undefined) sheet.getRange(i + 1, h['dibatalkanby'] + 1).setValue(info.email || '');
+        if (h['dibatalkanat'] !== undefined) sheet.getRange(i + 1, h['dibatalkanat'] + 1).setValue(toDateStr_(new Date()));
+        if (h['alasanbatal'] !== undefined) sheet.getRange(i + 1, h['alasanbatal'] + 1).setValue('Koreksi realisasi setoran');
+      }
+      try { logActivityWajib_(info.email || 'sistem', 'KOREKSI_SETORAN', 'Batal ' + existingId + ' → nominal baru ' + info.nominal); } catch(e) {}
+      break;
     }
   }
-  // Tidak ditemukan / belum ada → buat baru
+  // Buat baris baru (Status Aktif).
   var newId = generateID('PNK');
   sheet.appendRow([newId, info.periodeId, info.jenisId, toDateStr_(new Date()),
-    info.nominal, info.sumberKas, info.catatan, info.email, toDateStr_(new Date())]);
+    info.nominal, info.sumberKas, info.catatan, info.email, toDateStr_(new Date()), 'Aktif']);
   return newId;
 }
 
@@ -4196,13 +4251,21 @@ function konfirmasiSerahTerima(serahTerimaId) {
           jenisId:  String(hGet_(kpRows[ki], kpH, 'jenisid', 3) || ''),
           anggotaId: String(hGet_(kpRows[ki], kpH, 'anggotaid', 4) || ''),
           nominal:  Number(hGet_(kpRows[ki], kpH, 'nominal', 5)) || 0,
-          catatan:  String(hGet_(kpRows[ki], kpH, 'catatan', 7) || '')
+          catatan:  String(hGet_(kpRows[ki], kpH, 'catatan', 7) || ''),
+          tanggal:  toDateStr_(hGet_(kpRows[ki], kpH, 'tanggal', 2)) // T8: tanggal ASLI terima dari jamaah
         });
       }
     }
     if (items.length === 0) return { success: false, message: 'Tidak ada item kas penerobos untuk serah terima ini' };
 
-    // Buat INPUT_PENERIMAAN per item
+    // T8 cut-off: tanggal asli penerimaan wajib berada dalam rentang periode aktif.
+    var periodeAktif = getPeriodeAktif();
+    for (var vj = 0; vj < items.length; vj++) {
+      var vc = validasiTanggalPeriode_(items[vj].tanggal, periodeAktif ? periodeAktif.id : stData.periodeId);
+      if (!vc.ok) return { success: false, message: 'Tanggal terima item (' + (items[vj].tanggal || '-') + ') di luar rentang periode aktif — ' + vc.message + ' Lakukan koreksi lewat prosedur, jangan geser tanggal.' };
+    }
+
+    // Buat INPUT_PENERIMAAN per item — Tanggal = tanggal ASLI terima; Created At = tanggal konfirmasi.
     var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
     if (!sheetP) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
     var now = toDateStr_(new Date());
@@ -4211,7 +4274,7 @@ function konfirmasiSerahTerima(serahTerimaId) {
       var penId = generateID('TRX');
       var catatanEntry = 'Serah Terima dari: ' + stData.penerobosEmail + (items[ji].catatan ? ' | ' + items[ji].catatan : '');
       sheetP.appendRow([penId, stData.periodeId, items[ji].jenisId, items[ji].anggotaId,
-        now, items[ji].nominal, stData.sumberTujuan, catatanEntry, auth.user.email, now]);
+        items[ji].tanggal || now, items[ji].nominal, stData.sumberTujuan, catatanEntry, auth.user.email, now, 'Aktif']);
       penIds.push(penId);
     }
 

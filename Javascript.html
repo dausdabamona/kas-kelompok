@@ -423,6 +423,9 @@ var App = {
         '</div>' +
       '</div>' : '') +
 
+      // T7: pos ketiga — kas di tangan penerobos (belum masuk kas kelompok) + aging.
+      ((u.role !== 'PENEROBOS' && (data.kasPenerobos || 0) > 0) ? this._renderKasPenerobos(data) : '') +
+
       '<button class="btn btn-success mb-16" onclick="App.pageTransaksi()">+ Input Transaksi</button>' +
 
       '<button class="btn btn-secondary mb-16" onclick="App.pageRiwayatSaya()">🧾 Riwayat Transaksi Saya</button>' +
@@ -435,6 +438,27 @@ var App = {
     '</div>';
 
     document.getElementById('app').innerHTML = html;
+  },
+
+  // T7: kartu Kas di Tangan Penerobos + aging.
+  _renderKasPenerobos: function(data) {
+    var self = this;
+    var agingHari = data.agingHari || 7;
+    var list = (data.penerobosDetail || []).map(function(p) {
+      var warn = p.tertuaHari > agingHari;
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(0,0,0,.06);">' +
+        '<div style="font-size:12px;">' + self.escapeHtml(p.nama) + (warn ? ' <span style="color:#DC2626;font-weight:700;">⚠ ' + p.tertuaHari + ' hari</span>' : ' <span style="color:var(--text-muted);">' + p.tertuaHari + ' hari</span>') + '</div>' +
+        '<div style="font-weight:700;font-size:12px;">' + self.formatNumber(p.total) + '</div>' +
+      '</div>';
+    }).join('');
+    return '<div class="card" style="margin-bottom:14px;border-left:4px solid #D97706;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<div class="kas-label">🤲 Kas di Tangan Penerobos</div>' +
+        '<div style="font-weight:800;">' + self.formatNumber(data.kasPenerobos) + '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Belum masuk kas kelompok — menunggu serah terima (peringatan bila &gt; ' + agingHari + ' hari).</div>' +
+      list +
+    '</div>';
   },
 
   // Menu dashboard berkelompok (Opsi B). Grup hanya tampil bila ada isinya.

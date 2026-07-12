@@ -75,3 +75,21 @@ Checklist uji manual per fase. Jalankan di **deployment staging** setelah
 | 9 | Buka `generatePDF(periodeIdCLOSED)` saat arsip belum diset | Balas: "Laporan periode tertutup tidak diarsipkan…". |
 
 **Residual Fase 1 (rincian Buku IR dari penerimaan dibatalkan)** — belum ditangani; dianjurkan sebelum produksi.
+
+---
+
+## FASE 3 — Kas Penerobos & Cut-off (T7, T8, T9)
+
+### Implementasi
+- **T7:** `kasPenerobosAktif_` (total + aging per penerobos). `getDashboardData` menambah pos **Kas di Tangan Penerobos** (`kasPenerobos`, `penerobosDetail`, `agingHari`); `totalKas` = Tunai+Bank+Penerobos. Frontend menampilkan kartu terpisah + peringatan bila umur > `AGING_HARI` (Script Property, default 7). *(Seksi PDF penerobos: menyusul.)*
+- **T8:** `konfirmasiSerahTerima` mencatat `Input Penerimaan` dengan **tanggal ASLI** (`Tanggal` di Kas Penerobos), bukan tanggal konfirmasi; menolak bila tanggal asli di luar rentang periode aktif.
+- **T9:** `upsertSetoranPengeluaran_` tidak lagi menimpa — bila realisasi berubah, **batalkan baris lama** (soft delete, alasan "Koreksi realisasi setoran") + **buat baris baru**; tanggal lama tak diubah.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | Penerobos input pemasukan (jadi Kas Penerobos Aktif) → buka Dashboard (non-penerobos) | Muncul kartu **Kas di Tangan Penerobos** dengan nominal + umur; masuk hitungan **Total Kas**. |
+| 2 | Biarkan > `AGING_HARI` (atau set `AGING_HARI`=0) | Baris penerobos diberi tanda **⚠ N hari** merah. |
+| 3 | Serah terima → konfirmasi | Baris `Input Penerimaan` bertanggal **= tanggal asli terima** (bukan hari konfirmasi); `Created At` = hari konfirmasi. |
+| 4 | Item kas penerobos bertanggal di luar periode aktif → konfirmasi | Ditolak dengan pesan cut-off. |
+| 5 | Ubah **realisasi setoran** yang sudah tercatat | Baris pengeluaran lama jadi **Dibatalkan** (alasan "Koreksi realisasi setoran"), muncul **baris baru**; saldo benar; tanggal lama tak berubah. |
