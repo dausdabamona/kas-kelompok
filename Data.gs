@@ -48,6 +48,99 @@ function ensureColumns_(sheet, headers) {
   }
 }
 
+// ══════════════════════════════════════════════════════
+// FASE 1 — HELPER PENGENDALIAN INTERN
+// ══════════════════════════════════════════════════════
+
+// Baris transaksi dianggap dibatalkan (soft delete) bila kolom Status = 'Dibatalkan'.
+// Baris lama tanpa kolom/nilai Status → dianggap AKTIF.
+function barisDibatalkan_(row, h) {
+  if (!h || h['status'] === undefined) return false;
+  return String(row[h['status']] || '').toLowerCase().trim() === 'dibatalkan';
+}
+
+// Ambil periode berdasarkan ID dengan status APA PUN (OPEN/CLOSED).
+function getPeriodeById_(periodeId) {
+  try {
+    if (!periodeId) return null;
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+    if (!sheet) return null;
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(periodeId)) {
+        return {
+          id: String(rows[i][0]),
+          nama: String(hGet_(rows[i], h, 'nama', 1) || ''),
+          tanggalMulai: toDateStr_(hGet_(rows[i], h, 'tglmulai', 2)),
+          status: String(hGet_(rows[i], h, 'status', 4) || '')
+        };
+      }
+    }
+    return null;
+  } catch(e) { return null; }
+}
+
+// Tolak bila periode baris (berdasarkan Periode ID di baris) BUKAN OPEN.
+// Menutup T2: transaksi periode tertutup tidak dapat diubah/dihapus.
+function assertPeriodeOpen_(periodeIdBaris) {
+  var p = getPeriodeById_(periodeIdBaris);
+  if (!p) return { ok: false, message: 'Periode transaksi tidak ditemukan.' };
+  if (String(p.status) !== CONFIG.STATUS.OPEN) {
+    return { ok: false, message: 'Transaksi ini milik periode yang sudah ditutup dan tidak dapat diubah.' };
+  }
+  return { ok: true, periode: p };
+}
+
+// Validasi nominal uang: bilangan bulat rupiah > 0, dalam batas wajar.
+function validasiNominal_(n) {
+  var v = Number(n);
+  if (!isFinite(v)) return { ok: false, message: 'Nominal tidak valid.' };
+  if (Math.floor(v) !== v) return { ok: false, message: 'Nominal harus bilangan bulat rupiah (tanpa desimal).' };
+  if (v <= 0) return { ok: false, message: 'Nominal harus lebih besar dari 0.' };
+  if (v > 100000000000) return { ok: false, message: 'Nominal melebihi batas wajar.' };
+  return { ok: true, nilai: v };
+}
+
+// Validasi tanggal transaksi: tidak di masa depan & tidak sebelum awal periode.
+function validasiTanggalPeriode_(rawTgl, periodeId) {
+  var t = toDateStr_(rawTgl instanceof Date ? rawTgl : (rawTgl ? new Date(rawTgl) : null));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) t = toDateStr_(rawTgl); // fallback string apa adanya
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return { ok: false, message: 'Tanggal tidak valid.' };
+  var today = toDateStr_(new Date());
+  if (t > today) return { ok: false, message: 'Tanggal transaksi tidak boleh di masa depan.' };
+  var p = getPeriodeById_(periodeId);
+  if (p && /^\d{4}-\d{2}-\d{2}$/.test(p.tanggalMulai) && t < p.tanggalMulai) {
+    return { ok: false, message: 'Tanggal (' + t + ') sebelum awal periode (' + p.tanggalMulai + ').' };
+  }
+  return { ok: true, tgl: t };
+}
+
+// Log WAJIB untuk mutasi material: melempar error bila gagal menulis
+// (berbeda dari logActivity yang silent). Menutup T3.
+function logActivityWajib_(user, action, detail) {
+  var ss = getSS_();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.LOG);
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.SHEETS.LOG);
+    sheet.appendRow(['Timestamp', 'User', 'Action', 'Detail']);
+  }
+  sheet.appendRow([new Date(), user, action, detail]);
+}
+
+// Guard saldo negatif (T13): pastikan saldo sumber kas cukup untuk pengeluaran
+// atau mutasi. override=true (khusus ADMIN + alasan) melewati guard.
+function cekSaldoCukup_(periode, sumberKas, nominal) {
+  var saldo = { tunai: 0, bank: 0 };
+  try { saldo = calculateSaldo(periode.id, periode); } catch(e) {}
+  var s = (sumberKas === 'Bank') ? saldo.bank : saldo.tunai;
+  if (nominal > s) {
+    return { ok: false, message: 'Saldo ' + (sumberKas === 'Bank' ? 'Bank' : 'Tunai') + ' tidak mencukupi (saldo: Rp ' + Number(s).toLocaleString('id-ID') + ', diminta: Rp ' + Number(nominal).toLocaleString('id-ID') + ').', saldo: s };
+  }
+  return { ok: true, saldo: s };
+}
+
 // ──────────────────────────────────────────────────────
 // PERIODE
 // ──────────────────────────────────────────────────────
@@ -179,6 +272,7 @@ function calculateSaldo(periodeId, periode) {
     var dp = sheetP.getDataRange().getValues();
     var dpH = headerMap_(dp[0]);
     for (var i = 1; i < dp.length; i++) {
+      if (barisDibatalkan_(dp[i], dpH)) continue; // T3: abaikan yang dibatalkan
       if (!periodeId || String(hGet_(dp[i], dpH, 'periodeid', 1)) === periodeId) {
         var nominal = Number(hGet_(dp[i], dpH, 'nominal', 5)) || 0;
         var sumber  = String(hGet_(dp[i], dpH, 'sumberkas', 6) || '');
@@ -193,6 +287,7 @@ function calculateSaldo(periodeId, periode) {
     var dpk = sheetPK.getDataRange().getValues();
     var dpkH = headerMap_(dpk[0]);
     for (var i = 1; i < dpk.length; i++) {
+      if (barisDibatalkan_(dpk[i], dpkH)) continue; // T3
       if (!periodeId || String(hGet_(dpk[i], dpkH, 'periodeid', 1)) === periodeId) {
         var nominal = Number(hGet_(dpk[i], dpkH, 'nominal', 4)) || 0;
         var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
@@ -207,6 +302,7 @@ function calculateSaldo(periodeId, periode) {
     var ds = sheetS.getDataRange().getValues();
     var dsH = headerMap_(ds[0]);
     for (var i = 1; i < ds.length; i++) {
+      if (barisDibatalkan_(ds[i], dsH)) continue; // T3
       if (!periodeId || String(hGet_(ds[i], dsH, 'periodeid', 1)) === periodeId) {
         var nominal = Number(hGet_(ds[i], dsH, 'nominal', 3)) || 0;
         var arah    = String(hGet_(ds[i], dsH, 'arah', 4) || '');
@@ -424,7 +520,34 @@ function submitTransaksi(data) {
 
     var id = generateID('TRX');
     var now = new Date();
-    var tgl = toDateStr_(data.tanggal ? new Date(data.tanggal) : now);
+
+    // FASE 1: validasi nominal, tanggal, sumber kas / arah (server-side, T4/T8/A3).
+    var nomCek = validasiNominal_(data.nominal);
+    if (!nomCek.ok) return { success: false, message: nomCek.message };
+    var nominal = nomCek.nilai;
+    if (data.tipe === 'masuk' || data.tipe === 'keluar') {
+      if (data.sumberKas !== 'Tunai' && data.sumberKas !== 'Bank') return { success: false, message: 'Sumber Kas harus Tunai atau Bank.' };
+    } else if (data.tipe === 'mutasi') {
+      if (data.arah !== 'setor' && data.arah !== 'tarik') return { success: false, message: 'Arah mutasi harus setor atau tarik.' };
+    }
+    var tglCek = validasiTanggalPeriode_(data.tanggal ? data.tanggal : now, periode.id);
+    if (!tglCek.ok) return { success: false, message: tglCek.message };
+    var tgl = tglCek.tgl;
+
+    // Guard saldo negatif (T13) untuk pengeluaran & mutasi. Override khusus ADMIN + alasan wajib.
+    var override = !!data.override && auth.user.role === CONFIG.ROLES.ADMIN;
+    if (override && !String(data.alasanOverride || '').trim()) return { success: false, message: 'Override saldo wajib disertai alasan.' };
+    if (!override) {
+      if (data.tipe === 'keluar') {
+        var ck = cekSaldoCukup_(periode, data.sumberKas, nominal);
+        if (!ck.ok) return { success: false, message: ck.message, saldoKurang: true };
+      } else if (data.tipe === 'mutasi') {
+        var ckm = cekSaldoCukup_(periode, (data.arah === 'setor') ? 'Tunai' : 'Bank', nominal);
+        if (!ckm.ok) return { success: false, message: ckm.message, saldoKurang: true };
+      }
+    } else {
+      logActivityWajib_(auth.user.email, 'OVERRIDE_SALDO', 'Alasan: ' + data.alasanOverride + ' | tipe: ' + data.tipe + ' | nominal: ' + nominal);
+    }
 
     // Validasi FK: jenisId harus ada di master
     if (data.tipe === 'masuk' || data.tipe === 'keluar') {
@@ -447,28 +570,28 @@ function submitTransaksi(data) {
           kpSheet = ss.insertSheet(CONFIG.SHEETS.KAS_PENEROBOS);
           kpSheet.appendRow(['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Sumber Kas', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At']);
         }
-        kpSheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', Number(data.nominal), data.sumberKas || 'Tunai', data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(now)]);
-        logActivity(auth.user.email, 'KAS_PENEROBOS_VIA_TRX', 'Nominal: ' + data.nominal);
+        kpSheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', nominal, data.sumberKas || 'Tunai', data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(now)]);
+        logActivity(auth.user.email, 'KAS_PENEROBOS_VIA_TRX', 'Nominal: ' + nominal);
         try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
         return { success: true, id: id, viaPenerobos: true };
       }
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
       if (!sheet) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
-      sheet.appendRow([id, periode.id, data.jenisId, data.anggotaId || '', tgl, Number(data.nominal), data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now)]);
-      logActivity(auth.user.email, 'PEMASUKAN', 'Nominal: ' + data.nominal);
+      sheet.appendRow([id, periode.id, data.jenisId, data.anggotaId || '', tgl, nominal, data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now), 'Aktif']);
+      logActivity(auth.user.email, 'PEMASUKAN', 'Nominal: ' + nominal);
     } else if (data.tipe === 'keluar') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
       if (!sheet) return { success: false, message: 'Sheet pengeluaran tidak ditemukan' };
-      sheet.appendRow([id, periode.id, data.jenisId, tgl, Number(data.nominal), data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now)]);
-      logActivity(auth.user.email, 'PENGELUARAN', 'Nominal: ' + data.nominal);
+      sheet.appendRow([id, periode.id, data.jenisId, tgl, nominal, data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now), 'Aktif']);
+      logActivity(auth.user.email, 'PENGELUARAN', 'Nominal: ' + nominal);
     } else if (data.tipe === 'mutasi') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
       if (!sheet) {
         sheet = ss.insertSheet(CONFIG.SHEETS.INPUT_SETORAN);
-        sheet.appendRow(['ID', 'PeriodeID', 'Tanggal', 'Nominal', 'Arah', 'CreatedBy', 'CreatedAt']);
+        sheet.appendRow(['ID', 'Periode ID', 'Tanggal', 'Nominal', 'Arah', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal']);
       }
-      sheet.appendRow([id, periode.id, tgl, Number(data.nominal), data.arah, auth.user.email, toDateStr_(now)]);
-      logActivity(auth.user.email, 'MUTASI', 'Arah: ' + data.arah + ' Nominal: ' + data.nominal);
+      sheet.appendRow([id, periode.id, tgl, nominal, data.arah, auth.user.email, toDateStr_(now), 'Aktif']);
+      logActivity(auth.user.email, 'MUTASI', 'Arah: ' + data.arah + ' Nominal: ' + nominal);
     }
 
     // Invalidate saldo cache setiap ada transaksi baru
@@ -486,92 +609,85 @@ function updateTransaksi(data) {
     var auth = requirePerm(cap);
     if (!auth.success) return { success: false, message: auth.message };
     return withLock_(function() {
-    var periode = getPeriodeAktif();
-    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
-    if (periode.status !== CONFIG.STATUS.OPEN) return { success: false, message: 'Periode sudah ditutup, tidak bisa mengedit transaksi' };
+    if (data.sumberKas !== 'Tunai' && data.sumberKas !== 'Bank') return { success: false, message: 'Sumber Kas harus Tunai atau Bank.' };
+    var nomCek = validasiNominal_(data.nominal);
+    if (!nomCek.ok) return { success: false, message: nomCek.message };
+    var nominal = nomCek.nilai;
+    var masuk = (data.tipe === 'masuk');
+    if (!masuk && data.tipe !== 'keluar') return { success: false, message: 'Tipe transaksi tidak valid' };
 
     var ss = getSS_();
-    var tgl = toDateStr_(data.tanggal ? new Date(data.tanggal) : new Date());
+    var sheet = ss.getSheetByName(masuk ? CONFIG.SHEETS.INPUT_PENERIMAAN : CONFIG.SHEETS.INPUT_PENGELUARAN);
+    if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var iTgl = masuk ? 4 : 3, iNom = masuk ? 5 : 4, iSmb = masuk ? 6 : 5, iCat = masuk ? 7 : 6;
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) !== String(data.id)) continue;
+      if (barisDibatalkan_(rows[i], h)) return { success: false, message: 'Transaksi sudah dibatalkan, tidak dapat diedit.' };
+      var pidBaris = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+      var ap = assertPeriodeOpen_(pidBaris); // T2: kunci periode tertutup
+      if (!ap.ok) return { success: false, message: ap.message };
+      var tglCek = validasiTanggalPeriode_(data.tanggal, pidBaris);
+      if (!tglCek.ok) return { success: false, message: tglCek.message };
 
-    if (data.tipe === 'masuk') {
-      var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-      if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
-      var rows = sheet.getDataRange().getValues();
-      var h = headerMap_(rows[0]);
-      for (var i = 1; i < rows.length; i++) {
-        if (String(hGet_(rows[i], h, 'id', 0)) === String(data.id)) {
-          var colJenis   = (h['jenisid']    !== undefined ? h['jenisid']    : 2) + 1;
-          var colAnggota = (h['anggotaid']  !== undefined ? h['anggotaid']  : 3) + 1;
-          var colTgl     = (h['tanggal']    !== undefined ? h['tanggal']    : 4) + 1;
-          var colNom     = (h['nominal']    !== undefined ? h['nominal']    : 5) + 1;
-          var colSumber  = (h['sumberkas']  !== undefined ? h['sumberkas']  : 6) + 1;
-          var colCat     = (h['catatan']    !== undefined ? h['catatan']    : 7) + 1;
-          sheet.getRange(i + 1, colJenis).setValue(data.jenisId);
-          sheet.getRange(i + 1, colAnggota).setValue(data.anggotaId || '');
-          sheet.getRange(i + 1, colTgl).setValue(tgl);
-          sheet.getRange(i + 1, colNom).setValue(Number(data.nominal) || 0);
-          sheet.getRange(i + 1, colSumber).setValue(data.sumberKas);
-          sheet.getRange(i + 1, colCat).setValue(data.catatan || '');
-          try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
-          logActivity(auth.user.email, 'EDIT_PEMASUKAN', 'ID: ' + data.id);
-          return { success: true };
-        }
-      }
-      return { success: false, message: 'Transaksi tidak ditemukan' };
-    } else if (data.tipe === 'keluar') {
-      var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
-      if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
-      var rows = sheet.getDataRange().getValues();
-      var h = headerMap_(rows[0]);
-      for (var i = 1; i < rows.length; i++) {
-        if (String(hGet_(rows[i], h, 'id', 0)) === String(data.id)) {
-          var colJenis  = (h['jenisid']   !== undefined ? h['jenisid']   : 2) + 1;
-          var colTgl    = (h['tanggal']   !== undefined ? h['tanggal']   : 3) + 1;
-          var colNom    = (h['nominal']   !== undefined ? h['nominal']   : 4) + 1;
-          var colSumber = (h['sumberkas'] !== undefined ? h['sumberkas'] : 5) + 1;
-          var colCat    = (h['catatan']   !== undefined ? h['catatan']   : 6) + 1;
-          sheet.getRange(i + 1, colJenis).setValue(data.jenisId);
-          sheet.getRange(i + 1, colTgl).setValue(tgl);
-          sheet.getRange(i + 1, colNom).setValue(Number(data.nominal) || 0);
-          sheet.getRange(i + 1, colSumber).setValue(data.sumberKas);
-          sheet.getRange(i + 1, colCat).setValue(data.catatan || '');
-          try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
-          logActivity(auth.user.email, 'EDIT_PENGELUARAN', 'ID: ' + data.id);
-          return { success: true };
-        }
-      }
-      return { success: false, message: 'Transaksi tidak ditemukan' };
+      var lama = { jenis: String(hGet_(rows[i], h, 'jenisid', 2) || ''), tanggal: toDateStr_(hGet_(rows[i], h, 'tanggal', iTgl)), nominal: Number(hGet_(rows[i], h, 'nominal', iNom)) || 0, sumberKas: String(hGet_(rows[i], h, 'sumberkas', iSmb) || '') };
+      var rowNum = i + 1;
+      sheet.getRange(rowNum, (h['jenisid'] !== undefined ? h['jenisid'] : 2) + 1).setValue(data.jenisId);
+      if (masuk) sheet.getRange(rowNum, (h['anggotaid'] !== undefined ? h['anggotaid'] : 3) + 1).setValue(data.anggotaId || '');
+      sheet.getRange(rowNum, (h['tanggal'] !== undefined ? h['tanggal'] : iTgl) + 1).setValue(tglCek.tgl);
+      sheet.getRange(rowNum, (h['nominal'] !== undefined ? h['nominal'] : iNom) + 1).setValue(nominal);
+      sheet.getRange(rowNum, (h['sumberkas'] !== undefined ? h['sumberkas'] : iSmb) + 1).setValue(data.sumberKas);
+      sheet.getRange(rowNum, (h['catatan'] !== undefined ? h['catatan'] : iCat) + 1).setValue(data.catatan || '');
+      try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+      logActivityWajib_(auth.user.email, 'EDIT_' + (masuk ? 'PEMASUKAN' : 'PENGELUARAN'),
+        'ID: ' + data.id + ' | LAMA: ' + JSON.stringify(lama) + ' | BARU: ' + JSON.stringify({ jenis: data.jenisId, tanggal: tglCek.tgl, nominal: nominal, sumberKas: data.sumberKas }));
+      return { success: true };
     }
-    return { success: false, message: 'Tipe transaksi tidak valid' };
+    return { success: false, message: 'Transaksi tidak ditemukan' };
     });
   } catch(e) {
     return { success: false, message: e.message };
   }
 }
 
+// SOFT DELETE (T3): tidak menghapus baris; menandai Status=Dibatalkan +
+// mewajibkan alasan + mencatat snapshot nilai lama di log. Menolak baris
+// dari periode yang sudah ditutup (T2).
 function deleteTransaksi(data) {
   try {
     var cap = (data.sumberKas === 'Tunai') ? 'trx.edit.tunai' : 'trx.edit.bank';
     var auth = requirePerm(cap);
     if (!auth.success) return { success: false, message: auth.message };
+    var alasan = String(data.alasan || '').trim();
+    if (!alasan) return { success: false, message: 'Alasan pembatalan wajib diisi.' };
     return withLock_(function() {
-    var periode = getPeriodeAktif();
-    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
-    if (periode.status !== CONFIG.STATUS.OPEN) return { success: false, message: 'Periode sudah ditutup, tidak bisa menghapus transaksi' };
-
+    var masuk = (data.tipe === 'masuk');
     var ss = getSS_();
-    var sheetName = (data.tipe === 'masuk') ? CONFIG.SHEETS.INPUT_PENERIMAAN : CONFIG.SHEETS.INPUT_PENGELUARAN;
-    var sheet = ss.getSheetByName(sheetName);
+    var sheet = ss.getSheetByName(masuk ? CONFIG.SHEETS.INPUT_PENERIMAAN : CONFIG.SHEETS.INPUT_PENGELUARAN);
     if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
     var rows = sheet.getDataRange().getValues();
     var h = headerMap_(rows[0]);
+    if (h['status'] === undefined) return { success: false, message: 'Kolom Status belum ada. Jalankan migrasiPengendalian dulu.' };
+    var iTgl = masuk ? 4 : 3, iNom = masuk ? 5 : 4, iSmb = masuk ? 6 : 5;
     for (var i = 1; i < rows.length; i++) {
-      if (String(hGet_(rows[i], h, 'id', 0)) === String(data.id)) {
-        sheet.deleteRow(i + 1);
-        try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
-        logActivity(auth.user.email, 'HAPUS_' + (data.tipe === 'masuk' ? 'PEMASUKAN' : 'PENGELUARAN'), 'ID: ' + data.id);
-        return { success: true };
-      }
+      if (String(hGet_(rows[i], h, 'id', 0)) !== String(data.id)) continue;
+      if (barisDibatalkan_(rows[i], h)) return { success: false, message: 'Transaksi sudah dibatalkan.' };
+      var pidBaris = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+      var ap = assertPeriodeOpen_(pidBaris); // T2
+      if (!ap.ok) return { success: false, message: ap.message };
+
+      var snap = { jenis: String(hGet_(rows[i], h, 'jenisid', 2) || ''), tanggal: toDateStr_(hGet_(rows[i], h, 'tanggal', iTgl)), nominal: Number(hGet_(rows[i], h, 'nominal', iNom)) || 0, sumberKas: String(hGet_(rows[i], h, 'sumberkas', iSmb) || '') };
+      var rowNum = i + 1;
+      var nowS = toDateStr_(new Date());
+      sheet.getRange(rowNum, h['status'] + 1).setValue('Dibatalkan');
+      if (h['dibatalkanby'] !== undefined) sheet.getRange(rowNum, h['dibatalkanby'] + 1).setValue(auth.user.email);
+      if (h['dibatalkanat'] !== undefined) sheet.getRange(rowNum, h['dibatalkanat'] + 1).setValue(nowS);
+      if (h['alasanbatal'] !== undefined) sheet.getRange(rowNum, h['alasanbatal'] + 1).setValue(alasan);
+      try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+      logActivityWajib_(auth.user.email, 'BATAL_' + (masuk ? 'PEMASUKAN' : 'PENGELUARAN'),
+        'ID: ' + data.id + ' | ALASAN: ' + alasan + ' | NILAI: ' + JSON.stringify(snap));
+      return { success: true };
     }
     return { success: false, message: 'Transaksi tidak ditemukan' };
     });
@@ -629,15 +745,18 @@ function importTransaksiCSV(payload) {
         var tgl = toDateStr_(row.tanggal ? new Date(row.tanggal) : now);
         var ket = String(row.keterangan || '');
         if (tipe !== 'masuk' && tipe !== 'keluar') { gagal.push({ baris: i + 1, alasan: 'Tipe harus masuk/keluar' }); continue; }
-        if (nominal <= 0) { gagal.push({ baris: i + 1, alasan: 'Nominal tidak valid' }); continue; }
-        if (!tgl) { gagal.push({ baris: i + 1, alasan: 'Tanggal tidak valid' }); continue; }
+        var nc = validasiNominal_(nominal);
+        if (!nc.ok) { gagal.push({ baris: i + 1, alasan: nc.message }); continue; }
+        var tc = validasiTanggalPeriode_(row.tanggal ? row.tanggal : now, periode.id);
+        if (!tc.ok) { gagal.push({ baris: i + 1, alasan: tc.message }); continue; }
+        tgl = tc.tgl;
         var id = generateID('TRX');
         if (tipe === 'masuk') {
           if (!shIn) { gagal.push({ baris: i + 1, alasan: 'Sheet penerimaan tidak ada' }); continue; }
-          shIn.appendRow([id, periode.id, jenisMasukId, '', tgl, nominal, sumberKas, ket, auth.user.email, toDateStr_(now)]);
+          shIn.appendRow([id, periode.id, jenisMasukId, '', tgl, nominal, sumberKas, ket, auth.user.email, toDateStr_(now), 'Aktif']);
         } else {
           if (!shOut) { gagal.push({ baris: i + 1, alasan: 'Sheet pengeluaran tidak ada' }); continue; }
-          shOut.appendRow([id, periode.id, jenisKeluarId, tgl, nominal, sumberKas, ket, auth.user.email, toDateStr_(now)]);
+          shOut.appendRow([id, periode.id, jenisKeluarId, tgl, nominal, sumberKas, ket, auth.user.email, toDateStr_(now), 'Aktif']);
         }
         berhasil++;
       }
@@ -685,6 +804,7 @@ function getRiwayatTransaksiSaya() {
       for (var i = 1; i < rin.length; i++) {
         if (!hGet_(rin[i], hin, 'id', 0)) continue;
         if (String(hGet_(rin[i], hin, 'createdby', 8)) !== email) continue;
+        if (barisDibatalkan_(rin[i], hin)) continue; // T3
         var jid = String(hGet_(rin[i], hin, 'jenisid', 2) || '');
         list.push({
           id: String(hGet_(rin[i], hin, 'id', 0)),
@@ -710,6 +830,7 @@ function getRiwayatTransaksiSaya() {
       for (var i = 1; i < rout.length; i++) {
         if (!hGet_(rout[i], hout, 'id', 0)) continue;
         if (String(hGet_(rout[i], hout, 'createdby', 7)) !== email) continue;
+        if (barisDibatalkan_(rout[i], hout)) continue; // T3
         var jid2 = String(hGet_(rout[i], hout, 'jenisid', 2) || '');
         list.push({
           id: String(hGet_(rout[i], hout, 'id', 0)),
@@ -735,6 +856,7 @@ function getRiwayatTransaksiSaya() {
       for (var i = 1; i < rmut.length; i++) {
         if (!hGet_(rmut[i], hmut, 'id', 0)) continue;
         if (String(hGet_(rmut[i], hmut, 'createdby', 5)) !== email) continue;
+        if (barisDibatalkan_(rmut[i], hmut)) continue; // T3
         var arah = String(hGet_(rmut[i], hmut, 'arah', 4) || '');
         list.push({
           id: String(hGet_(rmut[i], hmut, 'id', 0)),
@@ -835,6 +957,7 @@ function getAdminConsole() {
       var rin = shIn.getDataRange().getValues(); var hin = headerMap_(rin[0]);
       for (var i = 1; i < rin.length; i++) {
         if (!hGet_(rin[i], hin, 'id', 0)) continue;
+        if (barisDibatalkan_(rin[i], hin)) continue; // T3
         var jid = String(hGet_(rin[i], hin, 'jenisid', 2) || '');
         var tgl = toDateStr_(hGet_(rin[i], hin, 'tanggal', 4));
         var aid = String(hGet_(rin[i], hin, 'anggotaid', 3) || '');
@@ -850,6 +973,7 @@ function getAdminConsole() {
       var rout = shOut.getDataRange().getValues(); var hout = headerMap_(rout[0]);
       for (var i = 1; i < rout.length; i++) {
         if (!hGet_(rout[i], hout, 'id', 0)) continue;
+        if (barisDibatalkan_(rout[i], hout)) continue; // T3
         var jid2 = String(hGet_(rout[i], hout, 'jenisid', 2) || '');
         var tgl2 = toDateStr_(hGet_(rout[i], hout, 'tanggal', 3));
         var email2 = String(hGet_(rout[i], hout, 'createdby', 7) || '').toLowerCase();
@@ -1574,21 +1698,40 @@ function submitRincianIR(data) {
       // Kolom Total dihapus — nilai derived, dihitung saat read (IR+IR10+Cicilan+InfakDaerah+Index)
       sheet.appendRow(['ID', 'TransaksiID', 'PeriodeID', 'AnggotaID', 'Tanggal', 'IR', 'IR10', 'Cicilan', 'InfakDaerah', 'Index', 'CreatedBy', 'CreatedAt']);
     }
-    // Validasi: transaksiId harus ada di Input Penerimaan
+    // Baca transaksi penerimaan yang dirujuk. Nominal/periode/anggota/tanggal
+    // diambil dari SHEET (bukan klien) — menutup T6 & A1.
     var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-    if (sheetP) {
-      var pRows = sheetP.getDataRange().getValues();
-      var validTrx = false;
-      for (var vi = 1; vi < pRows.length; vi++) {
-        if (String(pRows[vi][0]) === String(data.transaksiId)) { validTrx = true; break; }
-      }
-      if (!validTrx) return { success: false, message: 'Transaksi tidak ditemukan.' };
+    if (!sheetP) return { success: false, message: 'Sheet penerimaan tidak ditemukan.' };
+    var pRows = sheetP.getDataRange().getValues();
+    var pH = headerMap_(pRows[0]);
+    var trxRow = null;
+    for (var vi = 1; vi < pRows.length; vi++) {
+      if (String(hGet_(pRows[vi], pH, 'id', 0)) === String(data.transaksiId)) { trxRow = pRows[vi]; break; }
     }
+    if (!trxRow) return { success: false, message: 'Transaksi tidak ditemukan.' };
+    if (barisDibatalkan_(trxRow, pH)) return { success: false, message: 'Transaksi sudah dibatalkan.' };
+    var trxNominal   = Number(hGet_(trxRow, pH, 'nominal', 5)) || 0;
+    var trxPeriodeId = String(hGet_(trxRow, pH, 'periodeid', 1) || '');
+    var trxAnggotaId = String(hGet_(trxRow, pH, 'anggotaid', 3) || '');
+    var trxTanggal   = toDateStr_(hGet_(trxRow, pH, 'tanggal', 4));
+
+    // Kunci periode tertutup (T2).
+    var ap = assertPeriodeOpen_(trxPeriodeId);
+    if (!ap.ok) return { success: false, message: ap.message };
+
     var ir = Number(data.ir) || 0;
     var ir10 = Number(data.ir10) || 0;
     var cicilan = Number(data.cicilan) || 0;
     var infakDaerah = Number(data.infakDaerah) || 0;
     var index = Number(data.index) || 0;
+    if (ir < 0 || ir10 < 0 || cicilan < 0 || infakDaerah < 0 || index < 0) {
+      return { success: false, message: 'Komponen rincian tidak boleh negatif.' };
+    }
+    // Validasi balance di SERVER (T6): total komponen = nominal transaksi.
+    var totalKomp = ir + ir10 + cicilan + infakDaerah + index;
+    if (totalKomp !== trxNominal) {
+      return { success: false, message: 'Rincian tidak seimbang: total Rp ' + totalKomp.toLocaleString('id-ID') + ' ≠ nominal transaksi Rp ' + trxNominal.toLocaleString('id-ID') + ' (selisih Rp ' + Math.abs(totalKomp - trxNominal).toLocaleString('id-ID') + ').' };
+    }
 
     // Cek apakah transaksi ini sudah pernah dirincikan → update, bukan tambah baru.
     // Edit hanya boleh selama periode masih OPEN (getPeriodeAktif memfilter ke periode aktif).
@@ -1611,7 +1754,8 @@ function submitRincianIR(data) {
       logActivity(auth.user.email, 'RINCIAN_EDIT', 'Transaksi: ' + data.transaksiId);
     } else {
       id = generateID('IR');
-      sheet.appendRow([id, data.transaksiId, data.periodeId, data.anggotaId, toDateStr_(data.tanggal),
+      // Periode/anggota/tanggal dari transaksi (server), bukan klien (A1).
+      sheet.appendRow([id, data.transaksiId, trxPeriodeId, trxAnggotaId, trxTanggal,
         ir, ir10, cicilan, infakDaerah, index, auth.user.email, toDateStr_(new Date())]);
     }
     try { var c = CacheService.getScriptCache(); c.remove('master_trx_data'); c.remove('buku_ir_data'); c.remove('dashboard_saldo'); } catch(e) {}
@@ -1666,6 +1810,7 @@ function getRekapitulasiData() {
       var dpH = headerMap_(dp[0]);
       for (var i = 1; i < dp.length; i++) {
         if (!hGet_(dp[i], dpH, 'id', 0)) continue;
+        if (barisDibatalkan_(dp[i], dpH)) continue; // T3
         if (periodeId && String(hGet_(dp[i], dpH, 'periodeid', 1)) !== periodeId) continue;
         var nominal = Number(hGet_(dp[i], dpH, 'nominal', 5)) || 0;
         var sumber  = String(hGet_(dp[i], dpH, 'sumberkas', 6) || '');
@@ -1692,6 +1837,7 @@ function getRekapitulasiData() {
       var dpkH = headerMap_(dpk[0]);
       for (var i = 1; i < dpk.length; i++) {
         if (!hGet_(dpk[i], dpkH, 'id', 0)) continue;
+        if (barisDibatalkan_(dpk[i], dpkH)) continue; // T3
         if (periodeId && String(hGet_(dpk[i], dpkH, 'periodeid', 1)) !== periodeId) continue;
         var nominal = Number(hGet_(dpk[i], dpkH, 'nominal', 4)) || 0;
         var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
@@ -3569,6 +3715,11 @@ function submitKasPenerobos(data) {
     var periode = getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
 
+    var nomCek = validasiNominal_(data.nominal);
+    if (!nomCek.ok) return { success: false, message: nomCek.message };
+    var tglCek = validasiTanggalPeriode_(data.tanggal ? data.tanggal : new Date(), periode.id);
+    if (!tglCek.ok) return { success: false, message: tglCek.message };
+
     // Validasi FK jenis
     var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
     if (sheetMaster) {
@@ -3586,9 +3737,9 @@ function submitKasPenerobos(data) {
       sheet.appendRow(['ID', 'Periode ID', 'Tanggal', 'Jenis ID', 'Anggota ID', 'Nominal', 'Sumber Kas', 'Catatan', 'Penerobos Email', 'Status', 'Serah Terima ID', 'Created At']);
     }
     var id = generateID('KP');
-    var tgl = toDateStr_(data.tanggal ? new Date(data.tanggal) : new Date());
-    sheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', Number(data.nominal) || 0, data.sumberKas || 'Tunai', data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(new Date())]);
-    logActivity(auth.user.email, 'KAS_PENEROBOS', 'Nominal: ' + data.nominal);
+    var tgl = tglCek.tgl;
+    sheet.appendRow([id, periode.id, tgl, data.jenisId, data.anggotaId || '', nomCek.nilai, data.sumberKas || 'Tunai', data.catatan || '', auth.user.email, 'Aktif', '', toDateStr_(new Date())]);
+    logActivity(auth.user.email, 'KAS_PENEROBOS', 'Nominal: ' + nomCek.nilai);
     return { success: true, id: id };
     });
   } catch(e) {

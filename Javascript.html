@@ -1139,16 +1139,22 @@ var App = {
   hapusTrx: function(id) {
     var trx = (App._editTrxMap || {})[id];
     if (!trx) { this.showError('Data tidak ditemukan'); return; }
-    if (!confirm('Hapus transaksi ini? Tindakan tidak dapat diurungkan.')) return;
+    // Soft delete (T3): wajib alasan pembatalan. Transaksi tidak dihapus,
+    // hanya ditandai Dibatalkan agar jejaknya tetap ada.
+    var alasan = prompt('Batalkan transaksi ini?\nTransaksi tidak dihapus, hanya ditandai "Dibatalkan".\n\nAlasan pembatalan (wajib):', '');
+    if (alasan === null) return;
+    alasan = String(alasan).trim();
+    if (!alasan) { this.toast('Alasan pembatalan wajib diisi.'); return; }
     var self = this;
-    self.showLoading('Menghapus...');
+    self.showLoading('Membatalkan...');
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
+        self.toast('Transaksi dibatalkan.');
         self._afterTrxChange();
       })
       .withFailureHandler(function(e) { self.showError(e.message); })
-      .deleteTransaksi({ id: id, tipe: trx.tipe, sumberKas: trx.sumber });
+      .deleteTransaksi({ id: id, tipe: trx.tipe, sumberKas: trx.sumber, alasan: alasan });
   },
 
   // ─────────────────────────────────────────────────

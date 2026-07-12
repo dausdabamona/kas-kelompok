@@ -275,8 +275,8 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.INPUT_PENERIMAAN,
-      headers: ['ID', 'Periode ID', 'Jenis ID', 'Anggota ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At'],
-      note: 'Sumber Kas: Tunai / Bank | JANGAN edit manual'
+      headers: ['ID', 'Periode ID', 'Jenis ID', 'Anggota ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal'],
+      note: 'Sumber Kas: Tunai / Bank | Status: Aktif / Dibatalkan (soft delete) | JANGAN edit manual'
     },
     {
       name: CONFIG.SHEETS.BUKU_IR,
@@ -285,13 +285,13 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.INPUT_PENGELUARAN,
-      headers: ['ID', 'Periode ID', 'Jenis ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At'],
-      note: 'Sumber Kas: Tunai / Bank | JANGAN edit manual'
+      headers: ['ID', 'Periode ID', 'Jenis ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal'],
+      note: 'Sumber Kas: Tunai / Bank | Status: Aktif / Dibatalkan (soft delete) | JANGAN edit manual'
     },
     {
       name: CONFIG.SHEETS.INPUT_SETORAN,
-      headers: ['ID', 'Periode ID', 'Tanggal', 'Nominal', 'Arah', 'Created By', 'Created At'],
-      note: 'Arah: setor (Tunai→Bank) / tarik (Bank→Tunai) | JANGAN edit manual'
+      headers: ['ID', 'Periode ID', 'Tanggal', 'Nominal', 'Arah', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal'],
+      note: 'Arah: setor (Tunai→Bank) / tarik (Bank→Tunai) | Status: Aktif / Dibatalkan | JANGAN edit manual'
     },
     {
       name: CONFIG.SHEETS.INPUT_SALDO_BANK,
@@ -419,6 +419,28 @@ function migrasiKeamanan() {
     var ui = SpreadsheetApp.getUi();
     ui.alert('Migrasi Keamanan Selesai ✅', log.join('\n'), ui.ButtonSet.OK);
   } catch(e) {}
+  return { success: true, log: log };
+}
+
+// ══════════════════════════════════════════════════════
+// MIGRASI PENGENDALIAN (FASE 1) — idempoten, jalankan dari editor:
+//   Run → migrasiPengendalian
+// Menambah kolom soft-delete (Status/Dibatalkan By/At/Alasan Batal) pada
+// sheet transaksi. Tidak menghapus/mengubah data lama. Baris lama tanpa
+// Status dianggap 'Aktif' oleh pembaca (barisDibatalkan_).
+// ══════════════════════════════════════════════════════
+function migrasiPengendalian() {
+  if (!_setupAccessOk_()) return { success: false, message: 'Akses ditolak.' };
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var log = [];
+  var kolomBatal = ['Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal'];
+  [CONFIG.SHEETS.INPUT_PENERIMAAN, CONFIG.SHEETS.INPUT_PENGELUARAN, CONFIG.SHEETS.INPUT_SETORAN].forEach(function(nm) {
+    var sh = ss.getSheetByName(nm);
+    if (sh) { ensureColumns_(sh, kolomBatal); log.push('🔧 Kolom soft-delete dipastikan → ' + nm); }
+    else log.push('⚠️ Sheet tidak ditemukan → ' + nm);
+  });
+  Logger.log(log.join('\n'));
+  try { SpreadsheetApp.getUi().alert('Migrasi Pengendalian Selesai ✅', log.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK); } catch(e) {}
   return { success: true, log: log };
 }
 
