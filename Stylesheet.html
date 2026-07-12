@@ -880,8 +880,14 @@
   .valid-indicator.error { background: #FEF2F2; color: #DC2626; }
 
   /* ───────── Kenyamanan di HP (mobile) ───────── */
-  html { -webkit-text-size-adjust: 100%; }
-  body { overscroll-behavior-y: none; }
+  /* Matikan font-inflation/auto-sizing (Firefox mobile membuat ukuran teks
+     tidak konsisten tanpa properti -moz & standar ini). */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body { overscroll-behavior-y: none; font-size: 15px; }
 
   /* Scroll mulus + hilangkan highlight ketuk biru */
   #app { -webkit-overflow-scrolling: touch; }
