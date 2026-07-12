@@ -574,7 +574,10 @@ var App = {
         '<div class="form-group"><label>Sumber Kas</label>' +
         '<select id="trxSumber"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>' +
         '<div class="form-group"><label>Tanggal</label><input type="date" id="trxTanggal" value="' + today + '"/></div>' +
-        '<div class="form-group"><label>Catatan</label><textarea id="trxCatatan" placeholder="Opsional..."></textarea></div>';
+        '<div class="form-group"><label>Catatan</label><textarea id="trxCatatan" placeholder="Opsional..."></textarea></div>' +
+        '<div class="form-group"><label>Bukti / Nota (foto) <span style="font-size:11px;color:var(--text-muted);">— wajib untuk pengeluaran besar</span></label>' +
+          '<input type="file" id="trxBukti" accept="image/*" capture="environment" multiple/>' +
+          '<div id="trxBuktiInfo" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div></div>';
     } else {
       formHtml =
         '<div class="form-group"><label>Arah Mutasi</label>' +
@@ -665,21 +668,55 @@ var App = {
     } else {
       data.arah = document.getElementById('trxArah').value;
     }
-    document.getElementById('trxError').innerHTML = '<div class="info-box">Menyimpan...</div>';
     var self = this;
-    App.srv()
-      .withSuccessHandler(function(res) {
-        if (res.success) {
-          self.toast('Transaksi berhasil disimpan ✓');
-          self.loadDashboard();
-        } else {
-          document.getElementById('trxError').innerHTML = '<div class="error-box">' + res.message + '</div>';
-        }
-      })
-      .withFailureHandler(function(err) {
-        document.getElementById('trxError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>';
-      })
-      .submitTransaksi(data);
+    var kirim = function(buktiList) {
+      if (buktiList && buktiList.length) data.buktiList = buktiList;
+      document.getElementById('trxError').innerHTML = '<div class="info-box">Menyimpan...</div>';
+      App.srv()
+        .withSuccessHandler(function(res) {
+          if (res.success) { self.toast('Transaksi berhasil disimpan ✓'); self.loadDashboard(); }
+          else { document.getElementById('trxError').innerHTML = '<div class="error-box">' + (res.message || 'Gagal') + '</div>'; }
+        })
+        .withFailureHandler(function(err) { document.getElementById('trxError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>'; })
+        .submitTransaksi(data);
+    };
+    // Pengeluaran: kompres & sertakan foto bukti bila ada.
+    var buktiEl = document.getElementById('trxBukti');
+    if (tipe === 'keluar' && buktiEl && buktiEl.files && buktiEl.files.length) {
+      document.getElementById('trxError').innerHTML = '<div class="info-box">Menyiapkan bukti...</div>';
+      this._kumpulBukti_(buktiEl.files, kirim);
+    } else {
+      kirim(null);
+    }
+  },
+
+  // Kompres 1 gambar → dataURL JPEG (maks ~800px, kualitas 0.6) untuk hemat kuota.
+  _kompresGambar_: function(file, cb) {
+    try {
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var img = new Image();
+        img.onload = function() {
+          var maxW = 800, scale = Math.min(1, maxW / img.width);
+          var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+          var canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          try { cb(canvas.toDataURL('image/jpeg', 0.6)); } catch(err) { cb(null); }
+        };
+        img.onerror = function() { cb(null); };
+        img.src = e.target.result;
+      };
+      reader.onerror = function() { cb(null); };
+      reader.readAsDataURL(file);
+    } catch(e) { cb(null); }
+  },
+  _kumpulBukti_: function(fileList, done) {
+    var files = fileList ? Array.prototype.slice.call(fileList) : [];
+    if (!files.length) { done([]); return; }
+    var out = [], self = this, n = 0;
+    files.forEach(function(f) {
+      self._kompresGambar_(f, function(b64) { if (b64) out.push(b64); n++; if (n === files.length) done(out); });
+    });
   },
 
   // ─────────────────────────────────────────────────
@@ -3010,7 +3047,7 @@ var App = {
           '</div>' : '';
         return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);">' +
             '<div style="min-width:0;">' +
-              '<div style="font-weight:600;">' + self._esc(t.jenis) + '</div>' +
+              '<div style="font-weight:600;">' + self._esc(t.jenis) + (t.noBukti ? ' <span style="font-size:10px;color:var(--admin,#0F766E);font-weight:700;">' + self._esc(t.noBukti) + '</span>' : '') + '</div>' +
               '<div style="font-size:12px;color:var(--text-muted);">' + self.formatDate(t.tanggal) + sumber + '</div>' +
               catatan + actions +
             '</div>' +

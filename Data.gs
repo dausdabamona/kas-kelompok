@@ -117,6 +117,32 @@ function validasiTanggalPeriode_(rawTgl, periodeId) {
   return { ok: true, tgl: t };
 }
 
+// FASE 4 (T11): isi No Bukti berseri pada baris TERAKHIR sheet (dipanggil
+// tepat setelah appendRow, di dalam withLock_). prefix BKM/BKK, seq per periode,
+// tanpa daur ulang (baris dibatalkan tetap memegang nomornya).
+function _isiNoBukti_(sheet, prefix, periodeId) {
+  try {
+    var lastCol = sheet.getLastColumn();
+    var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var h = headerMap_(header);
+    var cNB = h['nobukti']; if (cNB === undefined) return '';
+    var cPid = h['periodeid'] !== undefined ? h['periodeid'] : 1;
+    var maxSeq = 0;
+    if (sheet.getLastRow() > 1) {
+      var rows = sheet.getRange(1, 1, sheet.getLastRow(), lastCol).getValues();
+      for (var i = 1; i < rows.length; i++) {
+        if (String(rows[i][cPid]) !== String(periodeId)) continue;
+        var m = String(rows[i][cNB] || '').match(/-(\d+)$/);
+        if (m) { var n = parseInt(m[1], 10); if (n > maxSeq) maxSeq = n; }
+      }
+    }
+    var pseq = _periodeSeqCode_(getSS_(), periodeId);
+    var nb = prefix + '-' + pseq + '-' + ('0000' + (maxSeq + 1)).slice(-4);
+    sheet.getRange(sheet.getLastRow(), cNB + 1).setValue(nb);
+    return nb;
+  } catch(e) { return ''; }
+}
+
 // Log WAJIB untuk mutasi material: melempar error bila gagal menulis
 // (berbeda dari logActivity yang silent). Menutup T3.
 function logActivityWajib_(user, action, detail) {
@@ -142,6 +168,74 @@ function getPatunganPeriodeId_(patunganId) {
     }
     return '';
   } catch(e) { return ''; }
+}
+
+// FASE 4 (T10) — LAMPIRAN BUKTI
+// Simpan 1 gambar base64 ke Drive + catat di sheet Lampiran.
+function _simpanBukti1_(transaksiId, tipe, base64, email) {
+  var folderId = PropertiesService.getScriptProperties().getProperty('FOLDER_BUKTI_ID');
+  if (!folderId) throw new Error('Folder bukti belum dikonfigurasi (FOLDER_BUKTI_ID).');
+  var m = String(base64).match(/^data:([^;]+);base64,(.*)$/);
+  var mime = m ? m[1] : 'image/jpeg';
+  var raw = m ? m[2] : base64;
+  var bytes = Utilities.base64Decode(raw);
+  var nama = 'bukti_' + transaksiId + '_' + new Date().getTime() + '.jpg';
+  var file = DriveApp.getFolderById(folderId).createFile(Utilities.newBlob(bytes, mime, nama));
+  var ss = getSS_();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.LAMPIRAN);
+  if (!sheet) { sheet = ss.insertSheet(CONFIG.SHEETS.LAMPIRAN); sheet.appendRow(['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status']); }
+  var id = generateID('LMP');
+  sheet.appendRow([id, transaksiId, tipe || '', nama, file.getId(), file.getUrl(), email || '', toDateStr_(new Date()), 'Aktif']);
+  return { id: id, url: file.getUrl() };
+}
+
+function _simpanBuktiList_(transaksiId, tipe, arr, email) {
+  var n = 0;
+  (arr || []).forEach(function(b) { if (b) { try { _simpanBukti1_(transaksiId, tipe, b, email); n++; } catch(e) {} } });
+  return n;
+}
+
+// Jumlah lampiran Aktif untuk sebuah transaksi.
+function countLampiran_(transaksiId) {
+  var ss = getSS_();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.LAMPIRAN);
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var rows = sheet.getDataRange().getValues(); var h = headerMap_(rows[0]);
+  var n = 0;
+  for (var i = 1; i < rows.length; i++) {
+    if (String(hGet_(rows[i], h, 'transaksiid', 1)) === String(transaksiId) && String(hGet_(rows[i], h, 'status', 8)) === 'Aktif') n++;
+  }
+  return n;
+}
+
+// Endpoint: unggah bukti untuk transaksi yang sudah ada (mis. retry offline).
+function uploadBukti(data) {
+  try {
+    var auth = requirePerm('trx.input');
+    if (!auth.success) return auth;
+    if (!data || !data.transaksiId || !data.base64) return { success: false, message: 'Data tidak lengkap.' };
+    var r = _simpanBukti1_(String(data.transaksiId), String(data.tipe || ''), String(data.base64), auth.user.email);
+    return { success: true, id: r.id, url: r.url };
+  } catch(e) { return { success: false, message: e.message }; }
+}
+
+// Endpoint: daftar lampiran sebuah transaksi.
+function getLampiran(transaksiId) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return auth;
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.LAMPIRAN);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [] };
+    var rows = sheet.getDataRange().getValues(); var h = headerMap_(rows[0]);
+    var out = [];
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'transaksiid', 1)) !== String(transaksiId)) continue;
+      if (String(hGet_(rows[i], h, 'status', 8)) !== 'Aktif') continue;
+      out.push({ id: String(hGet_(rows[i], h, 'id', 0)), url: String(hGet_(rows[i], h, 'url', 5) || ''), nama: String(hGet_(rows[i], h, 'namafile', 3) || '') });
+    }
+    return { success: true, data: out };
+  } catch(e) { return { success: false, message: e.message }; }
 }
 
 // Guard saldo negatif (T13): pastikan saldo sumber kas cukup untuk pengeluaran
@@ -501,10 +595,10 @@ function buatPenyesuaianSelisih_(periode, sumberKas, selisih, email) {
   var catatan = 'Penyesuaian selisih kas tutup buku (' + sumberKas + ')';
   if (selisih > 0) {
     var shIn = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-    if (shIn) shIn.appendRow([generateID('ADJ'), periode.id, 'SELISIH_KAS', '', tgl, nominal, sumberKas, catatan, email, tgl, 'Aktif']);
+    if (shIn) { shIn.appendRow([generateID('ADJ'), periode.id, 'SELISIH_KAS', '', tgl, nominal, sumberKas, catatan, email, tgl, 'Aktif']); _isiNoBukti_(shIn, 'BKM', periode.id); }
   } else {
     var shOut = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
-    if (shOut) shOut.appendRow([generateID('ADJ'), periode.id, 'SELISIH_KAS', tgl, nominal, sumberKas, catatan, email, tgl, 'Aktif']);
+    if (shOut) { shOut.appendRow([generateID('ADJ'), periode.id, 'SELISIH_KAS', tgl, nominal, sumberKas, catatan, email, tgl, 'Aktif']); _isiNoBukti_(shOut, 'BKK', periode.id); }
   }
 }
 
@@ -754,6 +848,16 @@ function submitTransaksi(data) {
     if (!tglCek.ok) return { success: false, message: tglCek.message };
     var tgl = tglCek.tgl;
 
+    // T10: pengeluaran di atas ambang wajib ada bukti (lampiran).
+    if (data.tipe === 'keluar') {
+      var ambang = 500000;
+      try { var av = PropertiesService.getScriptProperties().getProperty('AMBANG_BUKTI'); if (av) ambang = Number(av) || 500000; } catch(e) {}
+      var jmlBukti = (data.buktiList && data.buktiList.length) ? data.buktiList.length : 0;
+      if (nominal > ambang && jmlBukti === 0) {
+        return { success: false, butuhBukti: true, message: 'Pengeluaran di atas Rp ' + ambang.toLocaleString('id-ID') + ' wajib melampirkan minimal 1 bukti (foto nota).' };
+      }
+    }
+
     // Guard saldo negatif (T13) untuk pengeluaran & mutasi. Override khusus ADMIN + alasan wajib.
     var override = !!data.override && auth.user.role === CONFIG.ROLES.ADMIN;
     if (override && !String(data.alasanOverride || '').trim()) return { success: false, message: 'Override saldo wajib disertai alasan.' };
@@ -798,11 +902,14 @@ function submitTransaksi(data) {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
       if (!sheet) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
       sheet.appendRow([id, periode.id, data.jenisId, data.anggotaId || '', tgl, nominal, data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now), 'Aktif']);
+      _isiNoBukti_(sheet, 'BKM', periode.id);
       logActivity(auth.user.email, 'PEMASUKAN', 'Nominal: ' + nominal);
     } else if (data.tipe === 'keluar') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
       if (!sheet) return { success: false, message: 'Sheet pengeluaran tidak ditemukan' };
       sheet.appendRow([id, periode.id, data.jenisId, tgl, nominal, data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now), 'Aktif']);
+      _isiNoBukti_(sheet, 'BKK', periode.id);
+      if (data.buktiList && data.buktiList.length) { try { _simpanBuktiList_(id, 'keluar', data.buktiList, auth.user.email); } catch(e) {} }
       logActivity(auth.user.email, 'PENGELUARAN', 'Nominal: ' + nominal);
     } else if (data.tipe === 'mutasi') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
@@ -974,9 +1081,11 @@ function importTransaksiCSV(payload) {
         if (tipe === 'masuk') {
           if (!shIn) { gagal.push({ baris: i + 1, alasan: 'Sheet penerimaan tidak ada' }); continue; }
           shIn.appendRow([id, periode.id, jenisMasukId, '', tgl, nominal, sumberKas, ket, auth.user.email, toDateStr_(now), 'Aktif']);
+          _isiNoBukti_(shIn, 'BKM', periode.id);
         } else {
           if (!shOut) { gagal.push({ baris: i + 1, alasan: 'Sheet pengeluaran tidak ada' }); continue; }
           shOut.appendRow([id, periode.id, jenisKeluarId, tgl, nominal, sumberKas, ket, auth.user.email, toDateStr_(now), 'Aktif']);
+          _isiNoBukti_(shOut, 'BKK', periode.id);
         }
         berhasil++;
       }
@@ -1031,6 +1140,7 @@ function getRiwayatTransaksiSaya() {
           tipe: 'masuk',
           jenis: namaMasuk[jid] || jid || 'Pemasukan',
           jenisId: jid,
+          noBukti: hin['nobukti'] !== undefined ? String(rin[i][hin['nobukti']] || '') : '',
           anggotaId: String(hGet_(rin[i], hin, 'anggotaid', 3) || ''),
           nominal: Number(hGet_(rin[i], hin, 'nominal', 5)) || 0,
           sumberKas: String(hGet_(rin[i], hin, 'sumberkas', 6) || ''),
@@ -1057,6 +1167,7 @@ function getRiwayatTransaksiSaya() {
           tipe: 'keluar',
           jenis: namaKeluar[jid2] || jid2 || 'Pengeluaran',
           jenisId: jid2,
+          noBukti: hout['nobukti'] !== undefined ? String(rout[i][hout['nobukti']] || '') : '',
           anggotaId: '',
           nominal: Number(hGet_(rout[i], hout, 'nominal', 4)) || 0,
           sumberKas: String(hGet_(rout[i], hout, 'sumberkas', 5) || ''),
@@ -2690,6 +2801,7 @@ function upsertSetoranPengeluaran_(existingId, info) {
   var newId = generateID('PNK');
   sheet.appendRow([newId, info.periodeId, info.jenisId, toDateStr_(new Date()),
     info.nominal, info.sumberKas, info.catatan, info.email, toDateStr_(new Date()), 'Aktif']);
+  _isiNoBukti_(sheet, 'BKK', info.periodeId);
   return newId;
 }
 
@@ -4275,6 +4387,7 @@ function konfirmasiSerahTerima(serahTerimaId) {
       var catatanEntry = 'Serah Terima dari: ' + stData.penerobosEmail + (items[ji].catatan ? ' | ' + items[ji].catatan : '');
       sheetP.appendRow([penId, stData.periodeId, items[ji].jenisId, items[ji].anggotaId,
         items[ji].tanggal || now, items[ji].nominal, stData.sumberTujuan, catatanEntry, auth.user.email, now, 'Aktif']);
+      _isiNoBukti_(sheetP, 'BKM', stData.periodeId);
       penIds.push(penId);
     }
 

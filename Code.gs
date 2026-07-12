@@ -27,6 +27,8 @@ const CONFIG = {
     // FASE 2: identitas berbasis token
     PERANGKAT: 'Perangkat',
     SESI: 'Sesi',
+    // FASE 4: lampiran bukti
+    LAMPIRAN: 'Lampiran',
   },
   ROLES: {
     ADMIN: 'ADMIN',
@@ -275,7 +277,7 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.INPUT_PENERIMAAN,
-      headers: ['ID', 'Periode ID', 'Jenis ID', 'Anggota ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal'],
+      headers: ['ID', 'Periode ID', 'Jenis ID', 'Anggota ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal', 'No Bukti'],
       note: 'Sumber Kas: Tunai / Bank | Status: Aktif / Dibatalkan (soft delete) | JANGAN edit manual'
     },
     {
@@ -285,7 +287,7 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.INPUT_PENGELUARAN,
-      headers: ['ID', 'Periode ID', 'Jenis ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal'],
+      headers: ['ID', 'Periode ID', 'Jenis ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal', 'No Bukti'],
       note: 'Sumber Kas: Tunai / Bank | Status: Aktif / Dibatalkan (soft delete) | JANGAN edit manual'
     },
     {
@@ -352,6 +354,11 @@ function getSheetSchema_() {
       name: CONFIG.SHEETS.LOG,
       headers: ['Timestamp', 'User', 'Action', 'Detail'],
       note: 'Log otomatis — JANGAN edit manual'
+    },
+    {
+      name: CONFIG.SHEETS.LAMPIRAN,
+      headers: ['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status'],
+      note: 'FASE 4: bukti/lampiran transaksi (foto nota). Status: Aktif / Dihapus'
     },
     {
       // FASE 2: perangkat terpercaya. Simpan HANYA hash token perangkat.
@@ -429,6 +436,47 @@ function migrasiKeamanan() {
 // sheet transaksi. Tidak menghapus/mengubah data lama. Baris lama tanpa
 // Status dianggap 'Aktif' oleh pembaca (barisDibatalkan_).
 // ══════════════════════════════════════════════════════
+// Nomor urut periode (1-based) di Master Period — untuk kode No Bukti.
+function _periodeSeqCode_(ss, periodeId) {
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+  if (!sheet) return 1;
+  var rows = sheet.getDataRange().getValues();
+  var seq = 0;
+  for (var i = 1; i < rows.length; i++) { if (rows[i][0]) { seq++; if (String(rows[i][0]) === String(periodeId)) return seq; } }
+  return seq || 1;
+}
+
+// Isi No Bukti untuk data lama secara berurutan per periode (urut tanggal + ID).
+function _backfillNoBukti_(ss) {
+  var total = 0;
+  [[CONFIG.SHEETS.INPUT_PENERIMAAN, 'BKM', 4], [CONFIG.SHEETS.INPUT_PENGELUARAN, 'BKK', 3]].forEach(function(cfg) {
+    var sheet = ss.getSheetByName(cfg[0]);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var cNB = h['nobukti']; if (cNB === undefined) return;
+    var cPid = h['periodeid'] !== undefined ? h['periodeid'] : 1;
+    var cTgl = h['tanggal'] !== undefined ? h['tanggal'] : cfg[2];
+    var byPeriod = {}, maxSeq = {};
+    for (var i = 1; i < rows.length; i++) {
+      if (!rows[i][0]) continue;
+      var pid = String(rows[i][cPid] || '');
+      var nb = String(rows[i][cNB] || '');
+      var m = nb.match(/-(\d+)$/);
+      if (m) { var n = parseInt(m[1], 10); if (!(pid in maxSeq) || n > maxSeq[pid]) maxSeq[pid] = n; }
+      else { if (!byPeriod[pid]) byPeriod[pid] = []; byPeriod[pid].push({ i: i, tgl: String(rows[i][cTgl] || ''), id: String(rows[i][0]) }); }
+    }
+    Object.keys(byPeriod).forEach(function(pid) {
+      var arr = byPeriod[pid];
+      arr.sort(function(a, b) { if (a.tgl !== b.tgl) return a.tgl < b.tgl ? -1 : 1; return a.id < b.id ? -1 : 1; });
+      var seq = maxSeq[pid] || 0;
+      var pseq = _periodeSeqCode_(ss, pid);
+      arr.forEach(function(o) { seq++; sheet.getRange(o.i + 1, cNB + 1).setValue(cfg[1] + '-' + pseq + '-' + ('0000' + seq).slice(-4)); total++; });
+    });
+  });
+  return total;
+}
+
 function _adaKode_(sheet, kode) {
   if (!sheet || sheet.getLastRow() < 1) return false;
   var col = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
@@ -453,6 +501,19 @@ function migrasiPengendalian() {
     ensureColumns_(shSTB, ['Saldo Tunai Sistem', 'Saldo Bank Sistem', 'Selisih Tunai', 'Selisih Bank', 'Selisih Total', 'Alasan Selisih', 'Arsip File ID', 'Arsip URL', 'Arsip Hash']);
     log.push('🔧 Kolom selisih/arsip dipastikan → ' + CONFIG.SHEETS.SALDO_TUTUP_BUKU);
   }
+
+  // FASE 4: kolom No Bukti + sheet Lampiran.
+  [CONFIG.SHEETS.INPUT_PENERIMAAN, CONFIG.SHEETS.INPUT_PENGELUARAN].forEach(function(nm) {
+    var sh = ss.getSheetByName(nm);
+    if (sh) { ensureColumns_(sh, ['No Bukti']); log.push('🔧 Kolom No Bukti dipastikan → ' + nm); }
+  });
+  if (!ss.getSheetByName(CONFIG.SHEETS.LAMPIRAN)) {
+    var shL = ss.insertSheet(CONFIG.SHEETS.LAMPIRAN);
+    shL.appendRow(['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status']);
+    log.push('✅ DIBUAT: ' + CONFIG.SHEETS.LAMPIRAN);
+  }
+  // Isi No Bukti untuk data lama (berurutan per periode, urut tanggal+ID).
+  try { var bk = _backfillNoBukti_(ss); if (bk) log.push('🔢 No Bukti data lama diisi: ' + bk); } catch(e) { log.push('⚠️ backfill No Bukti gagal: ' + e.message); }
 
   // FASE 2: jenis khusus "Selisih Kas" di master (untuk baris penyesuaian tutup buku).
   var jm = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);

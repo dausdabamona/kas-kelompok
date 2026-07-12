@@ -93,3 +93,26 @@ Checklist uji manual per fase. Jalankan di **deployment staging** setelah
 | 3 | Serah terima → konfirmasi | Baris `Input Penerimaan` bertanggal **= tanggal asli terima** (bukan hari konfirmasi); `Created At` = hari konfirmasi. |
 | 4 | Item kas penerobos bertanggal di luar periode aktif → konfirmasi | Ditolak dengan pesan cut-off. |
 | 5 | Ubah **realisasi setoran** yang sudah tercatat | Baris pengeluaran lama jadi **Dibatalkan** (alasan "Koreksi realisasi setoran"), muncul **baris baru**; saldo benar; tanggal lama tak berubah. |
+
+---
+
+## FASE 4 — Bukti & Nomor Bukti (T10, T11)
+
+### Prasyarat
+- **Run → `migrasiPengendalian`** (kolom `No Bukti`, sheet `Lampiran`, backfill No Bukti data lama).
+- **Lampiran bukti** butuh Script Property **`FOLDER_BUKTI_ID`** (folder Drive) + setujui izin **Drive**. Ambang wajib-bukti: **`AMBANG_BUKTI`** (default Rp 500.000).
+
+### Implementasi
+- **T11 nomor bukti:** kolom `No Bukti` di penerimaan (`BKM-<periode>-0001`) & pengeluaran (`BKK-…`), berseri per periode via `_isiNoBukti_` (dalam `withLock_`); baris dibatalkan tetap memegang nomor (tak didaur ulang). Backfill data lama urut tanggal+ID. Tampil di Riwayat.
+- **T10 lampiran:** sheet `Lampiran`; `submitTransaksi` pengeluaran menerima `buktiList` (foto dikompres klien ~800px/JPEG 0.6), disimpan ke Drive. Pengeluaran > `AMBANG_BUKTI` **wajib** ≥1 bukti (ditolak `butuhBukti`). Endpoint `uploadBukti`/`getLampiran`.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | Input pemasukan & pengeluaran | Dapat **No Bukti** (BKM-…/BKK-…) berseri; tampil di Riwayat. |
+| 2 | Batalkan satu transaksi lalu input baru | Nomor tak didaur ulang (yang dibatalkan tetap memegang nomornya). |
+| 3 | Input **pengeluaran > AMBANG_BUKTI** tanpa foto | Ditolak: "…wajib melampirkan minimal 1 bukti". |
+| 4 | Idem #3 dengan foto (set `FOLDER_BUKTI_ID`) | Berhasil; berkas muncul di folder Drive; tercatat di sheet `Lampiran`. |
+| 5 | Pengeluaran kecil (≤ ambang) tanpa foto | Tetap boleh disimpan. |
+
+**Sisa (didokumentasikan):** daftar "Pengeluaran tanpa bukti" & antrian offline "bukti tertunda" belum dibuat; seksi Kas Penerobos & bukti di PDF menyusul.
