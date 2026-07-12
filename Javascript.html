@@ -452,13 +452,14 @@ var App = {
       setoranDesa: (!isPenerobos && App.can('view.setoranDesa')) ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '',
       laporanSetoran: (!isPenerobos && App.can('view.laporanSetoran')) ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '',
       laporanPDF: (!isPenerobos && App.can('view.laporanPDF')) ? '<div class="menu-item" onclick="App.pageLaporanPDF()"><span class="icon">📄</span><span>Laporan PDF</span></div>' : '',
+      periode: (!isPenerobos && App.can('view.laporanSetoran')) ? '<div class="menu-item" onclick="App.pagePeriode()"><span class="icon">🗓️</span><span>Periode</span></div>' : '',
       setting: (!isPenerobos && App.can('view.setting')) ? '<div class="menu-item" onclick="App.pageSetting()"><span class="icon">⚙️</span><span>Setting</span></div>' : '',
       kelolaPerangkat: App.can('user.manage') ? '<div class="menu-item" onclick="App.pageKelolaPerangkat()"><span class="icon">📱</span><span>Kelola Perangkat</span></div>' : ''
     };
     var groups = [
       { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah] },
       { judul: '💰 Keuangan', items: [item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
-      { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF] },
+      { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF, item.periode] },
       { judul: '⚙️ Admin', items: [item.setting, item.kelolaPerangkat] }
     ];
     var out = '';
@@ -3004,6 +3005,46 @@ var App = {
   },
   // Alias lama.
   _esc: function(s) { return this.escapeHtml(s); },
+
+  // ─────────────────────────────────────────────────
+  // PERIODE (daftar periode + status) — di grup Laporan
+  // ─────────────────────────────────────────────────
+  pagePeriode: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat periode...');
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) {
+        if (r && r.success) self.renderPeriode(r.data || []);
+        else self.showError((r && r.message) || 'Gagal memuat periode');
+      })
+      .withFailureHandler(function(err) { self.showError((err && err.message) || 'Gagal memuat periode'); })
+      .getAllPeriode();
+  },
+
+  renderPeriode: function(data) {
+    var self = this;
+    var bisaKelola = App.can('periode.manage');
+    var cards = (data || []).map(function(p) {
+      var open = String(p.status).toUpperCase() === 'OPEN';
+      var badge = '<span class="badge" style="background:' + (open ? '#dcfce7' : '#f3f4f6') + ';color:' + (open ? '#166534' : '#888') + ';">' + self.escapeHtml(p.status || '-') + '</span>';
+      var tutupBtn = (open && bisaKelola) ? '<button class="btn btn-sm btn-outline" style="margin-top:8px;" onclick="App.pageTutupBuku()">🔒 Tutup Buku</button>' : '';
+      return '<div class="card" style="margin-bottom:10px;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">' +
+            '<div><div style="font-weight:700;">' + self.escapeHtml(p.nama || '-') + ' ' + badge + '</div>' +
+              '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Mulai: ' + self.formatDate(p.tanggalMulai) + '</div>' +
+            '</div>' +
+          '</div>' + tutupBtn +
+        '</div>';
+    }).join('') || '<div class="info-box">Belum ada periode.</div>';
+
+    var bukaBtn = bisaKelola
+      ? '<button class="btn btn-primary mb-16" onclick="App.pageBukaPeriode()">+ Buka Periode Baru</button>'
+      : '';
+    var content = '<div class="info-box" style="margin-bottom:12px;">Daftar periode buku. Periode <b>OPEN</b> sedang berjalan; <b>CLOSED</b> sudah tutup buku.</div>' +
+      bukaBtn + cards;
+    document.getElementById('app').innerHTML = this.pageWrapper('Periode', content);
+  },
 
   // ─────────────────────────────────────────────────
   // KELOLA PERANGKAT (Admin) — Fase 4
