@@ -675,6 +675,8 @@ function getRiwayatTransaksiSaya() {
           id: String(hGet_(rin[i], hin, 'id', 0)),
           tipe: 'masuk',
           jenis: namaMasuk[jid] || jid || 'Pemasukan',
+          jenisId: jid,
+          anggotaId: String(hGet_(rin[i], hin, 'anggotaid', 3) || ''),
           nominal: Number(hGet_(rin[i], hin, 'nominal', 5)) || 0,
           sumberKas: String(hGet_(rin[i], hin, 'sumberkas', 6) || ''),
           tanggal: toDateStr_(hGet_(rin[i], hin, 'tanggal', 4)),
@@ -698,6 +700,8 @@ function getRiwayatTransaksiSaya() {
           id: String(hGet_(rout[i], hout, 'id', 0)),
           tipe: 'keluar',
           jenis: namaKeluar[jid2] || jid2 || 'Pengeluaran',
+          jenisId: jid2,
+          anggotaId: '',
           nominal: Number(hGet_(rout[i], hout, 'nominal', 4)) || 0,
           sumberKas: String(hGet_(rout[i], hout, 'sumberkas', 5) || ''),
           tanggal: toDateStr_(hGet_(rout[i], hout, 'tanggal', 3)),
@@ -765,7 +769,9 @@ function getRiwayatTransaksiSaya() {
     });
     list.forEach(function(it) { delete it.seq; });
 
-    return { success: true, data: list, total: list.length };
+    var periode = getPeriodeAktif();
+    var periodeOpen = !!(periode && String(periode.status) === CONFIG.STATUS.OPEN);
+    return { success: true, data: list, total: list.length, periodeOpen: periodeOpen };
   } catch(e) {
     return { success: false, message: e.message };
   }

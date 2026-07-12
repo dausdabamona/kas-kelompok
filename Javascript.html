@@ -992,6 +992,7 @@ var App = {
         var canEditBank  = periodeOpen && App.can('trx.edit.bank');
 
         // store items for edit lookup
+        App._editTrxReturn = 'rekap';
         App._editTrxMap = {};
         (res.pemasukan || []).forEach(function(p) { App._editTrxMap[p.id] = { tipe: 'masuk', sumber: p.sumber, jenisId: p.jenisId, jenis: p.jenis, anggotaId: p.anggotaId || '', tanggal: p.tanggal, nominal: p.nominal, catatan: p.catatan }; });
         (res.pengeluaran || []).forEach(function(p) { App._editTrxMap[p.id] = { tipe: 'keluar', sumber: p.sumber, jenisId: p.jenisId, jenis: p.jenis, anggotaId: '', tanggal: p.tanggal, nominal: p.nominal, catatan: p.catatan }; });
@@ -1048,6 +1049,12 @@ var App = {
       })
       .withFailureHandler(function(err) { self.showError(err.message); })
       .getRekapitulasiData();
+  },
+
+  // Setelah edit/hapus, kembali ke halaman asal (Rekap atau Riwayat).
+  _afterTrxChange: function() {
+    if (App._editTrxReturn === 'riwayat') this.pageRiwayatSaya();
+    else this.pageRekapitulasi();
   },
 
   editTrx: function(id) {
@@ -1122,7 +1129,7 @@ var App = {
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        self.pageRekapitulasi();
+        self._afterTrxChange();
       })
       .withFailureHandler(function(e) { self.showError(e.message); })
       .updateTransaksi({ id: id, tipe: tipe, jenisId: jenisId, tanggal: tanggal, nominal: nominal, sumberKas: sumberKas, catatan: catatan, anggotaId: anggotaId });
@@ -1137,7 +1144,7 @@ var App = {
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        self.pageRekapitulasi();
+        self._afterTrxChange();
       })
       .withFailureHandler(function(e) { self.showError(e.message); })
       .deleteTransaksi({ id: id, tipe: trx.tipe, sumberKas: trx.sumber });
@@ -2920,7 +2927,7 @@ var App = {
     var self = this;
     App.srv()
       .withSuccessHandler(function(r) {
-        if (r && r.success) self.renderRiwayatSaya(r.data || []);
+        if (r && r.success) self.renderRiwayatSaya(r);
         else self.showError((r && r.message) || 'Gagal memuat riwayat');
       })
       .withFailureHandler(function(err) {
@@ -2929,9 +2936,21 @@ var App = {
       .getRiwayatTransaksiSaya();
   },
 
-  renderRiwayatSaya: function(data) {
+  renderRiwayatSaya: function(res) {
     var self = this;
+    var data = (res && res.data) || [];
+    var periodeOpen = !!(res && res.periodeOpen);
     var LIMIT = 10; // jumlah yang tampil sebelum scroll
+
+    // Setelah edit/hapus, kembali ke halaman ini.
+    App._editTrxReturn = 'riwayat';
+    App._editTrxMap = App._editTrxMap || {};
+    data.forEach(function(t) {
+      if (t.tipe === 'masuk' || t.tipe === 'keluar') {
+        App._editTrxMap[t.id] = { tipe: t.tipe, sumber: t.sumberKas, jenisId: t.jenisId, jenis: t.jenis, anggotaId: t.anggotaId || '', tanggal: t.tanggal, nominal: t.nominal, catatan: t.catatan };
+      }
+    });
+
     var content;
     if (!data.length) {
       content = '<div class="info-box">Belum ada transaksi yang Anda input.</div>';
@@ -2942,21 +2961,28 @@ var App = {
         var tanda = t.tipe === 'mutasi' ? '' : (masuk ? '+' : '−');
         var sumber = t.sumberKas ? ' • ' + t.sumberKas : '';
         var catatan = t.catatan ? '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + self._esc(t.catatan) + '</div>' : '';
+        // Bisa diedit: periode OPEN + tipe masuk/keluar + punya izin sesuai sumber kas.
+        var canEdit = periodeOpen && (t.tipe === 'masuk' || t.tipe === 'keluar') &&
+          ((t.sumberKas === 'Tunai' && App.can('trx.edit.tunai')) || (t.sumberKas === 'Bank' && App.can('trx.edit.bank')));
+        var eid = self._esc(t.id).replace(/'/g, "\\'");
+        var actions = canEdit ? '<div style="display:flex;gap:8px;margin-top:8px;">' +
+            '<button class="btn btn-sm btn-warning" onclick="App.editTrx(\'' + eid + '\')">✏️ Edit</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="App.hapusTrx(\'' + eid + '\')">🗑️ Hapus</button>' +
+          '</div>' : '';
         return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);">' +
             '<div style="min-width:0;">' +
               '<div style="font-weight:600;">' + self._esc(t.jenis) + '</div>' +
               '<div style="font-size:12px;color:var(--text-muted);">' + self.formatDate(t.tanggal) + sumber + '</div>' +
-              catatan +
+              catatan + actions +
             '</div>' +
             '<div style="font-weight:700;color:' + warna + ';white-space:nowrap;">' + tanda + self.formatNumber(t.nominal) + '</div>' +
           '</div>';
       }).join('');
-      // Tinggi kontainer ± 10 baris; sisanya bisa discroll.
-      var scrollStyle = data.length > LIMIT
-        ? 'max-height:560px;overflow-y:auto;'
-        : '';
-      var hint = data.length > LIMIT
-        ? '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Menampilkan ' + LIMIT + ' terbaru — scroll ke bawah untuk melihat ' + (data.length - LIMIT) + ' lainnya.</div>'
+      // Tanpa scroll internal bila ada tombol aksi (agar tombol tak terpotong).
+      var adaAksi = periodeOpen && (App.can('trx.edit.tunai') || App.can('trx.edit.bank'));
+      var scrollStyle = (!adaAksi && data.length > LIMIT) ? 'max-height:560px;overflow-y:auto;' : '';
+      var hint = (data.length > LIMIT)
+        ? '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Menampilkan ' + data.length + ' transaksi' + (periodeOpen ? ' — bisa diedit/hapus selama periode belum tutup buku.' : ' (periode sudah tutup buku — hanya lihat).') + '</div>'
         : '';
       content =
         '<div class="card" style="margin-bottom:12px;">' +
