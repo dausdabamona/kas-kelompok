@@ -66,6 +66,7 @@ function getCapabilities_() {
     { code: 'terobosan.bayar', label: 'Bayar Penerobosan', grup: 'edit' },
     { code: 'terobosan.batal', label: 'Batal Bayar Penerobosan', grup: 'edit' },
     { code: 'grade.edit', label: 'Atur Grade Jamaah', grup: 'edit' },
+    { code: 'trx.approve', label: 'Setujui Pengeluaran (maker-checker)', grup: 'edit' },
     { code: 'saldo.input', label: 'Input/Pemeriksaan Saldo', grup: 'edit' },
     { code: 'bank.input', label: 'Input Transaksi Bank', grup: 'edit' },
     { code: 'bank.manage', label: 'Kelola Bank (rekon/pending/daily)', grup: 'edit' },
@@ -108,6 +109,7 @@ function getDefaultPermMatrix_() {
     'terobosan.bayar': allRoles,
     'terobosan.batal': [R.ADMIN, R.BENDAHARA_1, R.PENEROBOS],
     'grade.edit': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
+    'trx.approve': [R.ADMIN, R.BENDAHARA_1],
     'saldo.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'bank.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'bank.manage': [R.ADMIN, R.BENDAHARA_1],
@@ -287,7 +289,7 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.INPUT_PENGELUARAN,
-      headers: ['ID', 'Periode ID', 'Jenis ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal', 'No Bukti'],
+      headers: ['ID', 'Periode ID', 'Jenis ID', 'Tanggal', 'Nominal', 'Sumber Kas', 'Catatan', 'Created By', 'Created At', 'Status', 'Dibatalkan By', 'Dibatalkan At', 'Alasan Batal', 'No Bukti', 'Status Approval', 'Disetujui By', 'Disetujui At'],
       note: 'Sumber Kas: Tunai / Bank | Status: Aktif / Dibatalkan (soft delete) | JANGAN edit manual'
     },
     {
@@ -507,6 +509,9 @@ function migrasiPengendalian() {
     var sh = ss.getSheetByName(nm);
     if (sh) { ensureColumns_(sh, ['No Bukti']); log.push('🔧 Kolom No Bukti dipastikan → ' + nm); }
   });
+  // FASE 5: kolom maker-checker di pengeluaran.
+  var shPK5 = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+  if (shPK5) { ensureColumns_(shPK5, ['Status Approval', 'Disetujui By', 'Disetujui At']); log.push('🔧 Kolom approval dipastikan → ' + CONFIG.SHEETS.INPUT_PENGELUARAN); }
   if (!ss.getSheetByName(CONFIG.SHEETS.LAMPIRAN)) {
     var shL = ss.insertSheet(CONFIG.SHEETS.LAMPIRAN);
     shL.appendRow(['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status']);

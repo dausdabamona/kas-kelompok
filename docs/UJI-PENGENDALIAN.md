@@ -116,3 +116,27 @@ Checklist uji manual per fase. Jalankan di **deployment staging** setelah
 | 5 | Pengeluaran kecil (≤ ambang) tanpa foto | Tetap boleh disimpan. |
 
 **Sisa (didokumentasikan):** daftar "Pengeluaran tanpa bukti" & antrian offline "bukti tertunda" belum dibuat; seksi Kas Penerobos & bukti di PDF menyusul.
+
+---
+
+## FASE 5 — Maker-Checker, Log Hak Akses & Anti-XSS (T12, keamanan)
+
+### Prasyarat
+- **Run → `migrasiPengendalian`** (kolom `Status Approval`, `Disetujui By`, `Disetujui At` di `Input Pengeluaran`).
+- Ambang approval: Script Property **`AMBANG_APPROVAL`** (default Rp 1.000.000).
+- Kapabilitas **`trx.approve`** (default: ADMIN + Bendahara 1) — cek di Pengaturan → Hak Akses.
+
+### Implementasi
+- **T12 maker-checker:** pengeluaran > `AMBANG_APPROVAL` disimpan berstatus **Draft** (`_isiApproval_`), **belum masuk saldo** (`calculateSaldo` & `getRekapitulasiData` melewati `barisDraft_`). Disetujui lewat `setujuiPengeluaran(id)` (butuh `trx.approve`) → status **Disetujui**, baru dihitung. **Penyetuju ≠ pembuat** (dicegah server). Dashboard menampilkan tombol **Persetujuan Pengeluaran** (jumlah + total) bila ada Draft; halaman `pageApproval`/`renderApproval` untuk menyetujui. `getDashboardData.menungguApproval` dan `getDraftPengeluaran`.
+- **Log hak akses:** `savePermMatrix` mencatat **selisih (diff)** matriks lama→baru sebagai `PRIVILEGED_HAK_AKSES` via `logActivityWajib_` (gagal log = gagal simpan).
+- **Anti-XSS:** semua teks bebas dari pengguna (jenis, catatan, alasan, nama jamaah/pos) di-`escapeHtml`/`_esc` sebelum masuk `innerHTML`.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | Input **pengeluaran > AMBANG_APPROVAL** | Tersimpan **Draft**; pesan "menunggu persetujuan"; **saldo belum berubah**; tak muncul di rekap saldo. |
+| 2 | Login sebagai **pembuat** Draft → buka Persetujuan | Tak bisa menyetujui transaksi sendiri (ditolak server: penyetuju ≠ pembuat). |
+| 3 | Login sebagai **penyetuju lain** (punya `trx.approve`) → Setujui | Status jadi **Disetujui**; **saldo bertambah** sesuai nominal; hilang dari daftar Draft. |
+| 4 | Pengeluaran **≤ AMBANG_APPROVAL** | Langsung **Disetujui** (tanpa antre). |
+| 5 | Ubah matriks Hak Akses (Pengaturan) lalu cek `Log Activity` | Ada baris `PRIVILEGED_HAK_AKSES` berisi diff peran per-kapabilitas. |
+| 6 | Isi catatan/jenis transaksi dengan teks `<img src=x onerror=alert(1)>` | Tampil sebagai teks apa adanya (tidak dieksekusi). |

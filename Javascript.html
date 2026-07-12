@@ -426,6 +426,10 @@ var App = {
       // T7: pos ketiga — kas di tangan penerobos (belum masuk kas kelompok) + aging.
       ((u.role !== 'PENEROBOS' && (data.kasPenerobos || 0) > 0) ? this._renderKasPenerobos(data) : '') +
 
+      // T12: pengeluaran menunggu persetujuan (untuk penyetuju).
+      ((App.can('trx.approve') && data.menungguApproval && data.menungguApproval.count > 0) ?
+        '<button class="btn btn-outline mb-16" style="border-color:#D97706;color:#D97706;" onclick="App.pageApproval()">✅ Persetujuan Pengeluaran (' + data.menungguApproval.count + ' · ' + this.formatNumber(data.menungguApproval.total) + ')</button>' : '') +
+
       '<button class="btn btn-success mb-16" onclick="App.pageTransaksi()">+ Input Transaksi</button>' +
 
       '<button class="btn btn-secondary mb-16" onclick="App.pageRiwayatSaya()">🧾 Riwayat Transaksi Saya</button>' +
@@ -674,7 +678,7 @@ var App = {
       document.getElementById('trxError').innerHTML = '<div class="info-box">Menyimpan...</div>';
       App.srv()
         .withSuccessHandler(function(res) {
-          if (res.success) { self.toast('Transaksi berhasil disimpan ✓'); self.loadDashboard(); }
+          if (res.success) { self.toast(res.perluApproval ? 'Disimpan sbg Draft — menunggu persetujuan ✓' : 'Transaksi berhasil disimpan ✓'); self.loadDashboard(); }
           else { document.getElementById('trxError').innerHTML = '<div class="error-box">' + (res.message || 'Gagal') + '</div>'; }
         })
         .withFailureHandler(function(err) { document.getElementById('trxError').innerHTML = '<div class="error-box">Error: ' + err.message + '</div>'; })
@@ -1255,7 +1259,7 @@ var App = {
         chk +
         '<div style="flex:1;">' +
           '<div class="trx-item-top">' +
-            '<span class="trx-item-nama">' + (d.jenis || '-') + (d.anggota ? ' · ' + d.anggota : '') + '</span>' +
+            '<span class="trx-item-nama">' + App.escapeHtml(d.jenis || '-') + (d.anggota ? ' · ' + App.escapeHtml(d.anggota) : '') + '</span>' +
             '<span class="trx-item-nominal text-success">' + App.formatNumber(d.nominal) + '</span>' +
           '</div>' +
           '<div class="trx-item-meta">' + App.formatDate(d.tanggal) + (d.catatan ? ' · ' + App.escapeHtml(d.catatan) : '') + ' ' + badge + '</div>' +
@@ -1446,7 +1450,7 @@ var App = {
         var itemRows = items.map(function(it, i) {
           return '<tr>' +
             '<td style="padding:6px 10px;border:1px solid #ccc;">' + (i+1) + '</td>' +
-            '<td style="padding:6px 10px;border:1px solid #ccc;">' + it.jenisNama + '</td>' +
+            '<td style="padding:6px 10px;border:1px solid #ccc;">' + App.escapeHtml(it.jenisNama) + '</td>' +
             '<td style="padding:6px 10px;border:1px solid #ccc;text-align:right;">' + App.formatNumber(it.nominal) + '</td>' +
             '<td style="padding:6px 10px;border:1px solid #ccc;">' + (it.catatan || '-') + '</td>' +
             '</tr>';
@@ -3035,7 +3039,7 @@ var App = {
         var masuk = (t.tipe === 'masuk');
         var warna = t.tipe === 'mutasi' ? 'var(--bank)' : (masuk ? 'var(--success)' : 'var(--danger)');
         var tanda = t.tipe === 'mutasi' ? '' : (masuk ? '+' : '−');
-        var sumber = t.sumberKas ? ' • ' + t.sumberKas : '';
+        var sumber = t.sumberKas ? ' • ' + self._esc(t.sumberKas) : '';
         var catatan = t.catatan ? '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + self._esc(t.catatan) + '</div>' : '';
         // Bisa diedit: periode OPEN + tipe masuk/keluar + punya izin sesuai sumber kas.
         var canEdit = periodeOpen && (t.tipe === 'masuk' || t.tipe === 'keluar') &&
@@ -3121,6 +3125,45 @@ var App = {
     var content = '<div class="info-box" style="margin-bottom:12px;">Daftar periode buku. Periode <b>OPEN</b> sedang berjalan; <b>CLOSED</b> sudah tutup buku (laporan dari arsip).</div>' +
       bukaBtn + cards;
     document.getElementById('app').innerHTML = this.pageWrapper('Periode', content);
+  },
+
+  // T12: halaman persetujuan pengeluaran (Draft).
+  pageApproval: function() {
+    this.history.push('dashboard');
+    this.showLoading('Memuat daftar persetujuan...');
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) { if (r && r.success) self.renderApproval(r.data || []); else self.showError((r && r.message) || 'Gagal memuat'); })
+      .withFailureHandler(function(e) { self.showError((e && e.message) || 'Gagal memuat'); })
+      .getDraftPengeluaran();
+  },
+  renderApproval: function(data) {
+    var self = this;
+    var content;
+    if (!data.length) content = '<div class="info-box">Tidak ada pengeluaran yang menunggu persetujuan.</div>';
+    else content = '<div class="info-box" style="margin-bottom:12px;">Pengeluaran besar (Draft) — belum masuk saldo sampai disetujui. Anda <b>tidak bisa</b> menyetujui yang Anda buat sendiri.</div>' +
+      data.map(function(t) {
+        var idS = self._esc(t.id).replace(/'/g, "\\'");
+        return '<div class="card" style="margin-bottom:10px;">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;">' +
+            '<div style="min-width:0;"><div style="font-weight:700;">' + self.escapeHtml(t.jenis) + '</div>' +
+              '<div style="font-size:12px;color:var(--text-muted);">' + self.formatDate(t.tanggal) + ' · ' + self.escapeHtml(t.sumberKas) + ' · oleh ' + self.escapeHtml(t.pembuat) + '</div>' +
+              (t.catatan ? '<div style="font-size:12px;color:var(--text-muted);">' + self.escapeHtml(t.catatan) + '</div>' : '') +
+            '</div>' +
+            '<div style="font-weight:800;color:var(--danger);white-space:nowrap;">−' + self.formatNumber(t.nominal) + '</div>' +
+          '</div>' +
+          '<button class="btn btn-sm btn-primary" style="margin-top:8px;" onclick="App.setujuiPengeluaran(\'' + idS + '\')">✅ Setujui</button>' +
+        '</div>';
+      }).join('');
+    document.getElementById('app').innerHTML = this.pageWrapper('Persetujuan Pengeluaran', content);
+  },
+  setujuiPengeluaran: function(id) {
+    if (!confirm('Setujui pengeluaran ini? Setelah disetujui akan masuk hitungan saldo.')) return;
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) { if (r && r.success) { self.toast('Pengeluaran disetujui ✓'); self.pageApproval(); } else self.toast((r && r.message) || 'Gagal menyetujui.'); })
+      .withFailureHandler(function() { self.toast('Gagal terhubung.'); })
+      .setujuiPengeluaran(id);
   },
 
   // Buka arsip laporan PDF periode yang sudah ditutup.
@@ -3731,7 +3774,7 @@ var App = {
     var total = res.total || {};
     var summary =
       '<div class="card" style="margin-bottom:12px;">' +
-        '<div class="stat-row"><span class="stat-label">Pos</span><span class="stat-value">' + res.posNama + '</span></div>' +
+        '<div class="stat-row"><span class="stat-label">Pos</span><span class="stat-value">' + App.escapeHtml(res.posNama) + '</span></div>' +
         '<div class="stat-row"><span class="stat-label">Total Jamaah</span><span class="stat-value">' + (total.totalAnggota || 0) + '</span></div>' +
         '<div class="stat-row"><span class="stat-label">Belum Infak</span><span class="stat-value text-danger">' + (total.belum || 0) + '</span></div>' +
         '<div class="stat-row"><span class="stat-label">Sudah Infak</span><span class="stat-value text-success">' + (total.sudah || 0) + '</span></div>' +
@@ -3829,7 +3872,7 @@ var App = {
         return '<div class="pos-card" style="cursor:pointer;" onclick="App.pagePenerobosDetail(' + idx + ')">' +
           '<div class="pos-card-header">' +
             '<div style="flex:1;">' +
-              '<div class="pos-card-nama">' + pos.nama + '</div>' +
+              '<div class="pos-card-nama">' + App.escapeHtml(pos.nama) + '</div>' +
               '<div class="progress-bar" style="margin-top:6px;"><div class="progress-fill ' + fillClass + '" style="width:' + pct + '%;"></div></div>' +
             '</div>' +
             '<div style="text-align:right;padding-left:12px;">' +
@@ -3874,10 +3917,10 @@ var App = {
           return '<div style="border:1.5px solid ' + borderColor + ';border-radius:12px;padding:12px;margin-bottom:10px;">' +
             '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
               '<div>' +
-                '<div style="font-weight:700;">' + r.anggotaNama + '</div>' +
+                '<div style="font-weight:700;">' + App.escapeHtml(r.anggotaNama) + '</div>' +
                 '<div class="text-small text-muted">Sanggup: ' + App.formatNumber(r.nominal) + '</div>' +
                 '<div class="text-small text-muted">Janji bayar: ' + App.formatDate(r.tanggalJanji) + '</div>' +
-                (r.catatan ? '<div class="text-small text-muted">' + r.catatan + '</div>' : '') +
+                (r.catatan ? '<div class="text-small text-muted">' + App.escapeHtml(r.catatan) + '</div>' : '') +
               '</div>' + tag +
             '</div>' +
             '<div style="display:flex;gap:8px;margin-top:8px;">' +
@@ -3892,7 +3935,7 @@ var App = {
           return '<div class="jamaah-card">' +
             '<div class="jamaah-avatar" style="background:linear-gradient(135deg,var(--success),#047857);">' + (r.anggotaNama||'J').charAt(0).toUpperCase() + '</div>' +
             '<div class="jamaah-info">' +
-              '<div class="jamaah-nama">' + r.anggotaNama + '</div>' +
+              '<div class="jamaah-nama">' + App.escapeHtml(r.anggotaNama) + '</div>' +
               '<div class="jamaah-detail">' + App.formatNumber(r.nominal) + ' · Lunas ' + App.formatDate(r.lunasAt) + '</div>' +
             '</div>' +
             '<span class="status-badge lunas">Lunas</span>' +
@@ -3900,7 +3943,7 @@ var App = {
         }).join('');
 
     var angOpts = '<option value="">-- Pilih Jamaah --</option>' + (pd.anggotaList || []).map(function(a){
-      return '<option value="' + a.id + '">' + a.nama + '</option>';
+      return '<option value="' + App.escapeHtml(a.id) + '">' + App.escapeHtml(a.nama) + '</option>';
     }).join('');
 
     return '<div class="card" style="margin-bottom:12px;">' +

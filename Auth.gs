@@ -171,6 +171,8 @@ function savePermMatrix(matrix) {
   var auth = checkAuth([CONFIG.ROLES.ADMIN]);
   if (!auth.success) return auth;
   try {
+    // T12: rekam DIFF matriks (sebelum → sesudah) sebagai aktivitas istimewa.
+    var lama = getPermMatrix_();
     var ss = SpreadsheetApp.openById(getSpreadsheetId());
     var sheet = ss.getSheetByName(CONFIG.SHEETS.HAK_AKSES);
     if (!sheet) {
@@ -196,7 +198,17 @@ function savePermMatrix(matrix) {
     sheet.setFrozenRows(1);
 
     try { CacheService.getScriptCache().remove('perm_matrix'); } catch(e) {}
-    logActivity(auth.user.email, 'HAK_AKSES', 'Update matriks hak akses');
+    // Susun diff perubahan izin.
+    var diffs = [];
+    caps.forEach(function(c) {
+      roles.forEach(function(role) {
+        if (role === CONFIG.ROLES.ADMIN) return;
+        var before = !!(lama[role] && lama[role][c.code]);
+        var after = !!(matrix && matrix[role] && matrix[role][c.code]);
+        if (before !== after) diffs.push(role + '.' + c.code + ': ' + (before ? 'ON' : 'OFF') + '→' + (after ? 'ON' : 'OFF'));
+      });
+    });
+    logActivityWajib_(auth.user.email, 'PRIVILEGED_HAK_AKSES', diffs.length ? diffs.join('; ') : 'tanpa perubahan');
     return { success: true };
   } catch(e) {
     return { success: false, message: e.message };

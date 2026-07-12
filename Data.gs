@@ -143,6 +143,24 @@ function _isiNoBukti_(sheet, prefix, periodeId) {
   } catch(e) { return ''; }
 }
 
+// FASE 5 (T12): set kolom approval pada baris TERAKHIR (setelah append).
+function _isiApproval_(sheet, statusApproval, by, at) {
+  try {
+    var lastCol = sheet.getLastColumn();
+    var h = headerMap_(sheet.getRange(1, 1, 1, lastCol).getValues()[0]);
+    var rowNum = sheet.getLastRow();
+    if (h['statusapproval'] !== undefined) sheet.getRange(rowNum, h['statusapproval'] + 1).setValue(statusApproval);
+    if (by && h['disetujuiby'] !== undefined) sheet.getRange(rowNum, h['disetujuiby'] + 1).setValue(by);
+    if (at && h['disetujuiat'] !== undefined) sheet.getRange(rowNum, h['disetujuiat'] + 1).setValue(at);
+  } catch(e) {}
+}
+
+// Baris pengeluaran berstatus Draft (belum disetujui) — tidak dihitung ke saldo.
+function barisDraft_(row, h) {
+  if (!h || h['statusapproval'] === undefined) return false;
+  return String(row[h['statusapproval']] || '').toLowerCase().trim() === 'draft';
+}
+
 // Log WAJIB untuk mutasi material: melempar error bila gagal menulis
 // (berbeda dari logActivity yang silent). Menutup T3.
 function logActivityWajib_(user, action, detail) {
@@ -387,6 +405,10 @@ function getDashboardData() {
       }
     } catch(e) {}
 
+    // T12: pengeluaran menunggu persetujuan (Draft).
+    var draft = { count: 0, total: 0 };
+    try { var dp2 = getDraftPengeluaran(); if (dp2 && dp2.success) { draft.count = (dp2.data || []).length; draft.total = dp2.total || 0; } } catch(e) {}
+
     // T7: pos ketiga — kas di tangan penerobos (belum masuk kas kelompok).
     var kp = { total: 0, perPenerobos: [] };
     try { kp = kasPenerobosAktif_(periodeId); } catch(e) {}
@@ -405,7 +427,8 @@ function getDashboardData() {
       penerobosDetail: kp.perPenerobos,
       agingHari: agingHari,
       totalKas: saldoData.tunai + saldoData.bank + kp.total,
-      belumDirincikanCount: belumCount
+      belumDirincikanCount: belumCount,
+      menungguApproval: draft
     };
   } catch(e) {
     return { success: false, message: e.message };
@@ -438,6 +461,7 @@ function calculateSaldo(periodeId, periode) {
     var dpkH = headerMap_(dpk[0]);
     for (var i = 1; i < dpk.length; i++) {
       if (barisDibatalkan_(dpk[i], dpkH)) continue; // T3
+      if (barisDraft_(dpk[i], dpkH)) continue;       // T12: Draft belum masuk saldo
       if (!periodeId || String(hGet_(dpk[i], dpkH, 'periodeid', 1)) === periodeId) {
         var nominal = Number(hGet_(dpk[i], dpkH, 'nominal', 4)) || 0;
         var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
@@ -910,7 +934,14 @@ function submitTransaksi(data) {
       sheet.appendRow([id, periode.id, data.jenisId, tgl, nominal, data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now), 'Aktif']);
       _isiNoBukti_(sheet, 'BKK', periode.id);
       if (data.buktiList && data.buktiList.length) { try { _simpanBuktiList_(id, 'keluar', data.buktiList, auth.user.email); } catch(e) {} }
-      logActivity(auth.user.email, 'PENGELUARAN', 'Nominal: ' + nominal);
+      // T12 maker-checker: pengeluaran di atas ambang jadi Draft (belum masuk saldo).
+      var ambangApp = 1000000;
+      try { var aa = PropertiesService.getScriptProperties().getProperty('AMBANG_APPROVAL'); if (aa) ambangApp = Number(aa) || 1000000; } catch(e) {}
+      var perluApproval = nominal > ambangApp;
+      _isiApproval_(sheet, perluApproval ? 'Draft' : 'Disetujui', perluApproval ? '' : auth.user.email, perluApproval ? '' : toDateStr_(now));
+      logActivity(auth.user.email, 'PENGELUARAN', 'Nominal: ' + nominal + (perluApproval ? ' [DRAFT menunggu persetujuan]' : ''));
+      try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+      return { success: true, id: id, perluApproval: perluApproval };
     } else if (data.tipe === 'mutasi') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
       if (!sheet) {
@@ -1021,6 +1052,60 @@ function deleteTransaksi(data) {
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+// FASE 5 (T12) — maker-checker: setujui pengeluaran Draft. Penyetuju ≠ pembuat.
+function setujuiPengeluaran(id) {
+  try {
+    var auth = requirePerm('trx.approve');
+    if (!auth.success) return { success: false, message: auth.message };
+    return withLock_(function() {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+    if (!sheet) return { success: false, message: 'Sheet tidak ditemukan' };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    if (h['statusapproval'] === undefined) return { success: false, message: 'Kolom approval belum ada. Jalankan migrasiPengendalian.' };
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) !== String(id)) continue;
+      if (barisDibatalkan_(rows[i], h)) return { success: false, message: 'Transaksi sudah dibatalkan.' };
+      var ap = assertPeriodeOpen_(String(hGet_(rows[i], h, 'periodeid', 1) || ''));
+      if (!ap.ok) return { success: false, message: ap.message };
+      var pembuat = String(hGet_(rows[i], h, 'createdby', 7) || '').toLowerCase();
+      if (pembuat === String(auth.user.email).toLowerCase()) return { success: false, message: 'Anda tidak boleh menyetujui pengeluaran yang Anda buat sendiri.' };
+      if (String(rows[i][h['statusapproval']] || '').toLowerCase() !== 'draft') return { success: false, message: 'Pengeluaran ini tidak berstatus Draft.' };
+      var rowNum = i + 1, now = toDateStr_(new Date());
+      sheet.getRange(rowNum, h['statusapproval'] + 1).setValue('Disetujui');
+      if (h['disetujuiby'] !== undefined) sheet.getRange(rowNum, h['disetujuiby'] + 1).setValue(auth.user.email);
+      if (h['disetujuiat'] !== undefined) sheet.getRange(rowNum, h['disetujuiat'] + 1).setValue(now);
+      try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+      logActivityWajib_(auth.user.email, 'SETUJUI_PENGELUARAN', 'ID: ' + id + ' | Pembuat: ' + pembuat);
+      return { success: true };
+    }
+    return { success: false, message: 'Transaksi tidak ditemukan' };
+    });
+  } catch(e) { return { success: false, message: e.message }; }
+}
+
+function getDraftPengeluaran() {
+  try {
+    var auth = checkAuth(); if (!auth.success) return auth;
+    var ss = getSS_(); var periode = getPeriodeAktif();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [], total: 0 };
+    var namaKeluar = {};
+    var mk = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
+    if (mk) { var mr = mk.getDataRange().getValues(); for (var j = 1; j < mr.length; j++) { if (mr[j][0]) namaKeluar[String(mr[j][0])] = String(mr[j][1] || ''); } }
+    var rows = sheet.getDataRange().getValues(); var h = headerMap_(rows[0]);
+    var out = [], total = 0;
+    for (var i = 1; i < rows.length; i++) {
+      if (barisDibatalkan_(rows[i], h) || !barisDraft_(rows[i], h)) continue;
+      if (periode && String(hGet_(rows[i], h, 'periodeid', 1)) !== periode.id) continue;
+      var nom = Number(hGet_(rows[i], h, 'nominal', 4)) || 0; total += nom;
+      out.push({ id: String(hGet_(rows[i], h, 'id', 0)), jenis: namaKeluar[String(hGet_(rows[i], h, 'jenisid', 2))] || '', tanggal: toDateStr_(hGet_(rows[i], h, 'tanggal', 3)), nominal: nom, sumberKas: String(hGet_(rows[i], h, 'sumberkas', 5) || ''), catatan: String(hGet_(rows[i], h, 'catatan', 6) || ''), pembuat: String(hGet_(rows[i], h, 'createdby', 7) || '') });
+    }
+    return { success: true, data: out, total: total };
+  } catch(e) { return { success: false, message: e.message }; }
 }
 
 // ──────────────────────────────────────────────────────
@@ -2182,6 +2267,7 @@ function getRekapitulasiData() {
       for (var i = 1; i < dpk.length; i++) {
         if (!hGet_(dpk[i], dpkH, 'id', 0)) continue;
         if (barisDibatalkan_(dpk[i], dpkH)) continue; // T3
+        if (barisDraft_(dpk[i], dpkH)) continue;       // T12: Draft belum final
         if (periodeId && String(hGet_(dpk[i], dpkH, 'periodeid', 1)) !== periodeId) continue;
         var nominal = Number(hGet_(dpk[i], dpkH, 'nominal', 4)) || 0;
         var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
