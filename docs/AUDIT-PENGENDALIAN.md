@@ -106,5 +106,52 @@ F5 memakai status approval yang seskema dengan status batal F1).
 
 ## Kesimpulan Fase 0
 14 dari 15 temuan **VALID** (masih ada); **T15 SEBAGIAN** (escaping sudah separuh).
-Ditambah 5 temuan baru (A1–A5). Rencana skema & regresi siap. **Menunggu "LANJUT"
-untuk mulai Fase 1.**
+Ditambah 5 temuan baru (A1–A5). Rencana skema & regresi siap.
+
+> **CATATAN:** Bagian di atas adalah snapshot audit awal (Fase 0). Fase 1–5 sudah
+> dikerjakan. Status akhir tiap temuan ada di bagian 6 & 7 di bawah.
+
+---
+
+## 6. Status Akhir Temuan (setelah Fase 1–5.1)
+
+Legenda: **DITUTUP** (perbaikan terpasang & teruji) · **DITUTUP\*** (tertutup dengan sisa
+kecil terdokumentasi).
+
+| # | Status akhir | Fase | Ringkas perbaikan |
+|---|--------------|------|-------------------|
+| **T1** | **DITUTUP** | F2 | `bukaPeriode` mengunci rollforward = `saldoAkhirTerakhir_`; beda wajib `overrideRollforward`+alasan → baris penyesuaian. |
+| **T2** | **DITUTUP** | F1 | `assertPeriodeOpen_(periodeId baris)` di `updateTransaksi`/`deleteTransaksi`/`submitRincianIR`; tak lagi lintas-periode. |
+| **T3** | **DITUTUP** | F1 | Soft delete (`Status`, `Dibatalkan By/At`, `Alasan Batal`) + `logActivityWajib_` dengan snapshot; hapus keras dihilangkan. |
+| **T4** | **DITUTUP** | F1 | `validasiNominal_` (>0, integer, ≤100e9) server-side di semua jalur input. |
+| **T5** | **DITUTUP** | F2 | `tutupBuku` hitung saldo sistem (`calculateSaldo`), simpan sistem/aktual/selisih, blokir selisih≠0 tanpa alasan, baris penyesuaian `Selisih Kas`. |
+| **T6** | **DITUTUP** | F1 | `submitRincianIR` baca nominal/periode/anggota/tanggal dari transaksi induk; validasi jumlah komponen === nominal. |
+| **T7** | **DITUTUP** | F3 | `kasPenerobosAktif_` jadi pos ketiga `Total Kas` + aging (`AGING_HARI`). |
+| **T8** | **DITUTUP** | F3 | Cut-off tanggal (rentang periode) di `submitTransaksi`/`konfirmasiSerahTerima`; pakai tanggal asli terima. |
+| **T9** | **DITUTUP** | F3 | `upsertSetoranPengeluaran_` soft-cancel + baris baru (bukan overwrite); tanggal lama tak di-reset. |
+| **T10** | **DITUTUP\*** | F4 | Sheet `Lampiran` + unggah Drive; pengeluaran > `AMBANG_BUKTI` wajib bukti. *Sisa:* daftar "tanpa bukti" & antrian offline. |
+| **T11** | **DITUTUP** | F4 | No Bukti berseri BKM/BKK per periode via `_isiNoBukti_` (dalam lock) + backfill data lama. |
+| **T12** | **DITUTUP** | F5/5.1 | Maker-checker pengeluaran (Draft→Disetujui, penyetuju≠pembuat); `trx.input` dipecah masuk/keluar; default diperketat; log `PRIVILEGED_HAK_AKSES`. |
+| **T13** | **DITUTUP** | F1 | `cekSaldoCukup_` guard saldo negatif; override khusus ADMIN + alasan. |
+| **T14** | **DITUTUP\*** | F2 | `arsipkanLaporan_` snapshot PDF ke Drive saat tutup buku; `generatePDF` periode CLOSED baca arsip. *Sisa:* seksi penerobos/bukti di PDF. |
+| **T15** | **DITUTUP** | F5 | Sink `innerHTML` data user dibungkus `escapeHtml`/`_esc`; temuan V5 ditutup. |
+| **A1** | **DITUTUP** | F1 | Rincian IR diturunkan dari transaksi induk, bukan input klien. |
+| **A2** | **DITUTUP** | F1 | `importTransaksiCSV` validasi nominal/tanggal per baris + enforcement per-arah (5.1). |
+| **A3** | **DITUTUP** | F1 | `sumberKas` divalidasi {Tunai,Bank}. |
+| **A4** | **DITUTUP** | F2 | `getSaldoTutupBukuTerakhir_` memilih baris `Tutup` terakhir; rollforward jelas. |
+| **A5** | **DITUTUP** | F3 | Status `KAS_PENEROBOS` di-set saat serah terima; aging akurat. |
+
+---
+
+## 7. Temuan Regresi Pasca-Perbaikan (K1–K3)
+
+Muncul **akibat** perbaikan Fase 1 (soft delete) — pembatalan `Input Penerimaan` tidak
+merambat ke data turunannya. Diperbaiki pada patch lanjutan setelah Fase 5.1.
+
+| # | Tingkat | Akar masalah | Perbaikan |
+|---|---------|--------------|-----------|
+| **K1** | TINGGI (uang riil) | `Detail Buku IR` tak punya Status; rincian dari penerimaan yang dibatalkan tetap terhitung di Setoran Desa. | `trxPenerimaanDibatalkan_()` + `rincianYatim_()` sebagai sumber kebenaran (induk batal → rincian batal). Difilter di `getRekapSetoran` & `getBukuIRBelumSerah`. Berlaku surut, tanpa kolom baru. |
+| **K2** | TINGGI (deadlock) | `getBukuIRData` tak memfilter penerimaan Dibatalkan → transaksi batal dianggap "belum dirincikan" → `cekSyaratTutupBuku_` mengunci tutup buku selamanya. | Tambah `barisDibatalkan_` di loop `getBukuIRData`; `bersihkanCache()` untuk buang cache lama. |
+| **K3** | TINGGI (saldo salah) | `calculateSaldo(null)` mengembalikan angka ngawur; `getDashboardData`/`cekSaldoCukup_` menelan error diam-diam. | `calculateSaldo` melempar error bila tanpa periode; `getSaldoTutupBukuTerakhir_`/`saldoSaatIni_` untuk kondisi tanpa periode OPEN; dashboard menampilkan peringatan. Rapikan: `buatPenyesuaianSelisih_` berbasis header + tanggal tutup + status `Disetujui`; endpoint `batalkanKasPenerobos`. |
+
+**Status:** K1–K3 **DITUTUP**. Semua fase pengendalian intern (Fase 0–5.1 + patch K) selesai.

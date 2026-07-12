@@ -59,6 +59,27 @@ function barisDibatalkan_(row, h) {
   return String(row[h['status']] || '').toLowerCase().trim() === 'dibatalkan';
 }
 
+// K1: Kumpulan Transaksi ID (Input Penerimaan) yang DIBATALKAN.
+// Sumber kebenaran tunggal untuk menyaring baris Detail Buku IR yang induknya
+// sudah batal. Berlaku surut — tidak butuh kolom baru di Detail Buku IR.
+function trxPenerimaanDibatalkan_() {
+  var set = {};
+  var sh = getSS_().getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+  if (!sh || sh.getLastRow() < 2) return set;
+  var rows = sh.getDataRange().getValues();
+  var h = headerMap_(rows[0]);
+  for (var i = 1; i < rows.length; i++) {
+    if (barisDibatalkan_(rows[i], h)) set[String(hGet_(rows[i], h, 'id', 0))] = true;
+  }
+  return set;
+}
+
+// Baris Detail Buku IR dianggap batal bila transaksi induknya batal.
+function rincianYatim_(irRow, irH, setBatal) {
+  var trxId = String(hGet_(irRow, irH, 'transaksiid', 1) || '');
+  return !!setBatal[trxId];
+}
+
 // Ambil periode berdasarkan ID dengan status APA PUN (OPEN/CLOSED).
 function getPeriodeById_(periodeId) {
   try {
@@ -259,8 +280,7 @@ function getLampiran(transaksiId) {
 // Guard saldo negatif (T13): pastikan saldo sumber kas cukup untuk pengeluaran
 // atau mutasi. override=true (khusus ADMIN + alasan) melewati guard.
 function cekSaldoCukup_(periode, sumberKas, nominal) {
-  var saldo = { tunai: 0, bank: 0 };
-  try { saldo = calculateSaldo(periode.id, periode); } catch(e) {}
+  var saldo = calculateSaldo(periode.id, periode);   // K3: error naik, tidak ditelan
   var s = (sumberKas === 'Bank') ? saldo.bank : saldo.tunai;
   if (nominal > s) {
     return { ok: false, message: 'Saldo ' + (sumberKas === 'Bank' ? 'Bank' : 'Tunai') + ' tidak mencukupi (saldo: Rp ' + Number(s).toLocaleString('id-ID') + ', diminta: Rp ' + Number(nominal).toLocaleString('id-ID') + ').', saldo: s };
@@ -389,9 +409,22 @@ function getDashboardData() {
         var sheetK = ss.getSheetByName(CONFIG.SHEETS.KELOMPOK);
         if (sheetK && sheetK.getLastRow() > 1) namaKelompok = sheetK.getRange(2, 2).getValue() || namaKelompok;
       } catch(e) {}
-      var saldo = { tunai: 0, bank: 0 };
-      try { saldo = calculateSaldo(periodeId, periode); } catch(e) {}
-      saldoData = { namaKelompok: namaKelompok, tunai: saldo.tunai, bank: saldo.bank };
+      var tunai = 0, bank = 0, peringatan = '';
+      if (periode) {
+        var s = calculateSaldo(periode.id, periode);   // biarkan error naik — jangan ditelan
+        tunai = s.tunai; bank = s.bank;
+      } else {
+        // Tidak ada periode OPEN → JANGAN hitung ulang. Pakai arsip tutup buku.
+        var akhir = getSaldoTutupBukuTerakhir_();
+        if (akhir) {
+          tunai = akhir.tunai; bank = akhir.bank;
+          peringatan = 'Periode sudah ditutup (' + akhir.tanggalTutup + '). Angka di bawah adalah ' +
+                       'saldo akhir tutup buku. Buka periode baru untuk mulai mencatat.';
+        } else {
+          peringatan = 'Belum ada periode aktif. Buka periode terlebih dahulu.';
+        }
+      }
+      saldoData = { namaKelompok: namaKelompok, tunai: tunai, bank: bank, peringatan: peringatan };
       try { cache.put(cacheKey, JSON.stringify(saldoData), 60); } catch(e) {}
     }
 
@@ -428,7 +461,8 @@ function getDashboardData() {
       agingHari: agingHari,
       totalKas: saldoData.tunai + saldoData.bank + kp.total,
       belumDirincikanCount: belumCount,
-      menungguApproval: draft
+      menungguApproval: draft,
+      peringatan: saldoData.peringatan || ''
     };
   } catch(e) {
     return { success: false, message: e.message };
@@ -436,9 +470,14 @@ function getDashboardData() {
 }
 
 function calculateSaldo(periodeId, periode) {
+  // K3: TANPA periode, saldo awal hilang dan filter transaksi mati → hasilnya salah.
+  // Jangan pernah kembalikan angka. Pemanggil wajib menangani ketiadaan periode.
+  if (!periodeId || !periode) {
+    throw new Error('calculateSaldo: periode wajib. Gunakan getSaldoTutupBukuTerakhir_() bila tidak ada periode OPEN.');
+  }
   var ss = getSS_();
-  var tunai = (periode && periode.saldoAwalTunai) ? Number(periode.saldoAwalTunai) : 0;
-  var bank  = (periode && periode.saldoAwalBank)  ? Number(periode.saldoAwalBank)  : 0;
+  var tunai = Number(periode.saldoAwalTunai) || 0;
+  var bank  = Number(periode.saldoAwalBank)  || 0;
 
   var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
   if (sheetP && sheetP.getLastRow() > 1) {
@@ -446,12 +485,11 @@ function calculateSaldo(periodeId, periode) {
     var dpH = headerMap_(dp[0]);
     for (var i = 1; i < dp.length; i++) {
       if (barisDibatalkan_(dp[i], dpH)) continue; // T3: abaikan yang dibatalkan
-      if (!periodeId || String(hGet_(dp[i], dpH, 'periodeid', 1)) === periodeId) {
-        var nominal = Number(hGet_(dp[i], dpH, 'nominal', 5)) || 0;
-        var sumber  = String(hGet_(dp[i], dpH, 'sumberkas', 6) || '');
-        if (sumber === 'Tunai') tunai += nominal;
-        else if (sumber === 'Bank') bank += nominal;
-      }
+      if (String(hGet_(dp[i], dpH, 'periodeid', 1)) !== String(periodeId)) continue;  // ← tegas
+      var nominal = Number(hGet_(dp[i], dpH, 'nominal', 5)) || 0;
+      var sumber  = String(hGet_(dp[i], dpH, 'sumberkas', 6) || '');
+      if (sumber === 'Tunai') tunai += nominal;
+      else if (sumber === 'Bank') bank += nominal;
     }
   }
 
@@ -459,15 +497,14 @@ function calculateSaldo(periodeId, periode) {
   if (sheetPK && sheetPK.getLastRow() > 1) {
     var dpk = sheetPK.getDataRange().getValues();
     var dpkH = headerMap_(dpk[0]);
-    for (var i = 1; i < dpk.length; i++) {
-      if (barisDibatalkan_(dpk[i], dpkH)) continue; // T3
-      if (barisDraft_(dpk[i], dpkH)) continue;       // T12: Draft belum masuk saldo
-      if (!periodeId || String(hGet_(dpk[i], dpkH, 'periodeid', 1)) === periodeId) {
-        var nominal = Number(hGet_(dpk[i], dpkH, 'nominal', 4)) || 0;
-        var sumber  = String(hGet_(dpk[i], dpkH, 'sumberkas', 5) || '');
-        if (sumber === 'Tunai') tunai -= nominal;
-        else if (sumber === 'Bank') bank -= nominal;
-      }
+    for (var j = 1; j < dpk.length; j++) {
+      if (barisDibatalkan_(dpk[j], dpkH)) continue; // T3
+      if (barisDraft_(dpk[j], dpkH)) continue;       // T12: Draft belum masuk saldo
+      if (String(hGet_(dpk[j], dpkH, 'periodeid', 1)) !== String(periodeId)) continue; // ← tegas
+      var nomK = Number(hGet_(dpk[j], dpkH, 'nominal', 4)) || 0;
+      var sumK = String(hGet_(dpk[j], dpkH, 'sumberkas', 5) || '');
+      if (sumK === 'Tunai') tunai -= nomK;
+      else if (sumK === 'Bank') bank -= nomK;
     }
   }
 
@@ -475,18 +512,45 @@ function calculateSaldo(periodeId, periode) {
   if (sheetS && sheetS.getLastRow() > 1) {
     var ds = sheetS.getDataRange().getValues();
     var dsH = headerMap_(ds[0]);
-    for (var i = 1; i < ds.length; i++) {
-      if (barisDibatalkan_(ds[i], dsH)) continue; // T3
-      if (!periodeId || String(hGet_(ds[i], dsH, 'periodeid', 1)) === periodeId) {
-        var nominal = Number(hGet_(ds[i], dsH, 'nominal', 3)) || 0;
-        var arah    = String(hGet_(ds[i], dsH, 'arah', 4) || '');
-        if (arah === 'setor') { tunai -= nominal; bank += nominal; }
-        else if (arah === 'tarik') { bank -= nominal; tunai += nominal; }
-      }
+    for (var k = 1; k < ds.length; k++) {
+      if (barisDibatalkan_(ds[k], dsH)) continue; // T3
+      if (String(hGet_(ds[k], dsH, 'periodeid', 1)) !== String(periodeId)) continue;  // ← tegas
+      var nomS = Number(hGet_(ds[k], dsH, 'nominal', 3)) || 0;
+      var arah = String(hGet_(ds[k], dsH, 'arah', 4) || '');
+      if (arah === 'setor')      { tunai -= nomS; bank += nomS; }
+      else if (arah === 'tarik') { bank  -= nomS; tunai += nomS; }
     }
   }
 
   return { tunai: tunai, bank: bank };
+}
+
+// K3: Saldo "saat ini" yang aman dipanggil walau tidak ada periode OPEN.
+// periode OPEN → calculateSaldo; tanpa periode → saldo arsip tutup buku (atau 0).
+function saldoSaatIni_(periodeId, periode) {
+  if (periodeId && periode) return calculateSaldo(periodeId, periode);
+  var akhir = getSaldoTutupBukuTerakhir_();
+  if (akhir) return { tunai: akhir.tunai, bank: akhir.bank };
+  return { tunai: 0, bank: 0 };
+}
+
+// K3: Saldo akhir dari baris 'Tutup' TERAKHIR (periode CLOSED terbaru).
+// Dipakai bila tidak ada periode OPEN. null bila belum pernah tutup buku.
+function getSaldoTutupBukuTerakhir_() {
+  var sheet = getSS_().getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  var rows = sheet.getDataRange().getValues();
+  var h = headerMap_(rows[0]);
+  for (var i = rows.length - 1; i >= 1; i--) {
+    if (String(hGet_(rows[i], h, 'status', 6) || '').trim() !== 'Tutup') continue;
+    return {
+      periodeId: String(hGet_(rows[i], h, 'periodeid', 1) || ''),
+      tanggalTutup: toDateStr_(hGet_(rows[i], h, 'tanggaltutup', 2)),
+      tunai: Number(hGet_(rows[i], h, 'saldotunaiakhir', 3)) || 0,
+      bank:  Number(hGet_(rows[i], h, 'saldobankakhir', 4)) || 0
+    };
+  }
+  return null;
 }
 
 // ──────────────────────────────────────────────────────
@@ -610,20 +674,36 @@ function cekSyaratTutupBuku_(periodeId) {
 }
 
 // Buat baris penyesuaian "Selisih Kas" agar saldo sistem = aktual (T5.7).
+// Tanggal = TANGGAL TUTUP BUKU (bukan hari ini), agar tetap di dalam periode.
 // selisih > 0 (aktual > sistem) → pemasukan; < 0 → pengeluaran.
-function buatPenyesuaianSelisih_(periode, sumberKas, selisih, email) {
+function buatPenyesuaianSelisih_(periode, sumberKas, selisih, email, tglTutup) {
   if (!selisih) return;
   var ss = getSS_();
-  var tgl = toDateStr_(new Date());
+  var tgl = tglTutup || toDateStr_(new Date());
   var nominal = Math.abs(selisih);
   var catatan = 'Penyesuaian selisih kas tutup buku (' + sumberKas + ')';
-  if (selisih > 0) {
-    var shIn = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-    if (shIn) { shIn.appendRow([generateID('ADJ'), periode.id, 'SELISIH_KAS', '', tgl, nominal, sumberKas, catatan, email, tgl, 'Aktif']); _isiNoBukti_(shIn, 'BKM', periode.id); }
-  } else {
-    var shOut = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
-    if (shOut) { shOut.appendRow([generateID('ADJ'), periode.id, 'SELISIH_KAS', tgl, nominal, sumberKas, catatan, email, tgl, 'Aktif']); _isiNoBukti_(shOut, 'BKK', periode.id); }
-  }
+  var masuk = (selisih > 0);
+  var sheet = ss.getSheetByName(masuk ? CONFIG.SHEETS.INPUT_PENERIMAAN : CONFIG.SHEETS.INPUT_PENGELUARAN);
+  if (!sheet) return;
+  // Tulis berbasis nama kolom — tahan terhadap perubahan urutan kolom.
+  var lastCol = sheet.getLastColumn();
+  var h = headerMap_(sheet.getRange(1, 1, 1, lastCol).getValues()[0]);
+  var baris = new Array(lastCol);
+  function set(key, val) { if (h[key] !== undefined) baris[h[key]] = val; }
+  set('id', generateID('ADJ'));
+  set('periodeid', periode.id);
+  set('jenisid', 'SELISIH_KAS');
+  set('tanggal', tgl);
+  set('nominal', nominal);
+  set('sumberkas', sumberKas);
+  set('catatan', catatan);
+  set('createdby', email);
+  set('createdat', tgl);
+  set('status', 'Aktif');
+  if (!masuk) set('statusapproval', 'Disetujui');  // penyesuaian tutup buku tidak lewat maker-checker
+  for (var i = 0; i < lastCol; i++) if (baris[i] === undefined) baris[i] = '';
+  sheet.appendRow(baris);
+  _isiNoBukti_(sheet, masuk ? 'BKM' : 'BKK', periode.id);
 }
 
 // Arsipkan laporan periode ke Drive (T14). Butuh Script Property FOLDER_ARSIP_ID.
@@ -691,8 +771,10 @@ function tutupBuku(data) {
     }
 
     // Buat baris penyesuaian agar saldo sistem = aktual setelah tutup buku (T5.7).
-    buatPenyesuaianSelisih_(periode, 'Tunai', selisihTunai, auth.user.email);
-    buatPenyesuaianSelisih_(periode, 'Bank', selisihBank, auth.user.email);
+    // Tanggal penyesuaian = tanggal tutup buku (tetap di dalam periode).
+    var tglTutup = toDateStr_(now);
+    buatPenyesuaianSelisih_(periode, 'Tunai', selisihTunai, auth.user.email, tglTutup);
+    buatPenyesuaianSelisih_(periode, 'Bank',  selisihBank,  auth.user.email, tglTutup);
 
     // Arsip laporan (opsional; aktif bila Script Property FOLDER_ARSIP_ID diset) — T14.
     var arsip = arsipkanLaporan_(periode.id, periode.nama) || {};
@@ -829,8 +911,9 @@ function bukaPeriode(data) {
 
     // Penyesuaian rollforward (bila override) dicatat sebagai transaksi eksplisit.
     if (adjust) {
-      buatPenyesuaianSelisih_({ id: id }, 'Tunai', adjust.tunai, auth.user.email);
-      buatPenyesuaianSelisih_({ id: id }, 'Bank', adjust.bank, auth.user.email);
+      var tglMulaiStr = toDateStr_(new Date(data.tglMulai));
+      buatPenyesuaianSelisih_({ id: id }, 'Tunai', adjust.tunai, auth.user.email, tglMulaiStr);
+      buatPenyesuaianSelisih_({ id: id }, 'Bank',  adjust.bank,  auth.user.email, tglMulaiStr);
       logActivityWajib_(auth.user.email, 'ROLLFORWARD_OVERRIDE', 'Periode: ' + data.nama + ' | Selisih T/B: ' + adjust.tunai + '/' + adjust.bank + ' | Alasan: ' + adjust.alasan);
     }
 
@@ -1043,7 +1126,8 @@ function deleteTransaksi(data) {
       if (h['dibatalkanby'] !== undefined) sheet.getRange(rowNum, h['dibatalkanby'] + 1).setValue(auth.user.email);
       if (h['dibatalkanat'] !== undefined) sheet.getRange(rowNum, h['dibatalkanat'] + 1).setValue(nowS);
       if (h['alasanbatal'] !== undefined) sheet.getRange(rowNum, h['alasanbatal'] + 1).setValue(alasan);
-      try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+      // K2: buang juga cache Buku IR & master agar pembatalan penerimaan langsung terlihat.
+      try { var cd = CacheService.getScriptCache(); cd.remove('dashboard_saldo'); cd.remove('buku_ir_data'); cd.remove('master_trx_data'); } catch(e) {}
       logActivityWajib_(auth.user.email, 'BATAL_' + (masuk ? 'PEMASUKAN' : 'PENGELUARAN'),
         'ID: ' + data.id + ' | ALASAN: ' + alasan + ' | NILAI: ' + JSON.stringify(snap));
       return { success: true };
@@ -1357,8 +1441,7 @@ function getAdminConsole() {
       if (sheetK && sheetK.getLastRow() > 1) namaKelompok = sheetK.getRange(2, 2).getValue() || namaKelompok;
     } catch(e) {}
 
-    var saldo = { tunai: 0, bank: 0 };
-    try { saldo = calculateSaldo(periodeId, periode); } catch(e) {}
+    var saldo = saldoSaatIni_(periodeId, periode);   // K3: aman tanpa periode OPEN
 
     // Peta nama jenis & anggota & user
     var namaMasuk = {}, katMasuk = {}, namaKeluar = {}, namaAnggota = {}, namaUser = {};
@@ -2090,6 +2173,7 @@ function getBukuIRData() {
       for (var i = 1; i < pRows.length; i++) {
         var row = pRows[i];
         if (!row[c_id]) continue;
+        if (barisDibatalkan_(row, pHdr)) continue;   // ← K2: penerimaan batal jangan dihitung "belum dirincikan"
         if (periodeId && row[c_pid] !== periodeId) continue;
         if (bukuIRIds.indexOf(row[c_jid]) === -1) continue;
         var trxIdStr = String(row[c_id]);
@@ -2117,6 +2201,15 @@ function getBukuIRData() {
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+// K2: bersihkan cache lama setelah deploy patch. Jalankan sekali dari editor.
+function bersihkanCache() {
+  var c = CacheService.getScriptCache();
+  c.remove('buku_ir_data');
+  c.remove('dashboard_saldo');
+  c.remove('master_trx_data');
+  return { success: true };
 }
 
 function submitRincianIR(data) {
@@ -2291,7 +2384,7 @@ function getRekapitulasiData() {
       }
     }
 
-    var saldo = calculateSaldo(periodeId, periode);
+    var saldo = saldoSaatIni_(periodeId, periode);   // K3: aman tanpa periode OPEN
 
     return {
       success: true,
@@ -2662,11 +2755,13 @@ function getRekapSetoran() {
     var irData = [], irColMap = {};
     var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
     if (sheetIR && sheetIR.getLastRow() > 1) {
+      var setBatal = trxPenerimaanDibatalkan_();          // ← K1
       var irRows = sheetIR.getDataRange().getValues();
       irColMap = headerMap_(irRows[0]);
       var ir_perid = irColMap['periodeid'] !== undefined ? irColMap['periodeid'] : 2;
       for (var j = 1; j < irRows.length; j++) {
         if (!irRows[j][0]) continue;
+        if (rincianYatim_(irRows[j], irColMap, setBatal)) continue;   // ← K1
         if (periodeId && String(irRows[j][ir_perid]) !== periodeId) continue;
         irData.push(irRows[j]);
       }
@@ -3920,10 +4015,12 @@ function getBukuIRBelumSerah() {
     var sudahRincianSet = {};
     var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
     if (sheetIR && sheetIR.getLastRow() > 1) {
+      var setBatalIR = trxPenerimaanDibatalkan_();          // ← K1
       var irRows = sheetIR.getDataRange().getValues();
       var irH = headerMap_(irRows[0]);
       for (var i = 1; i < irRows.length; i++) {
         if (!irRows[i][0]) continue;
+        if (rincianYatim_(irRows[i], irH, setBatalIR)) continue;   // ← K1
         if (periodeId && String(hGet_(irRows[i], irH, 'periodeid', 2)) !== periodeId) continue;
         var tId = String(hGet_(irRows[i], irH, 'transaksiid', 1) || '');
         if (tId) sudahRincianSet[tId] = true;
@@ -4285,6 +4382,43 @@ function getKasPenerobos() {
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+// K-cleanup: batalkan baris Kas Penerobos yang nyangkut agar tidak mengunci tutup buku.
+// Hanya baris berstatus Aktif yang belum diserahterimakan. Wajib alasan.
+function batalkanKasPenerobos(id, alasan) {
+  var auth = requirePerm('penerobos.input');
+  if (!auth.success) return { success: false, message: auth.message };
+  if (!id) return { success: false, message: 'ID wajib.' };
+  if (!String(alasan || '').trim()) return { success: false, message: 'Alasan pembatalan wajib diisi.' };
+  return withLock_(function() {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    if (!sheet || sheet.getLastRow() < 2) return { success: false, message: 'Data Kas Penerobos tidak ditemukan.' };
+    // Pastikan kolom pembatalan tersedia (idempoten, tidak menghapus data lama).
+    ensureColumns_(sheet, ['Dibatalkan By', 'Dibatalkan At', 'Alasan Batal']);
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) !== String(id)) continue;
+      var email = String(hGet_(rows[i], h, 'penerobosemail', 8) || '');
+      var isAdmin = (auth.user.role === CONFIG.ROLES.ADMIN);
+      if (!isAdmin && email !== auth.user.email) return { success: false, message: 'Hanya penerobos pemilik atau ADMIN yang boleh membatalkan.' };
+      var status = String(hGet_(rows[i], h, 'status', 9) || 'Aktif');
+      if (status !== 'Aktif') return { success: false, message: 'Baris ini sudah berstatus ' + status + '.' };
+      if (String(hGet_(rows[i], h, 'serahterimaid', 10) || '').trim()) return { success: false, message: 'Baris ini sudah masuk serah terima; tidak bisa dibatalkan.' };
+      var r = i + 1;
+      var snapshot = JSON.stringify({ id: id, nominal: hGet_(rows[i], h, 'nominal', 5), email: email });
+      sheet.getRange(r, h['status'] + 1).setValue('Dibatalkan');
+      if (h['dibatalkanby'] !== undefined) sheet.getRange(r, h['dibatalkanby'] + 1).setValue(auth.user.email);
+      if (h['dibatalkanat'] !== undefined) sheet.getRange(r, h['dibatalkanat'] + 1).setValue(toDateStr_(new Date()));
+      if (h['alasanbatal'] !== undefined) sheet.getRange(r, h['alasanbatal'] + 1).setValue(String(alasan).trim());
+      logActivityWajib_(auth.user.email, 'BATAL_KAS_PENEROBOS', 'Alasan: ' + String(alasan).trim() + ' | ' + snapshot);
+      try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+      return { success: true };
+    }
+    return { success: false, message: 'Kas Penerobos tidak ditemukan.' };
+  });
 }
 
 function buatSerahTerima(data) {

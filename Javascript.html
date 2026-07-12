@@ -416,6 +416,9 @@ var App = {
         '</div>' +
       '</div>' +
 
+      // K3: peringatan bila tidak ada periode OPEN (angka = saldo arsip tutup buku).
+      (data.peringatan ? '<div class="info-box" style="background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;margin-bottom:14px;">⚠ ' + App.escapeHtml(data.peringatan) + '</div>' : '') +
+
       (u.role !== 'PENEROBOS' ? '<div class="total-card">' +
         '<div class="total-label">💰 Total Kas</div>' +
         '<div class="total-amount">' + this.formatNumber(data.totalKas || 0) + '</div>' +
@@ -1272,6 +1275,8 @@ var App = {
             '<span class="trx-item-nominal text-success">' + App.formatNumber(d.nominal) + '</span>' +
           '</div>' +
           '<div class="trx-item-meta">' + App.formatDate(d.tanggal) + (d.catatan ? ' · ' + App.escapeHtml(d.catatan) : '') + ' ' + badge + '</div>' +
+          ((d.status === 'Aktif' && canInput && periodeOpen && !d.serahTerimaId) ?
+            '<button class="btn btn-sm btn-danger" style="margin-top:6px;" onclick="App.batalkanKasPenerobos(\'' + self._esc(d.id).replace(/'/g, "\\'") + '\')">🗑️ Batalkan</button>' : '') +
         '</div>' +
       '</div>';
     }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
@@ -1294,6 +1299,18 @@ var App = {
     var checked = document.querySelectorAll('.kp-check:checked').length;
     var bar = document.getElementById('kpActionBar');
     if (bar) bar.style.display = checked > 0 ? 'block' : 'none';
+  },
+
+  // K-cleanup: batalkan baris Kas Penerobos yang nyangkut (agar tak mengunci tutup buku).
+  batalkanKasPenerobos: function(id) {
+    var alasan = prompt('Alasan pembatalan Kas Penerobos ini?');
+    if (alasan === null) return;
+    if (!alasan.trim()) { this.toast('Alasan wajib diisi.'); return; }
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) { if (r && r.success) { self.toast('Kas Penerobos dibatalkan ✓'); self.pageKasPenerobos(); } else self.toast((r && r.message) || 'Gagal membatalkan.'); })
+      .withFailureHandler(function() { self.toast('Gagal terhubung.'); })
+      .batalkanKasPenerobos(id, alasan.trim());
   },
 
   _showFormKasPenerobos: function() {

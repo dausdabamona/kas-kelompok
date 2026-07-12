@@ -164,3 +164,28 @@ Checklist uji manual per fase. Jalankan di **deployment staging** setelah
 | 3 | Paksa panggil `submitTransaksi` tipe `keluar` sbg peran tanpa `trx.input.keluar` | Ditolak server: "Akses ditolak". |
 | 4 | Import CSV berisi baris `keluar` sbg peran tanpa `trx.input.keluar` | Ditolak: "tidak berwenang input pengeluaran". |
 | 5 | Peran dengan `trx.input.masuk`=ON → import CSV berisi hanya baris `masuk` | Berhasil. |
+
+---
+
+## PATCH K — Regresi Soft Delete & Saldo Tanpa Periode (K1, K2, K3)
+
+### Prasyarat
+- Deploy kode terbaru, lalu **Run → `bersihkanCache`** sekali dari editor (buang cache `buku_ir_data`/`dashboard_saldo`/`master_trx_data` lama).
+
+### Implementasi
+- **K1 (uang riil):** `trxPenerimaanDibatalkan_()` + `rincianYatim_()` — rincian Buku IR sah hanya bila transaksi penerimaan induknya masih Aktif. Difilter di `getRekapSetoran` & `getBukuIRBelumSerah`. Berlaku surut, tanpa kolom baru di `Detail Buku IR`.
+- **K2 (deadlock tutup buku):** `getBukuIRData` kini melewati penerimaan `Dibatalkan` (`barisDibatalkan_`) → transaksi batal tak lagi dihitung "belum dirincikan".
+- **K3 (saldo salah):** `calculateSaldo` **melempar error** bila dipanggil tanpa periode (tidak lagi mengembalikan angka ngawur). `getSaldoTutupBukuTerakhir_`/`saldoSaatIni_` dipakai saat tak ada periode OPEN. `getDashboardData` menampilkan **peringatan** + saldo arsip tutup buku; `cekSaldoCukup_` tak menelan error.
+- **Rapikan:** `buatPenyesuaianSelisih_` menulis berbasis nama kolom + tanggal = tanggal tutup buku + pengeluaran penyesuaian berstatus **Disetujui** (agar dihitung `calculateSaldo`). Endpoint `batalkanKasPenerobos(id, alasan)` (cap `penerobos.input`/ADMIN) untuk melepas baris Kas Penerobos yang nyangkut.
+
+### Checklist uji
+| # | Langkah | Hasil yang diharapkan |
+|---|---------|------------------------|
+| 1 | Catat penerimaan Buku IR Rp 500.000 → rincikan → **batalkan** transaksinya | Kas berkurang 500.000 **dan** Rekap Setoran Desa **ikut berkurang** sesuai rincian. |
+| 2 | Setelah #1, buka menu Buku IR | Transaksi dibatalkan **tidak** muncul di "Belum Dirincikan". |
+| 3 | Setelah #1, coba Tutup Buku | **Tidak** diblokir pesan "masih ada N belum dirincikan". |
+| 4 | Set semua periode CLOSED, buka dashboard | Saldo = saldo akhir tutup buku + kotak peringatan kuning. **Bukan** angka ngawur, **bukan** 0. |
+| 5 | Tutup buku dengan selisih (mis. aktual bank kurang Rp 10.000), isi alasan | Muncul baris BKK "Selisih Kas" Rp 10.000 status **Disetujui**; saldo periode baru = aktual. |
+| 6 | Cek `Master Pengeluaran` baris SELISIH_KAS | Ada, kode persis `SELISIH_KAS`. |
+| 7 | Kas Penerobos Aktif yang nyangkut → tombol **Batalkan** + alasan | Status jadi Dibatalkan; tak lagi mengunci tutup buku; hilang dari Total Kas. |
+| 8 | Muat ulang dashboard | Total Kas = Tunai + Bank + Kas Penerobos, ketiganya berlabel jelas. |
