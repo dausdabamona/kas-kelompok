@@ -2142,11 +2142,13 @@ function getBukuIRData() {
     // Kumpulkan rincian yang sudah ada per transaksiId (untuk edit)
     var rincianMap = {};
     if (sheetIR && sheetIR.getLastRow() > 1) {
+      var setBatalBIR = trxPenerimaanDibatalkan_();      // ← K1: jangan muat rincian yatim
       var irRows = sheetIR.getDataRange().getValues();
       var irH = headerMap_(irRows[0]);
       for (var i = 1; i < irRows.length; i++) {
         var trxId = String(hGet_(irRows[i], irH, 'transaksiid', 1) || '');
         if (!trxId) continue;
+        if (rincianYatim_(irRows[i], irH, setBatalBIR)) continue;   // ← K1
         rincianMap[trxId] = {
           rincianId: String(hGet_(irRows[i], irH, 'id', 0) || ''),
           ir: Number(hGet_(irRows[i], irH, 'ir', 5)) || 0,
@@ -4407,6 +4409,9 @@ function batalkanKasPenerobos(id, alasan) {
       var status = String(hGet_(rows[i], h, 'status', 9) || 'Aktif');
       if (status !== 'Aktif') return { success: false, message: 'Baris ini sudah berstatus ' + status + '.' };
       if (String(hGet_(rows[i], h, 'serahterimaid', 10) || '').trim()) return { success: false, message: 'Baris ini sudah masuk serah terima; tidak bisa dibatalkan.' };
+      // K2/T2: hanya boleh membatalkan bila periode baris masih OPEN.
+      var apKP = assertPeriodeOpen_(String(hGet_(rows[i], h, 'periodeid', 1) || ''));
+      if (!apKP.ok) return { success: false, message: apKP.message };
       var r = i + 1;
       var snapshot = JSON.stringify({ id: id, nominal: hGet_(rows[i], h, 'nominal', 5), email: email });
       sheet.getRange(r, h['status'] + 1).setValue('Dibatalkan');

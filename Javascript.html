@@ -442,7 +442,8 @@ var App = {
       ((App.can('trx.approve') && data.menungguApproval && data.menungguApproval.count > 0) ?
         '<button class="btn btn-outline mb-16" style="border-color:#D97706;color:#D97706;" onclick="App.pageApproval()">✅ Persetujuan Pengeluaran (' + data.menungguApproval.count + ' · ' + this.formatNumber(data.menungguApproval.total) + ')</button>' : '') +
 
-      '<button class="btn btn-success mb-16" onclick="App.pageTransaksi()">+ Input Transaksi</button>' +
+      // K3: input transaksi hanya bila ada periode aktif (OPEN).
+      (periode ? '<button class="btn btn-success mb-16" onclick="App.pageTransaksi()">+ Input Transaksi</button>' : '') +
 
       '<button class="btn btn-secondary mb-16" onclick="App.pageRiwayatSaya()">🧾 Riwayat Transaksi Saya</button>' +
 

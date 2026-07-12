@@ -716,7 +716,7 @@ var API_DENYLIST_ = {
   'apiCall': true, 'doGet': true, 'include': true,
   'loginWithEmail': true, 'getGoogleEmail': true, 'getCurrentUser': true,
   'setupSheets': true, 'repairSheetHeaders': true, 'migratePosSetoran': true,
-  'migrasiKeamanan': true, 'migrasiPengendalian': true,
+  'migrasiKeamanan': true, 'migrasiPengendalian': true, 'bersihkanCache': true,
   'fmtRp': true, 'fmtTanggal': true, 'generateID': true, 'logActivity': true,
   'getSpreadsheetId': true, 'calculateSaldo': true, 'buildPDFHTML': true,
   'hitungJumlahBulan': true, 'mapPosNamaToIRColName': true, 'mapPosNamaToBukuIRCol': true,

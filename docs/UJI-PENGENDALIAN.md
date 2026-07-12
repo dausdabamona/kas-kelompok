@@ -189,3 +189,33 @@ Checklist uji manual per fase. Jalankan di **deployment staging** setelah
 | 6 | Cek `Master Pengeluaran` baris SELISIH_KAS | Ada, kode persis `SELISIH_KAS`. |
 | 7 | Kas Penerobos Aktif yang nyangkut → tombol **Batalkan** + alasan | Status jadi Dibatalkan; tak lagi mengunci tutup buku; hilang dari Total Kas. |
 | 8 | Muat ulang dashboard | Total Kas = Tunai + Bank + Kas Penerobos, ketiganya berlabel jelas. |
+
+---
+
+## FASE 6 L1–L3 — Penutupan Celah Sisa (gate kritis)
+
+Inti K1–K3 sudah terpasang pada patch sebelumnya; Fase 6 menutup 4 celah sisa:
+- `bersihkanCache` dijadikan **editor-only** (masuk `API_DENYLIST_`) — bukan lagi endpoint terbuka.
+- `batalkanKasPenerobos` menambah `assertPeriodeOpen_` pada periode baris (T2).
+- `getBukuIRData` tidak lagi memuat `rincianMap` milik penerimaan yang dibatalkan (K1 tuntas di semua pembaca).
+- Dashboard menyembunyikan tombol **+ Input Transaksi** bila tidak ada periode aktif (K3).
+
+### Audit pembaca `Detail Buku IR` (hasil verifikasi)
+| Fungsi | Sumber | Status filter |
+|--------|--------|---------------|
+| `getBukuIRData` | Input Penerimaan + rincianMap (BUKU_IR) | `barisDibatalkan_` (K2) + `rincianYatim_` (K1) ✓ |
+| `getRekapSetoran` | BUKU_IR per kolom | `rincianYatim_` ✓ |
+| `getBukuIRBelumSerah` | BUKU_IR | `rincianYatim_` ✓ |
+| `getLaporanSetoran` | Input Penerimaan (%Desa/%Daerah), **tidak** baca BUKU_IR | `barisDibatalkan_` ✓ |
+| `submitRincianIR` | tulis BUKU_IR (bukan pembaca laporan) | — |
+
+Tidak ada pembaca keempat yang terlewat.
+
+### Checklist gate
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 (gerbang) | Penerimaan Buku IR Rp 500.000 → rincikan → **batalkan** | Kas −500.000 **dan** Rekap Setoran Desa ikut berkurang. |
+| 2 | Buka menu Buku IR | Transaksi batal tak muncul di "Belum Dirincikan". |
+| 3 | Tutup Buku setelah #1 | Tak diblokir "belum dirincikan". |
+| 4 | Semua periode CLOSED → dashboard | Saldo = arsip tutup buku + peringatan kuning; tombol Input Transaksi hilang. |
+| 5 | Kas Penerobos → `batalkanKasPenerobos` (periode OPEN) | Hilang dari pos penerobos; tutup buku tak terblokir. Periode CLOSED → ditolak. |
