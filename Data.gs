@@ -229,7 +229,7 @@ function countLampiran_(transaksiId) {
 // Endpoint: unggah bukti untuk transaksi yang sudah ada (mis. retry offline).
 function uploadBukti(data) {
   try {
-    var auth = requirePerm('trx.input');
+    var auth = requirePermInput_('keluar');
     if (!auth.success) return auth;
     if (!data || !data.transaksiId || !data.base64) return { success: false, message: 'Data tidak lengkap.' };
     var r = _simpanBukti1_(String(data.transaksiId), String(data.tipe || ''), String(data.base64), auth.user.email);
@@ -848,8 +848,9 @@ function bukaPeriode(data) {
 // ──────────────────────────────────────────────────────
 function submitTransaksi(data) {
   try {
-    // FASE 1: endpoint mutasi wajib requirePerm (sebelumnya hanya checkAuth).
-    var auth = requirePerm('trx.input');
+    // FASE 5.1: enforcement per-arah (masuk vs keluar/mutasi) dgn fallback ke 'trx.input'.
+    var _tipeInput = (data && data.tipe === 'masuk') ? 'masuk' : 'keluar';
+    var auth = requirePermInput_(_tipeInput);
     if (!auth.success) return { success: false, message: auth.message };
     return withLock_(function() {
     var ss = getSS_();
@@ -1116,7 +1117,8 @@ function getDraftPengeluaran() {
 // ──────────────────────────────────────────────────────
 function importTransaksiCSV(payload) {
   try {
-    var auth = requirePerm('trx.input');
+    // FASE 5.1: enforcement per-arah dilakukan setelah tahu isi baris (masuk/keluar).
+    var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
     payload = payload || {};
     var rows = payload.rows || [];
@@ -1142,6 +1144,9 @@ function importTransaksiCSV(payload) {
     }
     var adaMasuk = rows.some(function(x) { return String(x.tipe).toLowerCase() === 'masuk'; });
     var adaKeluar = rows.some(function(x) { return String(x.tipe).toLowerCase() === 'keluar'; });
+    // FASE 5.1: cek izin per-arah sesuai isi baris CSV.
+    if (adaMasuk && !userCanInput_(auth.user.role, 'masuk')) return { success: false, message: 'Akses ditolak: tidak berwenang input pemasukan.' };
+    if (adaKeluar && !userCanInput_(auth.user.role, 'keluar')) return { success: false, message: 'Akses ditolak: tidak berwenang input pengeluaran.' };
     if (adaMasuk && !jenisValid_(CONFIG.SHEETS.PEMASUKAN, jenisMasukId)) return { success: false, message: 'Pilih Jenis Pemasukan yang valid (ada baris "masuk").' };
     if (adaKeluar && !jenisValid_(CONFIG.SHEETS.PENGELUARAN, jenisKeluarId)) return { success: false, message: 'Pilih Jenis Pengeluaran yang valid (ada baris "keluar").' };
 

@@ -10,6 +10,15 @@ var App = {
     return !!(App.currentUser && App.currentUser.perms && App.currentUser.perms[cap]);
   },
 
+  // FASE 5.1: cek izin input per-arah dengan fallback ke kapabilitas lama 'trx.input'.
+  // tipe: 'masuk' → trx.input.masuk; selain itu → trx.input.keluar.
+  canInput: function(tipe) {
+    var perms = (App.currentUser && App.currentUser.perms) || {};
+    var cap = (tipe === 'masuk') ? 'trx.input.masuk' : 'trx.input.keluar';
+    if (Object.prototype.hasOwnProperty.call(perms, cap)) return !!perms[cap];
+    return !!perms['trx.input'];
+  },
+
   // ─── FASE 2c: TOKEN & DISPATCHER FRONTEND ───────────────
   // Token disimpan di localStorage: sesi (harian) & perangkat (terpercaya).
   _K_SESSION: 'kk_session', _K_DEVICE: 'kk_device', _K_EMAIL: 'kk_email',
@@ -594,9 +603,9 @@ var App = {
 
     var html = this.pageWrapper('Input Transaksi',
       '<div class="tabs">' +
-        '<button class="tab-btn' + (tipe === 'masuk' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'masuk\', App._masterP, App._masterPK, App._anggota)">💚 Masuk</button>' +
-        (isPenerobos ? '' : '<button class="tab-btn' + (tipe === 'keluar' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'keluar\', App._masterP, App._masterPK, App._anggota)">❤️ Keluar</button>') +
-        (isPenerobos ? '' : '<button class="tab-btn' + (tipe === 'mutasi' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'mutasi\', App._masterP, App._masterPK, App._anggota)">🔄 Mutasi</button>') +
+        (App.canInput('masuk') ? '<button class="tab-btn' + (tipe === 'masuk' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'masuk\', App._masterP, App._masterPK, App._anggota)">💚 Masuk</button>' : '') +
+        ((isPenerobos || !App.canInput('keluar')) ? '' : '<button class="tab-btn' + (tipe === 'keluar' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'keluar\', App._masterP, App._masterPK, App._anggota)">❤️ Keluar</button>') +
+        ((isPenerobos || !App.canInput('keluar')) ? '' : '<button class="tab-btn' + (tipe === 'mutasi' ? ' active' : '') + '" onclick="App.renderTransaksiForm(\'mutasi\', App._masterP, App._masterPK, App._anggota)">🔄 Mutasi</button>') +
       '</div>' +
       formHtml +
       '<div id="trxError"></div>' +
@@ -2510,7 +2519,7 @@ var App = {
         '<div class="kelola-menu-icon">🤝</div>' +
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Hasil Musyawaroh</div><div class="kelola-menu-desc">Kelola keputusan musyawarah</div></div><span>›</span>' +
       '</div>' +
-      (App.can('trx.input') ? '<div class="kelola-menu-item" onclick="App.pageImportCsv()">' +
+      ((App.canInput('masuk') || App.canInput('keluar')) ? '<div class="kelola-menu-item" onclick="App.pageImportCsv()">' +
         '<div class="kelola-menu-icon">📥</div>' +
         '<div class="kelola-menu-text"><div class="kelola-menu-title">Input CSV</div><div class="kelola-menu-desc">Impor banyak transaksi (mis. rekening bank) sekaligus</div></div><span>›</span>' +
       '</div>' : '') +

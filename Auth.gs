@@ -64,6 +64,27 @@ function userCan_(role, cap) {
   return !!(matrix[role] && matrix[role][cap]);
 }
 
+// FASE 5.1: enforcement input per-arah (masuk/keluar) dengan fallback ke
+// kapabilitas lama 'trx.input' bila matriks tersimpan belum punya kolom baru.
+// tipe: 'masuk' → trx.input.masuk; 'keluar'/'mutasi' → trx.input.keluar.
+function userCanInput_(role, tipe) {
+  if (role === CONFIG.ROLES.ADMIN) return true;
+  var cap = (tipe === 'masuk') ? 'trx.input.masuk' : 'trx.input.keluar';
+  var matrix = getPermMatrix_();
+  var row = matrix[role] || {};
+  // Bila kapabilitas baru sudah terdefinisi di matriks, pakai itu.
+  if (Object.prototype.hasOwnProperty.call(row, cap)) return !!row[cap];
+  // Kompatibilitas: matriks lama hanya punya 'trx.input'.
+  return !!row['trx.input'];
+}
+
+function requirePermInput_(tipe) {
+  var user = getCurrentUser();
+  if (!user) return { success: false, message: 'Belum login' };
+  if (!userCanInput_(user.role, tipe)) return { success: false, message: 'Akses ditolak' };
+  return { success: true, user: user };
+}
+
 // Seperti checkAuth tapi cek capability tertentu.
 function requirePerm(cap) {
   var user = getCurrentUser();

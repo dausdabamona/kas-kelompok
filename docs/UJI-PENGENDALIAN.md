@@ -140,3 +140,27 @@ Checklist uji manual per fase. Jalankan di **deployment staging** setelah
 | 4 | Pengeluaran **≤ AMBANG_APPROVAL** | Langsung **Disetujui** (tanpa antre). |
 | 5 | Ubah matriks Hak Akses (Pengaturan) lalu cek `Log Activity` | Ada baris `PRIVILEGED_HAK_AKSES` berisi diff peran per-kapabilitas. |
 | 6 | Isi catatan/jenis transaksi dengan teks `<img src=x onerror=alert(1)>` | Tampil sebagai teks apa adanya (tidak dieksekusi). |
+
+---
+
+## FASE 5.1 — Perketat Hak Akses Default & Pisah Input Masuk/Keluar (T12)
+
+### Prasyarat
+- **Run → `migrasiPengendalian`**: menyisipkan baris `trx.input.masuk` & `trx.input.keluar` ke sheet **Hak Akses**, **meniru nilai `trx.input` lama** (perilaku instalasi lama tetap sama; idempoten). Instalasi baru memakai default ketat.
+
+### Implementasi
+- **Pisah kapabilitas:** `trx.input` (lama) dipertahankan; enforcement kini per-arah:
+  - `trx.input.masuk` — catat pemasukan. Default: ADMIN, Bendahara 1, Bendahara 2, Penulis, Penerobos.
+  - `trx.input.keluar` — catat pengeluaran/mutasi. Default: ADMIN, Bendahara 1, Bendahara 2.
+- **Enforcement server** (`requirePermInput_`/`userCanInput_`, fallback ke `trx.input` bila kolom baru belum ada): `submitTransaksi` (per `data.tipe`), `importTransaksiCSV` (per baris masuk/keluar), `uploadBukti` (keluar).
+- **Frontend** (`App.canInput(tipe)`, fallback sama): tab **Masuk** muncul bila `trx.input.masuk`; tab **Keluar**/**Mutasi** bila `trx.input.keluar`; menu **Input CSV** bila salah satu.
+- **Default lain diperketat:** `bukuIR.input` (tanpa Penerobos), `pembelaan.manage` (ADMIN+Bend.1+Bend.2), `terobosan.bayar` (tanpa Penulis), `grade.edit` (ADMIN+Bend.1). Hanya mempengaruhi **default**; matriks tersimpan tak berubah otomatis.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | (Instalasi lama) Run `migrasiPengendalian` → cek sheet Hak Akses | Muncul baris `trx.input.masuk` & `trx.input.keluar` = salinan nilai `trx.input`; akses semua user tak berubah. |
+| 2 | Set peran (mis. Penulis) `trx.input.keluar`=OFF, `trx.input.masuk`=ON → login sbg Penulis → Input Transaksi | Hanya tab **Masuk** tampil; tab Keluar/Mutasi hilang. |
+| 3 | Paksa panggil `submitTransaksi` tipe `keluar` sbg peran tanpa `trx.input.keluar` | Ditolak server: "Akses ditolak". |
+| 4 | Import CSV berisi baris `keluar` sbg peran tanpa `trx.input.keluar` | Ditolak: "tidak berwenang input pengeluaran". |
+| 5 | Peran dengan `trx.input.masuk`=ON → import CSV berisi hanya baris `masuk` | Berhasil. |

@@ -57,7 +57,9 @@ function getCapabilities_() {
     { code: 'view.terobosan', label: 'Lihat: Terobosan Kelompok', grup: 'lihat' },
     { code: 'view.setting', label: 'Lihat: Setting', grup: 'lihat' },
     // Edit/Aksi (server-enforced)
-    { code: 'trx.input', label: 'Input Transaksi', grup: 'edit' },
+    { code: 'trx.input', label: 'Input Transaksi (lama — mencakup masuk & keluar)', grup: 'edit' },
+    { code: 'trx.input.masuk', label: 'Input Pemasukan', grup: 'edit' },
+    { code: 'trx.input.keluar', label: 'Input Pengeluaran', grup: 'edit' },
     { code: 'bukuIR.input', label: 'Input Rincian Buku IR', grup: 'edit' },
     { code: 'jamaah.add', label: 'Tambah Jamaah', grup: 'edit' },
     { code: 'jamaah.edit', label: 'Edit Jamaah', grup: 'edit' },
@@ -100,21 +102,23 @@ function getDefaultPermMatrix_() {
     'view.laporanPDF': nonPenerobos,
     'view.terobosan': allRoles,
     'view.setting': [R.ADMIN],
-    'trx.input': allRoles,
-    'bukuIR.input': allRoles,
+    'trx.input': allRoles, // dipertahankan demi kompatibilitas; enforcement kini via masuk/keluar
+    'trx.input.masuk': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS, R.PENEROBOS],
+    'trx.input.keluar': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
+    'bukuIR.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS],
     'jamaah.add': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
     'jamaah.edit': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
     'jamaah.delete': [R.ADMIN],
     'terobosan.create': [R.ADMIN, R.BENDAHARA_1, R.PENULIS],
-    'terobosan.bayar': allRoles,
+    'terobosan.bayar': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENEROBOS],
     'terobosan.batal': [R.ADMIN, R.BENDAHARA_1, R.PENEROBOS],
-    'grade.edit': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
+    'grade.edit': [R.ADMIN, R.BENDAHARA_1],
     'trx.approve': [R.ADMIN, R.BENDAHARA_1],
     'saldo.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'bank.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'bank.manage': [R.ADMIN, R.BENDAHARA_1],
     'setoran.realisasi': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
-    'pembelaan.manage': allRoles,
+    'pembelaan.manage': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'master.manage': [R.ADMIN],
     'user.manage': [R.ADMIN],
     'trx.edit.tunai': [R.ADMIN, R.BENDAHARA_1],
@@ -526,9 +530,34 @@ function migrasiPengendalian() {
   var jk = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
   if (jk && !_adaKode_(jk, 'SELISIH_KAS')) { jk.appendRow(['SELISIH_KAS', 'Selisih Kas', 'Umum', 'Aktif']); log.push('➕ Jenis Selisih Kas → Master Pengeluaran'); }
 
+  // FASE 5.1: pisah trx.input → trx.input.masuk/keluar di sheet Hak Akses (jika ada).
+  try { var hi = _migrasiHakAksesInput_(ss); if (hi) log.push('🔐 Hak Akses: ' + hi); } catch(e) { log.push('⚠️ migrasi Hak Akses input gagal: ' + e.message); }
+
   Logger.log(log.join('\n'));
   try { SpreadsheetApp.getUi().alert('Migrasi Pengendalian Selesai ✅', log.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK); } catch(e) {}
   return { success: true, log: log };
+}
+
+// FASE 5.1: sisipkan baris 'trx.input.masuk'/'trx.input.keluar' ke sheet Hak Akses,
+// meniru nilai per-role dari 'trx.input' lama agar perilaku instalasi lama tetap sama.
+// Idempoten: hanya menambah bila kedua baris belum ada. Instalasi baru (belum ada sheet
+// atau belum ada baris) memakai default ketat dari getDefaultPermMatrix_().
+function _migrasiHakAksesInput_(ss) {
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.HAK_AKSES);
+  if (!sheet || sheet.getLastRow() < 2) return '';
+  var rows = sheet.getDataRange().getValues();
+  var idx = {};
+  for (var i = 1; i < rows.length; i++) idx[String(rows[i][0])] = i;
+  if (idx['trx.input.masuk'] != null && idx['trx.input.keluar'] != null) return ''; // sudah ada
+  if (idx['trx.input'] == null) return ''; // tak ada legacy → biarkan default ketat
+  var legacy = rows[idx['trx.input']];
+  var caps = getCapabilities_();
+  function labelOf_(code) { for (var j = 0; j < caps.length; j++) if (caps[j].code === code) return caps[j].label; return code; }
+  var ditambah = [];
+  if (idx['trx.input.masuk'] == null) { sheet.appendRow(['trx.input.masuk', labelOf_('trx.input.masuk')].concat(legacy.slice(2))); ditambah.push('trx.input.masuk'); }
+  if (idx['trx.input.keluar'] == null) { sheet.appendRow(['trx.input.keluar', labelOf_('trx.input.keluar')].concat(legacy.slice(2))); ditambah.push('trx.input.keluar'); }
+  try { CacheService.getScriptCache().remove('perm_matrix'); } catch(e) {}
+  return ditambah.join(' & ') + ' (mengikuti nilai trx.input lama)';
 }
 
 // ══════════════════════════════════════════════════════
