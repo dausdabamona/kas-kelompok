@@ -1279,7 +1279,7 @@ var App = {
     var rows = (res.data || []).map(function(d) {
       var badge = d.status === 'Aktif'
         ? '<span class="badge badge-success">Aktif</span>'
-        : '<span class="badge badge-muted">Diserahkan</span>';
+        : '<span class="badge badge-muted">' + App.escapeHtml(d.status || 'Diserahkan') + '</span>';
       var chk = (d.status === 'Aktif' && canInput && periodeOpen)
         ? '<input type="checkbox" class="kp-check" data-id="' + d.id + '" onchange="App._updateKpBtn()" style="width:18px;height:18px;margin-right:4px;">'
         : '';
@@ -1297,12 +1297,22 @@ var App = {
       '</div>';
     }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
 
+    // L2d: bila ada kas Aktif tapi serah terima tak bisa dibuat, jelaskan alasannya.
+    var diagBanner = '';
+    if (activeItems.length > 0 && res.dapatSerahTerima === false) {
+      diagBanner = '<div class="info-box" style="background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;margin-bottom:12px;">⚠ Serah terima belum bisa diproses: ' +
+        App.escapeHtml(res.alasanSerahTerima || 'sebab tidak diketahui') + '</div>';
+    } else if (activeItems.length > 0 && res.alasanSerahTerima) {
+      diagBanner = '<div class="info-box" style="margin-bottom:12px;">' + App.escapeHtml(res.alasanSerahTerima) + '</div>';
+    }
+    var bisaSerah = (res.dapatSerahTerima !== false);
     var html = self.pageWrapper('Kas Penerobos',
+      diagBanner +
       (canInput && periodeOpen ?
         '<button class="btn btn-primary mb-16" onclick="App._showFormKasPenerobos()">+ Tambah Kas Masuk</button>'
       : '') +
       '<div class="card" style="padding:0 16px;" id="kpList">' + rows + '</div>' +
-      (canInput && periodeOpen && activeItems.length > 0 ?
+      (canInput && periodeOpen && bisaSerah && activeItems.length > 0 ?
         '<div id="kpActionBar" style="display:none;margin-top:12px;">' +
           '<button class="btn btn-warning" id="kpSerahBtn" onclick="App._showModalSerahTerima()">Buat Serah Terima</button>' +
         '</div>'

@@ -246,3 +246,24 @@ Tidak ada pembaca keempat yang terlewat.
 | 8 | Batalkan satu baris (periode OPEN, skenario uji) | Status → Dibatalkan; hilang dari kartu dashboard & Total; **baris tetap ada di sheet**; Activity Log memuat alasan + snapshot + RISIKO. |
 | 9 | `cekIntegritas()` | Kategori `DUPLIKAT_PENEROBOS` muncul dengan penilaian risiko per baris. |
 | 10 | Coba serah terima baris Dibatalkan | Ditolak (tidak bisa dipilih). |
+
+---
+
+## L2d — Akar Macetnya Serah Terima (normalisasi email + diagnostik)
+
+### Temuan (kenapa alur macet)
+1. **Email case-sensitive (utama).** `getKasPenerobos`, `buatSerahTerima`, `getSerahTerimaList` membandingkan `email !== auth.user.email` **mentah**. Sheet menyimpan `Brianfpratama@gmail.com`, login `brianfpratama@gmail.com` → baris Brian **tak pernah terlihat** → tak bisa membuat serah terima. Kelas bug sama di `getRiwayatTransaksiSaya` (4 loop) dan key `migrasiTransaksiPenerobos`.
+2. **Ketergantungan periode.** `konfirmasiSerahTerima` & `getSerahTerimaList` butuh periode OPEN. Setelah tutup buku tanpa periode baru, serah terima tak bisa dikonfirmasi → baris terjebak. (`cekSyaratTutupBuku_` sudah memblokir tutup buku saat kas penerobos Aktif — dikonfirmasi jalan.)
+3. **Role penerima.** Konfirmasi butuh `serahterima.konfirmasi` + role cocok Sumber Tujuan (B1→Tunai, B2→Bank). Bila tak ada pengurus dengan role itu, tak ada yang bisa mengonfirmasi.
+
+### Perbaikan
+- Helper `emailSama_(a,b)` (`toLowerCase().trim()` kedua sisi) menggantikan semua perbandingan identitas email di `Data.gs` (riwayat ×4, getKasPenerobos, buatSerahTerima, getSerahTerimaList) + key migrasi dinormalisasi.
+- `getKasPenerobos` mengirim `dapatSerahTerima` + `alasanSerahTerima` via `_diagnosaSerahTerima_` (cek periode OPEN + ada bendahara/admin aktif). UI menampilkan alasan bila serah terima tak bisa dibuat — bukan tombol hilang diam-diam.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | Login penerobos yang casing emailnya beda dari sheet | Kas penerobosnya **tetap terlihat**. |
+| 2 | Buka Kas Penerobos saat tak ada periode OPEN | Banner kuning: "Periode sedang tidak terbuka…". Tombol serah terima tidak muncul, **dengan penjelasan**. |
+| 3 | Tak ada Bendahara/Admin aktif | Banner: "Belum ada Bendahara/Admin aktif…". |
+| 4 | Tutup buku saat masih ada kas penerobos Aktif | Diblokir (`cekSyaratTutupBuku_`). |

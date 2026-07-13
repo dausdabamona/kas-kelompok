@@ -447,6 +447,13 @@ function randomToken_() {
   return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
 }
 
+// L2d: bandingkan dua email tanpa peka huruf besar/kecil & spasi.
+// Sheet bisa menyimpan 'Brianfpratama@gmail.com' sementara login
+// 'brianfpratama@gmail.com' — perbandingan '===' mentah membuat baris tak terlihat.
+function emailSama_(a, b) {
+  return String(a || '').toLowerCase().trim() === String(b || '').toLowerCase().trim();
+}
+
 // Cari user (aktif/nonaktif) berdasarkan email.
 function getUserByEmail_(email) {
   var norm = String(email || '').toLowerCase().trim();

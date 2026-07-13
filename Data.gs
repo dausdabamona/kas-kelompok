@@ -1451,7 +1451,7 @@ function getRiwayatTransaksiSaya() {
       var hin = headerMap_(rin[0]);
       for (var i = 1; i < rin.length; i++) {
         if (!hGet_(rin[i], hin, 'id', 0)) continue;
-        if (String(hGet_(rin[i], hin, 'createdby', 8)) !== email) continue;
+        if (!emailSama_(hGet_(rin[i], hin, 'createdby', 8), email)) continue;
         if (barisDibatalkan_(rin[i], hin)) continue; // T3
         var jid = String(hGet_(rin[i], hin, 'jenisid', 2) || '');
         list.push({
@@ -1478,7 +1478,7 @@ function getRiwayatTransaksiSaya() {
       var hout = headerMap_(rout[0]);
       for (var i = 1; i < rout.length; i++) {
         if (!hGet_(rout[i], hout, 'id', 0)) continue;
-        if (String(hGet_(rout[i], hout, 'createdby', 7)) !== email) continue;
+        if (!emailSama_(hGet_(rout[i], hout, 'createdby', 7), email)) continue;
         if (barisDibatalkan_(rout[i], hout)) continue; // T3
         var jid2 = String(hGet_(rout[i], hout, 'jenisid', 2) || '');
         list.push({
@@ -1505,7 +1505,7 @@ function getRiwayatTransaksiSaya() {
       var hmut = headerMap_(rmut[0]);
       for (var i = 1; i < rmut.length; i++) {
         if (!hGet_(rmut[i], hmut, 'id', 0)) continue;
-        if (String(hGet_(rmut[i], hmut, 'createdby', 5)) !== email) continue;
+        if (!emailSama_(hGet_(rmut[i], hmut, 'createdby', 5), email)) continue;
         if (barisDibatalkan_(rmut[i], hmut)) continue; // T3
         var arah = String(hGet_(rmut[i], hmut, 'arah', 4) || '');
         list.push({
@@ -1529,7 +1529,7 @@ function getRiwayatTransaksiSaya() {
       var hkp = headerMap_(rkp[0]);
       for (var i = 1; i < rkp.length; i++) {
         if (!hGet_(rkp[i], hkp, 'id', 0)) continue;
-        if (String(hGet_(rkp[i], hkp, 'penerobosemail', 8)) !== email) continue;
+        if (!emailSama_(hGet_(rkp[i], hkp, 'penerobosemail', 8), email)) continue;
         var jid3 = String(hGet_(rkp[i], hkp, 'jenisid', 3) || '');
         list.push({
           id: String(hGet_(rkp[i], hkp, 'id', 0)),
@@ -4505,7 +4505,7 @@ function getKasPenerobos() {
       if (!hGet_(rows[i], h, 'id', 0)) continue;
       if (periodeId && String(hGet_(rows[i], h, 'periodeid', 1)) !== periodeId) continue;
       var email = String(hGet_(rows[i], h, 'penerobosemail', 8) || '');
-      if (!isAdmin && email !== auth.user.email) continue;
+      if (!isAdmin && !emailSama_(email, auth.user.email)) continue;
       var jenisId = String(hGet_(rows[i], h, 'jenisid', 3) || '');
       var anggotaId = String(hGet_(rows[i], h, 'anggotaid', 4) || '');
       result.push({
@@ -4525,10 +4525,36 @@ function getKasPenerobos() {
       });
     }
     result.sort(function(a, b) { return b.tanggal.localeCompare(a.tanggal); });
-    return { success: true, data: result, periode: periode };
+    var diag = _diagnosaSerahTerima_(periode);
+    return { success: true, data: result, periode: periode, dapatSerahTerima: diag.bisa, alasanSerahTerima: diag.alasan };
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+// L2d: jelaskan kenapa serah terima mungkin tak bisa diproses — supaya UI tidak
+// sekadar menyembunyikan tombol tanpa alasan.
+function _diagnosaSerahTerima_(periode) {
+  if (!periode || String(periode.status).toUpperCase() !== CONFIG.STATUS.OPEN) {
+    return { bisa: false, alasan: 'Periode sedang tidak terbuka. Buka periode baru agar serah terima bisa diproses dan dikonfirmasi bendahara.' };
+  }
+  // Harus ada bendahara/admin aktif yang bisa mengonfirmasi (role cocok Sumber Tujuan).
+  var adaTunai = false, adaBank = false;
+  try {
+    getUserList_().forEach(function(u) {
+      if (String(u.status || 'Aktif').toLowerCase() === 'nonaktif') return;
+      if (u.role === CONFIG.ROLES.ADMIN) { adaTunai = true; adaBank = true; }
+      if (u.role === CONFIG.ROLES.BENDAHARA_1) adaTunai = true;
+      if (u.role === CONFIG.ROLES.BENDAHARA_2) adaBank = true;
+    });
+  } catch(e) {}
+  if (!adaTunai && !adaBank) {
+    return { bisa: false, alasan: 'Belum ada Bendahara/Admin aktif yang bisa mengonfirmasi serah terima. Tambahkan pengurus dengan role Bendahara 1 (Tunai) / Bendahara 2 (Bank).' };
+  }
+  var catatan = '';
+  if (!adaTunai) catatan = 'Catatan: belum ada penerima Tunai (Bendahara 1).';
+  else if (!adaBank) catatan = 'Catatan: belum ada penerima Bank (Bendahara 2).';
+  return { bisa: true, alasan: catatan };
 }
 
 // K-cleanup: batalkan baris Kas Penerobos yang nyangkut agar tidak mengunci tutup buku.
@@ -4719,7 +4745,7 @@ function buatSerahTerima(data) {
       for (var i = 1; i < rows.length; i++) {
         if (String(hGet_(rows[i], h, 'id', 0)) !== targetId) continue;
         var email = String(hGet_(rows[i], h, 'penerobosemail', 8) || '');
-        if (!isAdmin && email !== auth.user.email) return { success: false, message: 'Item bukan milik Anda: ' + targetId };
+        if (!isAdmin && !emailSama_(email, auth.user.email)) return { success: false, message: 'Item bukan milik Anda: ' + targetId };
         var status = String(hGet_(rows[i], h, 'status', 9) || '');
         if (status !== 'Aktif') return { success: false, message: 'Item sudah diserahkan: ' + targetId };
         var pid = String(hGet_(rows[i], h, 'periodeid', 1) || '');
@@ -4781,7 +4807,7 @@ function getSerahTerimaList() {
       var sumberTujuan = String(hGet_(rows[i], h, 'sumbertujuan', 5) || '');
       var email = String(hGet_(rows[i], h, 'penerobosemail', 3) || '');
       // Filter: Penerobos hanya lihat milik sendiri; B1 lihat Tunai; B2 lihat Bank; Admin lihat semua
-      if (isPenerobos && email !== auth.user.email) continue;
+      if (isPenerobos && !emailSama_(email, auth.user.email)) continue;
       if (!isPenerobos && role !== CONFIG.ROLES.ADMIN) {
         if (role === CONFIG.ROLES.BENDAHARA_1 && sumberTujuan !== 'Tunai') continue;
         if (role === CONFIG.ROLES.BENDAHARA_2 && sumberTujuan !== 'Bank') continue;
@@ -5029,7 +5055,7 @@ function migrasiTransaksiPenerobos() {
     var userList = getUserList_();
     var penerobosEmails = {};
     for (var u = 0; u < userList.length; u++) {
-      if (userList[u].role === CONFIG.ROLES.PENEROBOS) penerobosEmails[userList[u].email] = true;
+      if (userList[u].role === CONFIG.ROLES.PENEROBOS) penerobosEmails[String(userList[u].email || '').toLowerCase().trim()] = true;
     }
     if (Object.keys(penerobosEmails).length === 0) return { success: true, count: 0, message: 'Tidak ada user PENEROBOS' };
 
@@ -5050,7 +5076,7 @@ function migrasiTransaksiPenerobos() {
 
     for (var i = rows.length - 1; i >= 1; i--) {
       var createdBy = String(hGet_(rows[i], h, 'createdby', 8) || '');
-      if (!penerobosEmails[createdBy]) continue;
+      if (!penerobosEmails[createdBy.toLowerCase().trim()]) continue;
       var rowId = String(hGet_(rows[i], h, 'id', 0) || '');
       if (!rowId) continue;
       var periodeId2 = String(hGet_(rows[i], h, 'periodeid', 1) || '');
