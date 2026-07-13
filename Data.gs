@@ -414,16 +414,43 @@ function deteksiDuplikatPenerobos_() {
   var ss = getSS_();
   var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
   if (!sheet || sheet.getLastRow() < 2) return [];
-  // Indeks Input Penerimaan by id → { batal }.
+  // Indeks Input Penerimaan by id → { batal, ... }, + daftar baris aktif untuk pencocokan.
   var pen = {};
+  var penAktif = []; // untuk deteksi "dicatat langsung"
   var shP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
   if (shP && shP.getLastRow() > 1) {
     var pr = shP.getDataRange().getValues();
     var ph = headerMap_(pr[0]);
     for (var p = 1; p < pr.length; p++) {
       var pidr = String(hGet_(pr[p], ph, 'id', 0) || '');
-      if (pidr) pen[pidr] = { batal: barisDibatalkan_(pr[p], ph) };
+      if (!pidr) continue;
+      var batalP = barisDibatalkan_(pr[p], ph);
+      pen[pidr] = { batal: batalP };
+      if (!batalP) {
+        penAktif.push({
+          id: pidr,
+          tgl: toDateStr_(hGet_(pr[p], ph, 'tanggal', 4)),
+          nominal: Number(hGet_(pr[p], ph, 'nominal', 5)) || 0,
+          sumberKas: String(hGet_(pr[p], ph, 'sumberkas', 6) || ''),
+          jenisId: String(hGet_(pr[p], ph, 'jenisid', 2) || '')
+        });
+      }
     }
+  }
+  // Cari baris Input Penerimaan yang "mungkin pasangan" catatan langsung (±30 hari).
+  function cariPasangan_(tglStr, nominal, sumberKas, jenisId) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tglStr)) return null;
+    var t0 = new Date(tglStr).getTime();
+    for (var q = 0; q < penAktif.length; q++) {
+      var c = penAktif[q];
+      if (c.nominal !== nominal) continue;
+      if (sumberKas && c.sumberKas && c.sumberKas !== sumberKas) continue;
+      if (jenisId && c.jenisId && c.jenisId !== jenisId) continue;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(c.tgl)) continue;
+      var beda = Math.abs(t0 - new Date(c.tgl).getTime()) / 86400000;
+      if (beda <= 30) return { id: c.id, tanggal: c.tgl, nominal: c.nominal };
+    }
+    return null;
   }
   var namaUser = {}; try { getUserList_().forEach(function(u) { namaUser[String(u.email).toLowerCase()] = u.nama || u.email; }); } catch(e) {}
   var rows = sheet.getDataRange().getValues();
@@ -452,24 +479,33 @@ function deteksiDuplikatPenerobos_() {
     var sig = _sigPenerobos_(rows[i], h);
     var kembaran = (status === 'Aktif' && sigMap[sig] && sigMap[sig].length > 1)
       ? sigMap[sig].filter(function(x) { return x !== id; }) : [];
-    var jenisDuplikat = 'BUKAN', risiko = 'NORMAL';
+    var sumberKasRow = String(hGet_(rows[i], h, 'sumberkas', 6) || 'Tunai');
+    var jenisIdRow = String(hGet_(rows[i], h, 'jenisid', 3) || '');
+    var jenisDuplikat = 'BUKAN', risiko = 'NORMAL', kandidatPasangan = null;
     if (status === 'Aktif') {
-      if (trxSumberId) {
-        // Baris migrasi: uang aslinya pernah ada di Input Penerimaan.
-        if (sumberAda && !sumberBatal) { jenisDuplikat = 'SILANG'; risiko = 'AMAN_DIBATALKAN'; }
-        else { jenisDuplikat = 'TIDAK ADA'; risiko = 'BAHAYA_UANG_HILANG'; }
+      if (trxSumberId && sumberAda && !sumberBatal) {
+        // 1) DUPLIKAT SILANG: transaksi sumber masih ada & aktif → uang dobel.
+        jenisDuplikat = 'SILANG'; risiko = 'AMAN_DIBATALKAN';
       } else if (kembaran.length) {
+        // 3) DUPLIKAT INTERNAL: dua baris Kas Penerobos identik.
         jenisDuplikat = 'INTERNAL'; risiko = 'AMAN_DIBATALKAN';
+      } else {
+        // 2) DICATAT LANGSUNG: cari baris Input Penerimaan mirip (±30 hari) — bendahara
+        //    mungkin sudah mencatat langsung saat serah terima gagal. TANDAI, jangan simpulkan.
+        kandidatPasangan = cariPasangan_(tglStr, nominal, sumberKasRow, jenisIdRow);
+        if (kandidatPasangan) { jenisDuplikat = 'DICATAT LANGSUNG'; risiko = 'PERLU_DIKONFIRMASI'; }
+        else if (trxSumberId) { jenisDuplikat = 'TIDAK ADA'; risiko = 'BAHAYA_UANG_HILANG'; }
+        // baris penerobos normal tanpa jejak apa pun → tetap NORMAL (memang belum diserahkan).
       }
     }
     out.push({
       id: id,
       periodeId: String(hGet_(rows[i], h, 'periodeid', 1) || ''),
       tanggal: tglStr,
-      jenisId: String(hGet_(rows[i], h, 'jenisid', 3) || ''),
+      jenisId: jenisIdRow,
       anggotaId: String(hGet_(rows[i], h, 'anggotaid', 4) || ''),
       nominal: nominal,
-      sumberKas: String(hGet_(rows[i], h, 'sumberkas', 6) || 'Tunai'),
+      sumberKas: sumberKasRow,
       penerobosEmail: email,
       penerobosNama: namaUser[email.toLowerCase()] || email,
       status: status,
@@ -479,7 +515,8 @@ function deteksiDuplikatPenerobos_() {
       sumberBatal: sumberBatal,
       jenisDuplikat: jenisDuplikat,
       risiko: risiko,
-      kembaranIds: kembaran
+      kembaranIds: kembaran,
+      kandidatPasangan: kandidatPasangan
     });
   }
   return out;
@@ -4592,13 +4629,15 @@ function getKelolaKasPenerobos() {
 }
 
 // L2c: Batalkan baris Kas Penerobos (duplikat / salah catat / uang batal). SOFT DELETE.
-// Baris TIDAK dihapus. Wajib alasan; risiko BAHAYA wajib ketik ulang nominal.
+// Baris TIDAK dihapus. Wajib alasan (≥15 char); risiko BAHAYA/PERLU_DIKONFIRMASI
+// wajib ketik ulang nominal. Boleh di periode CLOSED (Kas Penerobos tak pernah masuk
+// calculateSaldo) — tapi ditandai PRIVILEGED untuk direviu ketua kelompok.
 function batalkanKasPenerobos(id, alasan, konfirmasiNominal) {
   var auth = requirePerm('penerobos.kelola');
   if (!auth.success) return { success: false, message: auth.message };
   if (!id) return { success: false, message: 'ID wajib.' };
   var alasanBersih = String(alasan || '').trim();
-  if (alasanBersih.length < 10) return { success: false, message: 'Alasan pembatalan wajib diisi (minimal 10 karakter).' };
+  if (alasanBersih.length < 15) return { success: false, message: 'Alasan pembatalan wajib diisi (minimal 15 karakter).' };
   return withLock_(function() {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
@@ -4610,20 +4649,24 @@ function batalkanKasPenerobos(id, alasan, konfirmasiNominal) {
     for (var i = 1; i < rows.length; i++) {
       if (String(hGet_(rows[i], h, 'id', 0)) !== String(id)) continue;
       var status = String(hGet_(rows[i], h, 'status', 9) || 'Aktif');
-      if (status === 'Diserahkan') return { success: false, message: 'Sudah diserahterimakan. Batalkan lewat koreksi transaksi penerimaan, bukan dari sini.' };
+      if (status === 'Diserahkan') return { success: false, message: 'Sudah diserahterimakan — tidak bisa dibatalkan dari sini.' };
       if (status !== 'Aktif') return { success: false, message: 'Baris ini sudah berstatus ' + status + '.' };
-      // Periode baris harus OPEN. Periode CLOSED → arahkan ke prosedur koreksi.
       var pidBaris = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+      // Periode CLOSED BOLEH (kas penerobos tak masuk calculateSaldo) → tandai PRIVILEGED.
+      var periodeTertutup = false;
       var apKP = assertPeriodeOpen_(pidBaris);
-      if (!apKP.ok) return { success: false, message: apKP.message + ' Baris di periode tertutup harus lewat menu Koreksi Kas Penerobos.', periodeTertutup: true };
+      if (!apKP.ok) periodeTertutup = true;
       // Penilaian risiko dari deteksi.
       var risiko = 'PERLU_DITELITI';
       try { var an = deteksiDuplikatPenerobos_(); for (var z = 0; z < an.length; z++) if (an[z].id === String(id)) { risiko = an[z].risiko; break; } } catch(e) {}
       var nominal = Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
-      if (risiko === 'BAHAYA_UANG_HILANG') {
+      if (risiko === 'BAHAYA_UANG_HILANG' || risiko === 'PERLU_DIKONFIRMASI') {
         if (Number(konfirmasiNominal) !== nominal) {
           return { success: false, butuhKonfirmasiNominal: true, nominal: nominal, risiko: risiko,
-            message: 'Transaksi sumber baris ini tidak ditemukan. Membatalkannya berarti uang Rp ' + nominal.toLocaleString('id-ID') + ' hilang total dari sistem. Ketik ulang nominal untuk konfirmasi.' };
+            message: (risiko === 'BAHAYA_UANG_HILANG'
+              ? 'Tidak ada jejak transaksi sumber. Membatalkannya berarti uang Rp ' + nominal.toLocaleString('id-ID') + ' hilang total dari sistem.'
+              : 'Baris ini kemungkinan sudah dicatat langsung oleh bendahara. Cocokkan dulu dengan pasangannya sebelum membatalkan (uang Rp ' + nominal.toLocaleString('id-ID') + ').') +
+              ' Ketik ulang nominal untuk konfirmasi.' };
         }
       }
       var r = i + 1;
@@ -4636,61 +4679,46 @@ function batalkanKasPenerobos(id, alasan, konfirmasiNominal) {
       if (h['dibatalkanby'] !== undefined) sheet.getRange(r, h['dibatalkanby'] + 1).setValue(auth.user.email);
       if (h['dibatalkanat'] !== undefined) sheet.getRange(r, h['dibatalkanat'] + 1).setValue(toDateStr_(new Date()));
       if (h['alasanbatal'] !== undefined) sheet.getRange(r, h['alasanbatal'] + 1).setValue(alasanBersih);
-      logActivityWajib_(auth.user.email, 'BATAL_KAS_PENEROBOS', 'ID: ' + id + ' | ALASAN: ' + alasanBersih + ' | RISIKO: ' + risiko + ' | NILAI: ' + snapshot);
+      // Aksi di periode tertutup ditandai PRIVILEGED agar muncul di Aktivitas Istimewa.
+      var aksiLog = periodeTertutup ? 'PRIVILEGED_BATAL_KAS_PENEROBOS_TUTUP' : 'BATAL_KAS_PENEROBOS';
+      logActivityWajib_(auth.user.email, aksiLog, 'ID: ' + id + ' | ALASAN: ' + alasanBersih + ' | RISIKO: ' + risiko + ' | NILAI: ' + snapshot);
       try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
-      return { success: true };
+      return { success: true, periodeTertutup: periodeTertutup };
     }
     return { success: false, message: 'Kas Penerobos tidak ditemukan.' };
   });
 }
 
-// L2c: Koreksi baris Kas Penerobos di periode TERTUTUP. Hanya penerobos.kelola (ADMIN).
-// Tidak mengubah periode lama menjadi salah — menandai baris 'Dikoreksi' + mencatat
-// PRIVILEGED, lalu melapor bila arsip tutup buku jadi tidak sesuai (perlu tutup ulang).
-function koreksiKasPenerobosPeriodeTertutup(id, alasan, konfirmasiNominal) {
-  var auth = requirePerm('penerobos.kelola');
-  if (!auth.success) return { success: false, message: auth.message };
-  if (!id) return { success: false, message: 'ID wajib.' };
-  var alasanBersih = String(alasan || '').trim();
-  if (alasanBersih.length < 10) return { success: false, message: 'Alasan koreksi wajib diisi (minimal 10 karakter).' };
-  // Wajib ada periode OPEN (koreksi dicatat di sana).
-  var periodeAktif = getPeriodeAktif();
-  if (!periodeAktif) return { success: false, message: 'Butuh periode aktif (OPEN) untuk mencatat koreksi.' };
-  return withLock_(function() {
+// L2c: Aktivitas Istimewa — entri Activity Log yang bersifat PRIVILEGED (untuk direviu
+// ketua kelompok). READ-ONLY. Butuh penerobos.kelola atau user.manage.
+function getAktivitasIstimewa(limit) {
+  var auth = getCurrentUser();
+  if (!auth) return { success: false, message: 'Belum login' };
+  if (!userCan_(auth.role, 'penerobos.kelola') && !userCan_(auth.role, 'user.manage')) {
+    return { success: false, message: 'Akses ditolak' };
+  }
+  try {
+    var lim = Number(limit) || 200;
     var ss = getSS_();
-    var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
-    if (!sheet || sheet.getLastRow() < 2) return { success: false, message: 'Data Kas Penerobos tidak ditemukan.' };
-    ensureColumns_(sheet, ['Dibatalkan By', 'Dibatalkan At', 'Alasan Batal', 'Koreksi Ref']);
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.LOG);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [] };
     var rows = sheet.getDataRange().getValues();
     var h = headerMap_(rows[0]);
-    for (var i = 1; i < rows.length; i++) {
-      if (String(hGet_(rows[i], h, 'id', 0)) !== String(id)) continue;
-      var status = String(hGet_(rows[i], h, 'status', 9) || 'Aktif');
-      if (status !== 'Aktif') return { success: false, message: 'Hanya baris Aktif yang dapat dikoreksi (status: ' + status + ').' };
-      var pidBaris = String(hGet_(rows[i], h, 'periodeid', 1) || '');
-      var apKP = assertPeriodeOpen_(pidBaris);
-      if (apKP.ok) return { success: false, message: 'Baris ini berada di periode OPEN — gunakan menu Batalkan biasa, bukan koreksi periode tertutup.' };
-      var nominal = Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
-      if (Number(konfirmasiNominal) !== nominal) {
-        return { success: false, butuhKonfirmasiNominal: true, nominal: nominal,
-          message: 'Koreksi periode tertutup mengubah uang Rp ' + nominal.toLocaleString('id-ID') + '. Ketik ulang nominal untuk konfirmasi.' };
-      }
-      var korefId = generateID('KOR');
-      var r = i + 1;
-      sheet.getRange(r, h['status'] + 1).setValue('Dikoreksi');
-      if (h['alasanbatal'] !== undefined) sheet.getRange(r, h['alasanbatal'] + 1).setValue(alasanBersih);
-      if (h['dibatalkanby'] !== undefined) sheet.getRange(r, h['dibatalkanby'] + 1).setValue(auth.user.email);
-      if (h['dibatalkanat'] !== undefined) sheet.getRange(r, h['dibatalkanat'] + 1).setValue(toDateStr_(new Date()));
-      if (h['koreksiref'] !== undefined) sheet.getRange(r, h['koreksiref'] + 1).setValue(korefId);
-      var snapshot = JSON.stringify({ id: id, periodeTutup: pidBaris, nominal: nominal, periodeKoreksi: periodeAktif.id });
-      logActivityWajib_(auth.user.email, 'PRIVILEGED_KOREKSI_PENEROBOS_TUTUP', 'Ref: ' + korefId + ' | ALASAN: ' + alasanBersih + ' | ' + snapshot);
-      try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
-      // Sistem TIDAK menutup selisih sendiri; laporkan bahwa arsip mungkin perlu tutup ulang.
-      return { success: true, korefId: korefId,
-        peringatan: 'Baris ditandai Dikoreksi (Ref ' + korefId + '). Saldo akhir periode tertutup mungkin tidak lagi sesuai — arsip tutup buku TIDAK diubah otomatis. Tinjau apakah periode perlu dibuka & ditutup ulang.' };
+    var out = [];
+    for (var i = rows.length - 1; i >= 1 && out.length < lim; i--) {
+      var aksi = String(hGet_(rows[i], h, 'action', 2) || '');
+      if (aksi.indexOf('PRIVILEGED') !== 0) continue;
+      out.push({
+        waktu: toDateStr_(hGet_(rows[i], h, 'timestamp', 0)),
+        email: String(hGet_(rows[i], h, 'user', 1) || ''),
+        aksi: aksi,
+        detail: String(hGet_(rows[i], h, 'detail', 3) || '')
+      });
     }
-    return { success: false, message: 'Kas Penerobos tidak ditemukan.' };
-  });
+    return { success: true, data: out };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
 }
 
 // L2c/L0: Pemeriksaan integritas ringkas — saat ini fokus duplikat Kas Penerobos.
@@ -4701,14 +4729,15 @@ function cekIntegritas() {
     var analisis = deteksiDuplikatPenerobos_();
     var kandidat = analisis.filter(function(a) { return a.status === 'Aktif' && a.jenisDuplikat !== 'BUKAN'; });
     var bahaya = kandidat.filter(function(a) { return a.risiko === 'BAHAYA_UANG_HILANG'; });
+    var konfirmasi = kandidat.filter(function(a) { return a.risiko === 'PERLU_DIKONFIRMASI'; });
     var aman = kandidat.filter(function(a) { return a.risiko === 'AMAN_DIBATALKAN'; });
     var kategori = [{
       kode: 'DUPLIKAT_PENEROBOS',
-      judul: 'Kandidat duplikat Kas Penerobos',
+      judul: 'Kandidat catatan ganda Kas Penerobos',
       jumlah: kandidat.length,
       ringkas: kandidat.length
-        ? (aman.length + ' aman dibatalkan, ' + bahaya.length + ' BAHAYA (uang bisa hilang) — tinjau di Kelola Kas Penerobos.')
-        : 'Tidak ada kandidat duplikat.',
+        ? (aman.length + ' aman dibatalkan, ' + konfirmasi.length + ' perlu dikonfirmasi, ' + bahaya.length + ' BAHAYA (uang bisa hilang) — tinjau di Kelola Kas Penerobos.')
+        : 'Tidak ada kandidat catatan ganda.',
       detail: kandidat
     }];
     return { success: true, kategori: kategori };

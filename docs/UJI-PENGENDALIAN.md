@@ -267,3 +267,24 @@ Tidak ada pembaca keempat yang terlewat.
 | 2 | Buka Kas Penerobos saat tak ada periode OPEN | Banner kuning: "Periode sedang tidak terbuka…". Tombol serah terima tidak muncul, **dengan penjelasan**. |
 | 3 | Tak ada Bendahara/Admin aktif | Banner: "Belum ada Bendahara/Admin aktif…". |
 | 4 | Tutup buku saat masih ada kas penerobos Aktif | Diblokir (`cekSyaratTutupBuku_`). |
+
+---
+
+## L2c (revisi) — Deteksi "dicatat langsung", periode tutup, Aktivitas Istimewa
+
+Melengkapi L2b/L2c sebelumnya dengan penyempurnaan sesuai insiden serah terima:
+- **Kategori baru DICATAT LANGSUNG:** bila tak ada ID sumber cocok TAPI ada baris Input Penerimaan (tanggal ±30 hari, nominal + sumber kas + jenis sama), `deteksiDuplikatPenerobos_` menandai `PERLU_DIKONFIRMASI` (🟡) + menampilkan **kandidat pasangannya** (ID + tanggal + nominal). Tidak menyimpulkan — hanya menandai.
+- **Risiko:** sumber ADA & aktif → 🟢 AMAN; ada pasangan → 🟡 PERLU_DIKONFIRMASI; tak ada jejak → 🔴 BAHAYA. 🟡 & 🔴 sama-sama wajib ketik ulang nominal.
+- **Periode CLOSED boleh dibatalkan** (kas penerobos tak masuk `calculateSaldo`) — dicatat `PRIVILEGED_BATAL_KAS_PENEROBOS_TUTUP` + peringatan UI. (Menu koreksi-tutup lama dihapus.)
+- **Alasan min 15 karakter** + alasan siap-pakai di UI.
+- **Aktivitas Istimewa:** `getAktivitasIstimewa` menampilkan entri log berawalan `PRIVILEGED` untuk direviu ketua.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | Baris `KP_MIG_*` yang sumbernya hilang, tapi ada penerimaan mirip ±30 hari | Badge 🟡 + baris "Mungkin sudah dicatat langsung: <id> …". |
+| 2 | Batalkan baris 🟡/🔴 tanpa ketik ulang nominal | Ditolak (`butuhKonfirmasiNominal`). |
+| 3 | Batalkan dengan alasan < 15 karakter | Ditolak. |
+| 4 | Batalkan baris di periode CLOSED | Boleh (setelah konfirmasi); tercatat `PRIVILEGED_BATAL_KAS_PENEROBOS_TUTUP`. |
+| 5 | Buka Aktivitas Istimewa | Aksi PRIVILEGED muncul (waktu, user, detail). |
+| 6 | `cekIntegritas()` | Ringkas memuat jumlah aman / perlu dikonfirmasi / bahaya. |

@@ -45,9 +45,10 @@ Aplikasi memberi tanda:
   Aplikasi akan meminta Anda mengetik ulang nominal sebagai konfirmasi.
 - 🟡 **Perlu diteliti** — cek manual dulu.
 
-## Koreksi di periode yang sudah ditutup
+## Membatalkan baris di periode yang sudah ditutup
 
-Baris di periode tertutup **tidak bisa dibatalkan biasa** (mengubah buku yang sudah
-dilaporkan itu terlarang). Gunakan menu **Koreksi (periode tutup)** — hanya untuk admin.
-Koreksi ini dicatat sebagai aktivitas istimewa. Aplikasi **tidak** menutup selisih
-sendiri; pengurus yang memutuskan apakah periode perlu dibuka & ditutup ulang.
+Baris Kas Penerobos **boleh** dibatalkan walau periodenya sudah ditutup — karena kas
+penerobos memang **tidak pernah** ikut dihitung dalam saldo periode, jadi membatalkannya
+tidak mengubah angka periode yang sudah dilaporkan. Namun aksi ini dicatat sebagai
+**Aktivitas Istimewa** dan diberi peringatan di layar, supaya bisa ditinjau ketua kelompok
+di menu **Aktivitas Istimewa**.
