@@ -82,6 +82,7 @@ function getCapabilities_() {
     { code: 'view.kasPenerobos', label: 'Lihat: Kas Penerobos', grup: 'lihat' },
     { code: 'view.serahTerima', label: 'Lihat: Serah Terima', grup: 'lihat' },
     { code: 'penerobos.input', label: 'Input Kas Penerobos', grup: 'edit' },
+    { code: 'penerobos.kelola', label: 'Kelola/Batalkan Kas Penerobos (duplikat)', grup: 'edit' },
     { code: 'serahterima.konfirmasi', label: 'Konfirmasi Serah Terima', grup: 'edit' }
   ];
 }
@@ -127,6 +128,7 @@ function getDefaultPermMatrix_() {
     'view.kasPenerobos': [R.ADMIN, R.PENEROBOS],
     'view.serahTerima': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'penerobos.input': [R.ADMIN, R.PENEROBOS],
+    'penerobos.kelola': [R.ADMIN],
     'serahterima.konfirmasi': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2]
   };
   // bentuk matriks { role: { cap: bool } }
@@ -521,6 +523,9 @@ function migrasiPengendalian() {
     shL.appendRow(['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status']);
     log.push('✅ DIBUAT: ' + CONFIG.SHEETS.LAMPIRAN);
   }
+  // L2c: kolom pembatalan & koreksi pada Kas Penerobos (soft delete + jejak).
+  var shKP6 = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+  if (shKP6) { ensureColumns_(shKP6, ['Dibatalkan By', 'Dibatalkan At', 'Alasan Batal', 'Koreksi Ref']); log.push('🔧 Kolom pembatalan/koreksi dipastikan → ' + CONFIG.SHEETS.KAS_PENEROBOS); }
   // Isi No Bukti untuk data lama (berurutan per periode, urut tanggal+ID).
   try { var bk = _backfillNoBukti_(ss); if (bk) log.push('🔢 No Bukti data lama diisi: ' + bk); } catch(e) { log.push('⚠️ backfill No Bukti gagal: ' + e.message); }
 

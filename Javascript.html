@@ -436,7 +436,7 @@ var App = {
       '</div>' : '') +
 
       // T7: pos ketiga — kas di tangan penerobos (belum masuk kas kelompok) + aging.
-      ((u.role !== 'PENEROBOS' && (data.kasPenerobos || 0) > 0) ? this._renderKasPenerobos(data) : '') +
+      ((u.role !== 'PENEROBOS' && ((data.kasPenerobos || 0) > 0 || (data.penerobosTutup && data.penerobosTutup.count > 0))) ? this._renderKasPenerobos(data) : '') +
 
       // T12: pengeluaran menunggu persetujuan (untuk penyetuju).
       ((App.can('trx.approve') && data.menungguApproval && data.menungguApproval.count > 0) ?
@@ -451,7 +451,8 @@ var App = {
 
       this._renderMenuGroups(data) +
 
-      '<div class="app-footer">' + App.escapeHtml(data.namaKelompok || 'Kas Kelompok') + '</div>' +
+      '<div class="app-footer">' + App.escapeHtml(data.namaKelompok || 'Kas Kelompok') +
+        (data.buildDate ? ' <span style="opacity:.6;">· build ' + App.escapeHtml(data.buildDate) + '</span>' : '') + '</div>' +
     '</div>';
 
     document.getElementById('app').innerHTML = html;
@@ -461,6 +462,7 @@ var App = {
   _renderKasPenerobos: function(data) {
     var self = this;
     var agingHari = data.agingHari || 7;
+    var dalamTotal = (data.penerobosDalamTotal !== false); // default true (mode periode)
     var list = (data.penerobosDetail || []).map(function(p) {
       var warn = p.tertuaHari > agingHari;
       return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(0,0,0,.06);">' +
@@ -468,13 +470,25 @@ var App = {
         '<div style="font-weight:700;font-size:12px;">' + self.formatNumber(p.total) + '</div>' +
       '</div>';
     }).join('');
-    return '<div class="card" style="margin-bottom:14px;border-left:4px solid #D97706;">' +
+    // L2b: peringatan baris di periode CLOSED yang masih Aktif.
+    var pt = data.penerobosTutup || { total: 0, count: 0 };
+    var warnTutup = (pt.count > 0)
+      ? '<div style="font-size:11px;color:#B91C1C;background:#FEE2E2;border-radius:6px;padding:6px 8px;margin-top:8px;">⚠ ' + pt.count + ' baris (Rp ' + self.formatNumber(pt.total) + ') masih di luar kas padahal bukunya sudah ditutup. Perlu serah terima / koreksi.</div>'
+      : '';
+    // L2b: label berbeda antara mode periode (komponen Total) vs arsip (di luar Total).
+    var ket = dalamTotal
+      ? 'Belum masuk kas kelompok — menunggu serah terima (peringatan bila &gt; ' + agingHari + ' hari). Termasuk dalam Total Kas.'
+      : '<b>Tidak termasuk</b> dalam Total Kas di atas — Total berasal dari arsip tutup buku (basis waktu berbeda). Uang ini masih menunggu serah terima.';
+    var tombolKelola = App.can('penerobos.kelola')
+      ? '<button class="btn btn-sm btn-outline" style="margin-top:10px;border-color:#D97706;color:#B45309;" onclick="App.pageKelolaKasPenerobos()">🔧 Kelola Kas Penerobos</button>'
+      : '';
+    return '<div class="card" style="margin-bottom:14px;border-left:4px solid ' + (dalamTotal ? '#D97706' : '#B91C1C') + ';">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-        '<div class="kas-label">🤲 Kas di Tangan Penerobos</div>' +
+        '<div class="kas-label">🤲 Kas di Tangan Penerobos' + (dalamTotal ? '' : ' (di luar Total)') + '</div>' +
         '<div style="font-weight:800;">' + self.formatNumber(data.kasPenerobos) + '</div>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Belum masuk kas kelompok — menunggu serah terima (peringatan bila &gt; ' + agingHari + ' hari).</div>' +
-      list +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + ket + '</div>' +
+      list + warnTutup + tombolKelola +
     '</div>';
   },
 
@@ -489,6 +503,7 @@ var App = {
       kelolaBuku: (!isPenerobos && App.can('view.kelolaBuku')) ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '',
       pemeriksaanSaldo: (!isPenerobos && App.can('view.pemeriksaanSaldo')) ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
       kasPenerobos: App.can('view.kasPenerobos') ? '<div class="menu-item" onclick="App.pageKasPenerobos()"><span class="icon">💼</span><span>Kas Penerobos</span></div>' : '',
+      kelolaPenerobos: App.can('penerobos.kelola') ? '<div class="menu-item" onclick="App.pageKelolaKasPenerobos()"><span class="icon">🔧</span><span>Kelola Kas Penerobos</span></div>' : '',
       serahTerima: App.can('view.serahTerima') ? '<div class="menu-item" onclick="App.pageSerahTerima()"><span class="icon">🤲</span><span>Serah Terima</span></div>' : '',
       setoranDesa: (!isPenerobos && App.can('view.setoranDesa')) ? '<div class="menu-item" onclick="App.pageSetoranDesa()"><span class="icon">🏘️</span><span>Setoran Desa</span></div>' : '',
       laporanSetoran: (!isPenerobos && App.can('view.laporanSetoran')) ? '<div class="menu-item" onclick="App.pageLaporanSetoran()"><span class="icon">📈</span><span>Laporan Setoran</span></div>' : '',
@@ -501,7 +516,7 @@ var App = {
       { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah] },
       { judul: '💰 Keuangan', items: [item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
       { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF, item.periode] },
-      { judul: '⚙️ Admin', items: [item.setting, item.kelolaPerangkat] }
+      { judul: '⚙️ Admin', items: [item.setting, item.kelolaPerangkat, item.kelolaPenerobos] }
     ];
     var out = '';
     groups.forEach(function(g) {
@@ -1276,8 +1291,8 @@ var App = {
             '<span class="trx-item-nominal text-success">' + App.formatNumber(d.nominal) + '</span>' +
           '</div>' +
           '<div class="trx-item-meta">' + App.formatDate(d.tanggal) + (d.catatan ? ' · ' + App.escapeHtml(d.catatan) : '') + ' ' + badge + '</div>' +
-          ((d.status === 'Aktif' && canInput && periodeOpen && !d.serahTerimaId) ?
-            '<button class="btn btn-sm btn-danger" style="margin-top:6px;" onclick="App.batalkanKasPenerobos(\'' + self._esc(d.id).replace(/'/g, "\\'") + '\')">🗑️ Batalkan</button>' : '') +
+          ((d.status === 'Aktif' && App.can('penerobos.kelola') && periodeOpen && !d.serahTerimaId) ?
+            '<button class="btn btn-sm btn-danger" style="margin-top:6px;" onclick="App.batalkanKasPenerobos(\'' + self._esc(d.id).replace(/'/g, "\\'") + '\',' + (Number(d.nominal) || 0) + ')">🗑️ Batalkan</button>' : '') +
         '</div>' +
       '</div>';
     }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data</p>';
@@ -1302,16 +1317,109 @@ var App = {
     if (bar) bar.style.display = checked > 0 ? 'block' : 'none';
   },
 
-  // K-cleanup: batalkan baris Kas Penerobos yang nyangkut (agar tak mengunci tutup buku).
-  batalkanKasPenerobos: function(id) {
-    var alasan = prompt('Alasan pembatalan Kas Penerobos ini?');
-    if (alasan === null) return;
-    if (!alasan.trim()) { this.toast('Alasan wajib diisi.'); return; }
+  // L2c: batalkan baris Kas Penerobos (soft delete). Wajib alasan ≥10 karakter.
+  // Bila backend menilai BAHAYA (uang bisa hilang), minta ketik ulang nominal.
+  // onSelesai opsional: fungsi refresh halaman pemanggil (default kembali ke Kas Penerobos).
+  batalkanKasPenerobos: function(id, nominal, onSelesai) {
     var self = this;
+    var alasan = prompt('Alasan pembatalan Kas Penerobos ini? (minimal 10 karakter)\nBaris tidak dihapus, hanya ditandai "Dibatalkan".');
+    if (alasan === null) return;
+    if (alasan.trim().length < 10) { self.toast('Alasan minimal 10 karakter.'); return; }
+    var refresh = (typeof onSelesai === 'function') ? onSelesai : function() { self.pageKasPenerobos(); };
+    function kirim(konfirmasiNominal) {
+      App.srv()
+        .withSuccessHandler(function(r) {
+          if (r && r.success) { self.toast('Kas Penerobos dibatalkan ✓'); refresh(); return; }
+          if (r && r.butuhKonfirmasiNominal) {
+            var ket = prompt('⚠ BAHAYA: transaksi sumber baris ini tidak ditemukan.\nMembatalkannya berarti uang Rp ' + self.formatNumber(r.nominal) +
+              ' HILANG total dari sistem — bukan koreksi hitung ganda.\nPastikan sudah dicocokkan dengan uang fisik & catatan penerobos.\n\nKetik ULANG nominal untuk konfirmasi:');
+            if (ket === null) return;
+            var n = Number(String(ket).replace(/[^0-9]/g, ''));
+            if (n !== Number(r.nominal)) { self.toast('Nominal tidak cocok. Dibatalkan.'); return; }
+            kirim(n);
+            return;
+          }
+          self.toast((r && r.message) || 'Gagal membatalkan.');
+        })
+        .withFailureHandler(function() { self.toast('Gagal terhubung.'); })
+        .batalkanKasPenerobos(id, alasan.trim(), konfirmasiNominal);
+    }
+    kirim(Number(nominal) || '');
+  },
+
+  // L2c: koreksi baris di periode TERTUTUP (hanya lewat sini, bukan Batalkan biasa).
+  koreksiPenerobosTutup: function(id, nominal, onSelesai) {
+    var self = this;
+    var alasan = prompt('KOREKSI baris di periode TERTUTUP.\nAlasan wajib (minimal 10 karakter):');
+    if (alasan === null) return;
+    if (alasan.trim().length < 10) { self.toast('Alasan minimal 10 karakter.'); return; }
+    var ket = prompt('Ketik ULANG nominal Rp ' + self.formatNumber(nominal) + ' untuk konfirmasi koreksi:');
+    if (ket === null) return;
+    var n = Number(String(ket).replace(/[^0-9]/g, ''));
+    if (n !== Number(nominal)) { self.toast('Nominal tidak cocok. Dibatalkan.'); return; }
+    var refresh = (typeof onSelesai === 'function') ? onSelesai : function() { self.pageKelolaKasPenerobos(); };
     App.srv()
-      .withSuccessHandler(function(r) { if (r && r.success) { self.toast('Kas Penerobos dibatalkan ✓'); self.pageKasPenerobos(); } else self.toast((r && r.message) || 'Gagal membatalkan.'); })
+      .withSuccessHandler(function(r) {
+        if (r && r.success) { alert(r.peringatan || 'Koreksi tercatat.'); refresh(); }
+        else self.toast((r && r.message) || 'Gagal mengoreksi.');
+      })
       .withFailureHandler(function() { self.toast('Gagal terhubung.'); })
-      .batalkanKasPenerobos(id, alasan.trim());
+      .koreksiKasPenerobosPeriodeTertutup(id, alasan.trim(), n);
+  },
+
+  // L2c: halaman Kelola Kas Penerobos (Admin) — daftar semua baris + penilaian risiko.
+  pageKelolaKasPenerobos: function() {
+    var self = this;
+    self.showLoading();
+    App.srv()
+      .withSuccessHandler(function(r) { if (r && r.success) self.renderKelolaKasPenerobos(r); else self.showError((r && r.message) || 'Gagal memuat'); })
+      .withFailureHandler(function() { self.showError('Gagal terhubung.'); })
+      .getKelolaKasPenerobos();
+  },
+
+  renderKelolaKasPenerobos: function(res) {
+    var self = this;
+    var agingHari = res.agingHari || 7;
+    function badge(a) {
+      if (a.status !== 'Aktif') return '<span class="badge badge-muted">' + self.escapeHtml(a.status) + '</span>';
+      if (a.risiko === 'AMAN_DIBATALKAN') return '<span class="badge" style="background:#DCFCE7;color:#166534;">🟢 Aman dibatalkan</span>';
+      if (a.risiko === 'BAHAYA_UANG_HILANG') return '<span class="badge" style="background:#FEE2E2;color:#B91C1C;">🔴 Bahaya: uang hilang</span>';
+      if (a.jenisDuplikat !== 'BUKAN') return '<span class="badge" style="background:#FEF3C7;color:#92400E;">🟡 Perlu diteliti</span>';
+      return '<span class="badge badge-muted">—</span>';
+    }
+    function sumberTxt(a) {
+      if (!a.trxSumberId) return '<span style="color:var(--text-muted);">— (input langsung)</span>';
+      if (a.sumberAda && !a.sumberBatal) return '<span style="color:#166534;">ADA</span> · ' + self.escapeHtml(a.trxSumberId);
+      if (a.sumberBatal) return '<span style="color:#B91C1C;">DIBATALKAN</span> · ' + self.escapeHtml(a.trxSumberId);
+      return '<span style="color:#B91C1C;">TIDAK DITEMUKAN</span> · ' + self.escapeHtml(a.trxSumberId);
+    }
+    var rows = (res.data || []).map(function(a) {
+      var warnUmur = (a.status === 'Aktif' && a.umurHari > agingHari);
+      var bisaBatal = (a.status === 'Aktif' && !a.periodeTertutup);
+      var bahaya = (a.risiko === 'BAHAYA_UANG_HILANG');
+      var idJs = self._esc(a.id).replace(/'/g, "\\'");
+      var aksi = '';
+      if (a.status === 'Aktif' && a.periodeTertutup) {
+        aksi = '<button class="btn btn-sm" style="background:#7C2D12;color:#fff;" onclick="App.koreksiPenerobosTutup(\'' + idJs + '\',' + (Number(a.nominal) || 0) + ')">Koreksi (periode tutup)</button>';
+      } else if (bisaBatal) {
+        aksi = '<button class="btn btn-sm ' + (bahaya ? 'btn-danger' : 'btn-warning') + '" onclick="App.batalkanKasPenerobos(\'' + idJs + '\',' + (Number(a.nominal) || 0) + ', function(){App.pageKelolaKasPenerobos();})">Batalkan</button>';
+      }
+      return '<div class="card" style="margin-bottom:8px;padding:10px 12px;">' +
+        '<div style="display:flex;justify-content:space-between;gap:8px;">' +
+          '<div style="min-width:0;">' +
+            '<div style="font-weight:700;">' + self.escapeHtml(a.jenis || '-') + (a.anggota ? ' · ' + self.escapeHtml(a.anggota) : '') + '</div>' +
+            '<div style="font-size:12px;color:var(--text-muted);">' + self.formatDate(a.tanggal) +
+              (warnUmur ? ' · <span style="color:#B91C1C;font-weight:700;">⚠ ' + a.umurHari + ' hari</span>' : ' · ' + a.umurHari + ' hari') +
+              ' · ' + self.escapeHtml(a.penerobosNama) + ' · ' + self.escapeHtml(a.sumberKas) + '</div>' +
+            '<div style="font-size:11px;color:var(--text-muted);">Periode ' + self.escapeHtml(a.periodeId) + (a.periodeTertutup ? ' <span style="color:#B91C1C;">(TUTUP)</span>' : '') + ' · Sumber: ' + sumberTxt(a) + '</div>' +
+          '</div>' +
+          '<div style="text-align:right;white-space:nowrap;"><div style="font-weight:800;">' + self.formatNumber(a.nominal) + '</div>' + badge(a) + '</div>' +
+        '</div>' +
+        (aksi ? '<div style="margin-top:8px;">' + aksi + '</div>' : '') +
+      '</div>';
+    }).join('') || '<p class="text-muted text-small" style="padding:12px 0;">Belum ada data.</p>';
+    var info = '<div class="info-box" style="margin-bottom:12px;">Kelola & batalkan duplikat Kas Penerobos. <b>Tidak ada penghapusan</b> — hanya ditandai. Baris 🔴 <b>Bahaya</b> perlu ketik ulang nominal. Baris di periode <b>tutup</b> hanya bisa dikoreksi (bukan dibatalkan).</div>';
+    document.getElementById('app').innerHTML = this.pageWrapper('Kelola Kas Penerobos', info + rows);
   },
 
   _showFormKasPenerobos: function() {

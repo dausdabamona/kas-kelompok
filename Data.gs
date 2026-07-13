@@ -385,6 +385,135 @@ function kasPenerobosAktif_(periodeId) {
   return out;
 }
 
+// L2c: ID transaksi sumber sebuah baris Kas Penerobos.
+// Baris hasil migrasi berformat 'KP_MIG_<idSumber>'; awalan dibuang.
+// Baris penerobos normal (TRX_*) TIDAK diturunkan dari Input Penerimaan → ''.
+function _trxSumberIdPenerobos_(kpId) {
+  var s = String(kpId || '');
+  var pfx = 'KP_MIG_';
+  if (s.indexOf(pfx) === 0) return s.substring(pfx.length);
+  return '';
+}
+
+// Tanda tangan baris untuk mendeteksi duplikat internal (dua baris identik).
+function _sigPenerobos_(row, h) {
+  return [
+    String(hGet_(row, h, 'periodeid', 1) || ''),
+    toDateStr_(hGet_(row, h, 'tanggal', 2)),
+    String(hGet_(row, h, 'jenisid', 3) || ''),
+    String(hGet_(row, h, 'anggotaid', 4) || ''),
+    String(Number(hGet_(row, h, 'nominal', 5)) || 0),
+    String(hGet_(row, h, 'sumberkas', 6) || ''),
+    String(hGet_(row, h, 'penerobosemail', 8) || '').toLowerCase()
+  ].join('|');
+}
+
+// L2c: Deteksi kandidat duplikat Kas Penerobos + telusuri transaksi sumbernya.
+// READ-ONLY. Mengembalikan analisis PER BARIS (semua status) — pemanggil menyaring.
+function deteksiDuplikatPenerobos_() {
+  var ss = getSS_();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  // Indeks Input Penerimaan by id → { batal }.
+  var pen = {};
+  var shP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+  if (shP && shP.getLastRow() > 1) {
+    var pr = shP.getDataRange().getValues();
+    var ph = headerMap_(pr[0]);
+    for (var p = 1; p < pr.length; p++) {
+      var pidr = String(hGet_(pr[p], ph, 'id', 0) || '');
+      if (pidr) pen[pidr] = { batal: barisDibatalkan_(pr[p], ph) };
+    }
+  }
+  var namaUser = {}; try { getUserList_().forEach(function(u) { namaUser[String(u.email).toLowerCase()] = u.nama || u.email; }); } catch(e) {}
+  var rows = sheet.getDataRange().getValues();
+  var h = headerMap_(rows[0]);
+  var today = new Date();
+  // Kelompokkan tanda tangan baris Aktif untuk duplikat internal.
+  var sigMap = {};
+  for (var s1 = 1; s1 < rows.length; s1++) {
+    if (String(hGet_(rows[s1], h, 'status', 9)) !== 'Aktif') continue;
+    var sg = _sigPenerobos_(rows[s1], h);
+    (sigMap[sg] = sigMap[sg] || []).push(String(hGet_(rows[s1], h, 'id', 0) || ''));
+  }
+  var out = [];
+  for (var i = 1; i < rows.length; i++) {
+    var id = String(hGet_(rows[i], h, 'id', 0) || '');
+    if (!id) continue;
+    var status = String(hGet_(rows[i], h, 'status', 9) || 'Aktif');
+    var nominal = Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
+    var email = String(hGet_(rows[i], h, 'penerobosemail', 8) || '');
+    var tglStr = toDateStr_(hGet_(rows[i], h, 'tanggal', 2));
+    var umur = 0;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(tglStr)) { umur = Math.floor((today.getTime() - new Date(tglStr).getTime()) / 86400000); if (umur < 0) umur = 0; }
+    var trxSumberId = _trxSumberIdPenerobos_(id);
+    var sumberAda = false, sumberBatal = false;
+    if (trxSumberId && pen[trxSumberId]) { sumberAda = true; sumberBatal = !!pen[trxSumberId].batal; }
+    var sig = _sigPenerobos_(rows[i], h);
+    var kembaran = (status === 'Aktif' && sigMap[sig] && sigMap[sig].length > 1)
+      ? sigMap[sig].filter(function(x) { return x !== id; }) : [];
+    var jenisDuplikat = 'BUKAN', risiko = 'NORMAL';
+    if (status === 'Aktif') {
+      if (trxSumberId) {
+        // Baris migrasi: uang aslinya pernah ada di Input Penerimaan.
+        if (sumberAda && !sumberBatal) { jenisDuplikat = 'SILANG'; risiko = 'AMAN_DIBATALKAN'; }
+        else { jenisDuplikat = 'TIDAK ADA'; risiko = 'BAHAYA_UANG_HILANG'; }
+      } else if (kembaran.length) {
+        jenisDuplikat = 'INTERNAL'; risiko = 'AMAN_DIBATALKAN';
+      }
+    }
+    out.push({
+      id: id,
+      periodeId: String(hGet_(rows[i], h, 'periodeid', 1) || ''),
+      tanggal: tglStr,
+      jenisId: String(hGet_(rows[i], h, 'jenisid', 3) || ''),
+      anggotaId: String(hGet_(rows[i], h, 'anggotaid', 4) || ''),
+      nominal: nominal,
+      sumberKas: String(hGet_(rows[i], h, 'sumberkas', 6) || 'Tunai'),
+      penerobosEmail: email,
+      penerobosNama: namaUser[email.toLowerCase()] || email,
+      status: status,
+      umurHari: umur,
+      trxSumberId: trxSumberId,
+      sumberAda: sumberAda,
+      sumberBatal: sumberBatal,
+      jenisDuplikat: jenisDuplikat,
+      risiko: risiko,
+      kembaranIds: kembaran
+    });
+  }
+  return out;
+}
+
+// L2b: total baris Kas Penerobos berstatus Aktif yang periodenya sudah CLOSED.
+// Uang masih di tangan penerobos padahal bukunya sudah ditutup — perlu diperingatkan.
+function penerobosAktifPeriodeTertutup_() {
+  var out = { total: 0, count: 0 };
+  var ss = getSS_();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+  if (!sheet || sheet.getLastRow() < 2) return out;
+  // Kumpulan periode yang berstatus OPEN.
+  var openSet = {};
+  var shP = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+  if (shP && shP.getLastRow() > 1) {
+    var pr = shP.getDataRange().getValues();
+    var ph = headerMap_(pr[0]);
+    for (var p = 1; p < pr.length; p++) {
+      if (String(hGet_(pr[p], ph, 'status', 4)).toUpperCase() === CONFIG.STATUS.OPEN) openSet[String(pr[p][0])] = true;
+    }
+  }
+  var rows = sheet.getDataRange().getValues();
+  var h = headerMap_(rows[0]);
+  for (var i = 1; i < rows.length; i++) {
+    if (String(hGet_(rows[i], h, 'status', 9)) !== 'Aktif') continue;
+    var pid = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+    if (openSet[pid]) continue; // periode masih OPEN → bukan "di luar buku"
+    out.total += Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
+    out.count++;
+  }
+  return out;
+}
+
 function getDashboardData() {
   try {
     var auth = checkAuth();
@@ -409,22 +538,24 @@ function getDashboardData() {
         var sheetK = ss.getSheetByName(CONFIG.SHEETS.KELOMPOK);
         if (sheetK && sheetK.getLastRow() > 1) namaKelompok = sheetK.getRange(2, 2).getValue() || namaKelompok;
       } catch(e) {}
-      var tunai = 0, bank = 0, peringatan = '';
+      var tunai = 0, bank = 0, peringatan = '', sumberSaldo = 'kosong';
       if (periode) {
         var s = calculateSaldo(periode.id, periode);   // biarkan error naik — jangan ditelan
         tunai = s.tunai; bank = s.bank;
+        sumberSaldo = 'periode';
       } else {
         // Tidak ada periode OPEN → JANGAN hitung ulang. Pakai arsip tutup buku.
         var akhir = getSaldoTutupBukuTerakhir_();
         if (akhir) {
           tunai = akhir.tunai; bank = akhir.bank;
+          sumberSaldo = 'arsip';
           peringatan = 'Periode sudah ditutup (' + akhir.tanggalTutup + '). Angka di bawah adalah ' +
                        'saldo akhir tutup buku. Buka periode baru untuk mulai mencatat.';
         } else {
           peringatan = 'Belum ada periode aktif. Buka periode terlebih dahulu.';
         }
       }
-      saldoData = { namaKelompok: namaKelompok, tunai: tunai, bank: bank, peringatan: peringatan };
+      saldoData = { namaKelompok: namaKelompok, tunai: tunai, bank: bank, peringatan: peringatan, sumberSaldo: sumberSaldo };
       try { cache.put(cacheKey, JSON.stringify(saldoData), 60); } catch(e) {}
     }
 
@@ -442,27 +573,41 @@ function getDashboardData() {
     var draft = { count: 0, total: 0 };
     try { var dp2 = getDraftPengeluaran(); if (dp2 && dp2.success) { draft.count = (dp2.data || []).length; draft.total = dp2.total || 0; } } catch(e) {}
 
-    // T7: pos ketiga — kas di tangan penerobos (belum masuk kas kelompok).
+    // T7/L2b: pos ketiga — kas di tangan penerobos (belum masuk kas kelompok).
+    // Mode 'periode' → kas penerobos periode itu, KOMPONEN Total Kas.
+    // Mode 'arsip'/'kosong' → kas penerobos "saat ini" lintas periode, DI LUAR Total
+    //   (karena Total berasal dari snapshot arsip beku — basis waktu berbeda).
+    var sumberSaldo = saldoData.sumberSaldo || (periode ? 'periode' : 'kosong');
     var kp = { total: 0, perPenerobos: [] };
-    try { kp = kasPenerobosAktif_(periodeId); } catch(e) {}
+    try { kp = kasPenerobosAktif_(sumberSaldo === 'periode' ? periodeId : null); } catch(e) {}
+    var penerobosDalamTotal = (sumberSaldo === 'periode');
+    // L2b: baris Kas Penerobos di periode CLOSED yang masih Aktif (uang di luar buku).
+    var penerobosTutup = { total: 0, count: 0 };
+    try { penerobosTutup = penerobosAktifPeriodeTertutup_(); } catch(e) {}
     var agingHari = 7;
     try { var av = PropertiesService.getScriptProperties().getProperty('AGING_HARI'); if (av) agingHari = Number(av) || 7; } catch(e) {}
+    var buildDate = '';
+    try { buildDate = PropertiesService.getScriptProperties().getProperty('BUILD_DATE') || ''; } catch(e) {}
 
     return {
       success: true,
       user: auth.user,
       periode: periode,
+      sumberSaldo: sumberSaldo,
       namaKelompok: saldoData.namaKelompok,
       kasTunai: saldoData.tunai,
       kasBank: saldoData.bank,
       kasKelompok: saldoData.tunai + saldoData.bank,
       kasPenerobos: kp.total,
       penerobosDetail: kp.perPenerobos,
+      penerobosDalamTotal: penerobosDalamTotal,
+      penerobosTutup: penerobosTutup,
       agingHari: agingHari,
-      totalKas: saldoData.tunai + saldoData.bank + kp.total,
+      totalKas: saldoData.tunai + saldoData.bank + (penerobosDalamTotal ? kp.total : 0),
       belumDirincikanCount: belumCount,
       menungguApproval: draft,
-      peringatan: saldoData.peringatan || ''
+      peringatan: saldoData.peringatan || '',
+      buildDate: buildDate
     };
   } catch(e) {
     return { success: false, message: e.message };
@@ -4388,11 +4533,46 @@ function getKasPenerobos() {
 
 // K-cleanup: batalkan baris Kas Penerobos yang nyangkut agar tidak mengunci tutup buku.
 // Hanya baris berstatus Aktif yang belum diserahterimakan. Wajib alasan.
-function batalkanKasPenerobos(id, alasan) {
-  var auth = requirePerm('penerobos.input');
+// L2c: halaman Kelola Kas Penerobos (Admin) — READ-ONLY.
+// Menampilkan SELURUH baris (semua periode & status) + penilaian risiko duplikat.
+function getKelolaKasPenerobos() {
+  var auth = requirePerm('penerobos.kelola');
+  if (!auth.success) return { success: false, message: auth.message };
+  try {
+    var ss = getSS_();
+    var analisis = deteksiDuplikatPenerobos_();
+    // Peta nama jenis & anggota & status periode.
+    var jenisMap = {}, angMap = {}, periodeStatus = {};
+    var shM = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (shM) { var mr = shM.getDataRange().getValues(); for (var i = 1; i < mr.length; i++) if (mr[i][0]) jenisMap[String(mr[i][0])] = String(mr[i][1] || ''); }
+    var shA = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (shA) { var ar = shA.getDataRange().getValues(); for (var j = 1; j < ar.length; j++) if (ar[j][0]) angMap[String(ar[j][0])] = String(ar[j][1] || ''); }
+    var shP = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+    if (shP) { var pr = shP.getDataRange().getValues(); var ph = headerMap_(pr[0]); for (var k = 1; k < pr.length; k++) if (pr[k][0]) periodeStatus[String(pr[k][0])] = String(hGet_(pr[k], ph, 'status', 4) || '').toUpperCase(); }
+    var agingHari = 7;
+    try { var av = PropertiesService.getScriptProperties().getProperty('AGING_HARI'); if (av) agingHari = Number(av) || 7; } catch(e) {}
+    var data = analisis.map(function(a) {
+      a.jenis = jenisMap[a.jenisId] || a.jenisId;
+      a.anggota = angMap[a.anggotaId] || '';
+      a.periodeStatus = periodeStatus[a.periodeId] || '';
+      a.periodeTertutup = (a.periodeStatus === CONFIG.STATUS.CLOSED);
+      return a;
+    });
+    data.sort(function(x, y) { return String(y.tanggal).localeCompare(String(x.tanggal)); });
+    return { success: true, data: data, agingHari: agingHari };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// L2c: Batalkan baris Kas Penerobos (duplikat / salah catat / uang batal). SOFT DELETE.
+// Baris TIDAK dihapus. Wajib alasan; risiko BAHAYA wajib ketik ulang nominal.
+function batalkanKasPenerobos(id, alasan, konfirmasiNominal) {
+  var auth = requirePerm('penerobos.kelola');
   if (!auth.success) return { success: false, message: auth.message };
   if (!id) return { success: false, message: 'ID wajib.' };
-  if (!String(alasan || '').trim()) return { success: false, message: 'Alasan pembatalan wajib diisi.' };
+  var alasanBersih = String(alasan || '').trim();
+  if (alasanBersih.length < 10) return { success: false, message: 'Alasan pembatalan wajib diisi (minimal 10 karakter).' };
   return withLock_(function() {
     var ss = getSS_();
     var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
@@ -4403,27 +4583,112 @@ function batalkanKasPenerobos(id, alasan) {
     var h = headerMap_(rows[0]);
     for (var i = 1; i < rows.length; i++) {
       if (String(hGet_(rows[i], h, 'id', 0)) !== String(id)) continue;
-      var email = String(hGet_(rows[i], h, 'penerobosemail', 8) || '');
-      var isAdmin = (auth.user.role === CONFIG.ROLES.ADMIN);
-      if (!isAdmin && email !== auth.user.email) return { success: false, message: 'Hanya penerobos pemilik atau ADMIN yang boleh membatalkan.' };
       var status = String(hGet_(rows[i], h, 'status', 9) || 'Aktif');
+      if (status === 'Diserahkan') return { success: false, message: 'Sudah diserahterimakan. Batalkan lewat koreksi transaksi penerimaan, bukan dari sini.' };
       if (status !== 'Aktif') return { success: false, message: 'Baris ini sudah berstatus ' + status + '.' };
-      if (String(hGet_(rows[i], h, 'serahterimaid', 10) || '').trim()) return { success: false, message: 'Baris ini sudah masuk serah terima; tidak bisa dibatalkan.' };
-      // K2/T2: hanya boleh membatalkan bila periode baris masih OPEN.
-      var apKP = assertPeriodeOpen_(String(hGet_(rows[i], h, 'periodeid', 1) || ''));
-      if (!apKP.ok) return { success: false, message: apKP.message };
+      // Periode baris harus OPEN. Periode CLOSED → arahkan ke prosedur koreksi.
+      var pidBaris = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+      var apKP = assertPeriodeOpen_(pidBaris);
+      if (!apKP.ok) return { success: false, message: apKP.message + ' Baris di periode tertutup harus lewat menu Koreksi Kas Penerobos.', periodeTertutup: true };
+      // Penilaian risiko dari deteksi.
+      var risiko = 'PERLU_DITELITI';
+      try { var an = deteksiDuplikatPenerobos_(); for (var z = 0; z < an.length; z++) if (an[z].id === String(id)) { risiko = an[z].risiko; break; } } catch(e) {}
+      var nominal = Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
+      if (risiko === 'BAHAYA_UANG_HILANG') {
+        if (Number(konfirmasiNominal) !== nominal) {
+          return { success: false, butuhKonfirmasiNominal: true, nominal: nominal, risiko: risiko,
+            message: 'Transaksi sumber baris ini tidak ditemukan. Membatalkannya berarti uang Rp ' + nominal.toLocaleString('id-ID') + ' hilang total dari sistem. Ketik ulang nominal untuk konfirmasi.' };
+        }
+      }
       var r = i + 1;
-      var snapshot = JSON.stringify({ id: id, nominal: hGet_(rows[i], h, 'nominal', 5), email: email });
+      var snapshot = JSON.stringify({
+        id: id, periodeId: pidBaris, nominal: nominal,
+        jenisId: String(hGet_(rows[i], h, 'jenisid', 3) || ''), anggotaId: String(hGet_(rows[i], h, 'anggotaid', 4) || ''),
+        sumberKas: String(hGet_(rows[i], h, 'sumberkas', 6) || ''), penerobosEmail: String(hGet_(rows[i], h, 'penerobosemail', 8) || '')
+      });
       sheet.getRange(r, h['status'] + 1).setValue('Dibatalkan');
       if (h['dibatalkanby'] !== undefined) sheet.getRange(r, h['dibatalkanby'] + 1).setValue(auth.user.email);
       if (h['dibatalkanat'] !== undefined) sheet.getRange(r, h['dibatalkanat'] + 1).setValue(toDateStr_(new Date()));
-      if (h['alasanbatal'] !== undefined) sheet.getRange(r, h['alasanbatal'] + 1).setValue(String(alasan).trim());
-      logActivityWajib_(auth.user.email, 'BATAL_KAS_PENEROBOS', 'Alasan: ' + String(alasan).trim() + ' | ' + snapshot);
+      if (h['alasanbatal'] !== undefined) sheet.getRange(r, h['alasanbatal'] + 1).setValue(alasanBersih);
+      logActivityWajib_(auth.user.email, 'BATAL_KAS_PENEROBOS', 'ID: ' + id + ' | ALASAN: ' + alasanBersih + ' | RISIKO: ' + risiko + ' | NILAI: ' + snapshot);
       try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
       return { success: true };
     }
     return { success: false, message: 'Kas Penerobos tidak ditemukan.' };
   });
+}
+
+// L2c: Koreksi baris Kas Penerobos di periode TERTUTUP. Hanya penerobos.kelola (ADMIN).
+// Tidak mengubah periode lama menjadi salah — menandai baris 'Dikoreksi' + mencatat
+// PRIVILEGED, lalu melapor bila arsip tutup buku jadi tidak sesuai (perlu tutup ulang).
+function koreksiKasPenerobosPeriodeTertutup(id, alasan, konfirmasiNominal) {
+  var auth = requirePerm('penerobos.kelola');
+  if (!auth.success) return { success: false, message: auth.message };
+  if (!id) return { success: false, message: 'ID wajib.' };
+  var alasanBersih = String(alasan || '').trim();
+  if (alasanBersih.length < 10) return { success: false, message: 'Alasan koreksi wajib diisi (minimal 10 karakter).' };
+  // Wajib ada periode OPEN (koreksi dicatat di sana).
+  var periodeAktif = getPeriodeAktif();
+  if (!periodeAktif) return { success: false, message: 'Butuh periode aktif (OPEN) untuk mencatat koreksi.' };
+  return withLock_(function() {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
+    if (!sheet || sheet.getLastRow() < 2) return { success: false, message: 'Data Kas Penerobos tidak ditemukan.' };
+    ensureColumns_(sheet, ['Dibatalkan By', 'Dibatalkan At', 'Alasan Batal', 'Koreksi Ref']);
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(hGet_(rows[i], h, 'id', 0)) !== String(id)) continue;
+      var status = String(hGet_(rows[i], h, 'status', 9) || 'Aktif');
+      if (status !== 'Aktif') return { success: false, message: 'Hanya baris Aktif yang dapat dikoreksi (status: ' + status + ').' };
+      var pidBaris = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+      var apKP = assertPeriodeOpen_(pidBaris);
+      if (apKP.ok) return { success: false, message: 'Baris ini berada di periode OPEN — gunakan menu Batalkan biasa, bukan koreksi periode tertutup.' };
+      var nominal = Number(hGet_(rows[i], h, 'nominal', 5)) || 0;
+      if (Number(konfirmasiNominal) !== nominal) {
+        return { success: false, butuhKonfirmasiNominal: true, nominal: nominal,
+          message: 'Koreksi periode tertutup mengubah uang Rp ' + nominal.toLocaleString('id-ID') + '. Ketik ulang nominal untuk konfirmasi.' };
+      }
+      var korefId = generateID('KOR');
+      var r = i + 1;
+      sheet.getRange(r, h['status'] + 1).setValue('Dikoreksi');
+      if (h['alasanbatal'] !== undefined) sheet.getRange(r, h['alasanbatal'] + 1).setValue(alasanBersih);
+      if (h['dibatalkanby'] !== undefined) sheet.getRange(r, h['dibatalkanby'] + 1).setValue(auth.user.email);
+      if (h['dibatalkanat'] !== undefined) sheet.getRange(r, h['dibatalkanat'] + 1).setValue(toDateStr_(new Date()));
+      if (h['koreksiref'] !== undefined) sheet.getRange(r, h['koreksiref'] + 1).setValue(korefId);
+      var snapshot = JSON.stringify({ id: id, periodeTutup: pidBaris, nominal: nominal, periodeKoreksi: periodeAktif.id });
+      logActivityWajib_(auth.user.email, 'PRIVILEGED_KOREKSI_PENEROBOS_TUTUP', 'Ref: ' + korefId + ' | ALASAN: ' + alasanBersih + ' | ' + snapshot);
+      try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
+      // Sistem TIDAK menutup selisih sendiri; laporkan bahwa arsip mungkin perlu tutup ulang.
+      return { success: true, korefId: korefId,
+        peringatan: 'Baris ditandai Dikoreksi (Ref ' + korefId + '). Saldo akhir periode tertutup mungkin tidak lagi sesuai — arsip tutup buku TIDAK diubah otomatis. Tinjau apakah periode perlu dibuka & ditutup ulang.' };
+    }
+    return { success: false, message: 'Kas Penerobos tidak ditemukan.' };
+  });
+}
+
+// L2c/L0: Pemeriksaan integritas ringkas — saat ini fokus duplikat Kas Penerobos.
+function cekIntegritas() {
+  var auth = requirePerm('penerobos.kelola');
+  if (!auth.success) return { success: false, message: auth.message };
+  try {
+    var analisis = deteksiDuplikatPenerobos_();
+    var kandidat = analisis.filter(function(a) { return a.status === 'Aktif' && a.jenisDuplikat !== 'BUKAN'; });
+    var bahaya = kandidat.filter(function(a) { return a.risiko === 'BAHAYA_UANG_HILANG'; });
+    var aman = kandidat.filter(function(a) { return a.risiko === 'AMAN_DIBATALKAN'; });
+    var kategori = [{
+      kode: 'DUPLIKAT_PENEROBOS',
+      judul: 'Kandidat duplikat Kas Penerobos',
+      jumlah: kandidat.length,
+      ringkas: kandidat.length
+        ? (aman.length + ' aman dibatalkan, ' + bahaya.length + ' BAHAYA (uang bisa hilang) — tinjau di Kelola Kas Penerobos.')
+        : 'Tidak ada kandidat duplikat.',
+      detail: kandidat
+    }];
+    return { success: true, kategori: kategori };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
 }
 
 function buatSerahTerima(data) {

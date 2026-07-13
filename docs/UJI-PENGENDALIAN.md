@@ -219,3 +219,30 @@ Tidak ada pembaca keempat yang terlewat.
 | 3 | Tutup Buku setelah #1 | Tak diblokir "belum dirincikan". |
 | 4 | Semua periode CLOSED → dashboard | Saldo = arsip tutup buku + peringatan kuning; tombol Input Transaksi hilang. |
 | 5 | Kas Penerobos → `batalkanKasPenerobos` (periode OPEN) | Hilang dari pos penerobos; tutup buku tak terblokir. Periode CLOSED → ditolak. |
+
+---
+
+## L2b & L2c — Tampilan Kas Penerobos + Kelola Duplikat (Admin)
+
+### Prasyarat
+- **Run → `migrasiPengendalian`** (menambah kolom `Dibatalkan By/At`, `Alasan Batal`, `Koreksi Ref` di sheet `Kas Penerobos`).
+- Set Script Property **`BUILD_DATE`** (mis. tanggal deploy) agar penanda versi muncul di footer — memudahkan deteksi HTML tertinggal saat deploy.
+- Kapabilitas baru **`penerobos.kelola`** (default hanya ADMIN) — cek di Pengaturan → Hak Akses.
+
+### Implementasi
+- **L2b:** `getDashboardData` mengirim `sumberSaldo` ('periode'/'arsip'/'kosong'), `penerobosDalamTotal`, `penerobosTutup` (baris Aktif di periode CLOSED), `buildDate`. Kartu **Kas di Tangan Penerobos** tampil di dua mode: mode periode = komponen Total Kas; mode arsip = **di luar** Total (label tegas + garis merah). Peringatan merah bila ada baris di periode tutup. Aging merah bila umur > `AGING_HARI`.
+- **L2c:** `deteksiDuplikatPenerobos_` (READ-ONLY) menilai tiap baris: SILANG (sumber masih aktif → 🟢 aman), INTERNAL (kembar → 🟢 aman), sumber hilang/batal → 🔴 bahaya. `getKelolaKasPenerobos` (cap `penerobos.kelola`) menampilkan semua baris + penilaian + status transaksi sumber. `batalkanKasPenerobos(id, alasan, konfirmasiNominal)` soft-delete (alasan ≥10 char; 🔴 wajib ketik ulang nominal; periode CLOSED ditolak → arahkan ke koreksi; `Diserahkan` ditolak). `koreksiKasPenerobosPeriodeTertutup` menandai `Dikoreksi` + log PRIVILEGED + peringatan arsip. `cekIntegritas` menyertakan kategori duplikat penerobos.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | Deploy ulang + set `BUILD_DATE`, buka dashboard | Kartu Kas Penerobos muncul; footer menampilkan `build <tgl>`; **tidak ada** `undefined`. |
+| 2 | Dashboard tanpa periode OPEN | Total Kas = arsip (Tunai+Bank) saja. Kartu penerobos tampil **terpisah**, berlabel "tidak termasuk Total Kas". |
+| 3 | Dashboard dengan periode OPEN | Total Kas = Tunai + Bank + Penerobos periode itu. |
+| 4 | Buka Kelola Kas Penerobos | Semua baris tampil; kolom Sumber = ADA/DIBATALKAN/TIDAK DITEMUKAN; baris `KP_MIG_*` diberi badge 🔴/🟡. |
+| 5 | Batalkan tanpa alasan (atau <10 char) | Ditolak. |
+| 6 | Batalkan baris 🔴 tanpa ketik ulang nominal | Ditolak (`butuhKonfirmasiNominal`). |
+| 7 | Batalkan baris di periode CLOSED | Ditolak; diarahkan ke menu Koreksi. |
+| 8 | Batalkan satu baris (periode OPEN, skenario uji) | Status → Dibatalkan; hilang dari kartu dashboard & Total; **baris tetap ada di sheet**; Activity Log memuat alasan + snapshot + RISIKO. |
+| 9 | `cekIntegritas()` | Kategori `DUPLIKAT_PENEROBOS` muncul dengan penilaian risiko per baris. |
+| 10 | Coba serah terima baris Dibatalkan | Ditolak (tidak bisa dipilih). |
