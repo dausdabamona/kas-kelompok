@@ -1742,7 +1742,8 @@ var App = {
 
   _renderBukaPeriode: function(info) {
     var self = this;
-    var today = new Date().toISOString().split('T')[0];
+    // Tanggal mulai: saran dari penutupan periode lalu (bila ada), else hari ini.
+    var today = (info && info.tglMulaiSaran) ? info.tglMulaiSaran : new Date().toISOString().split('T')[0];
     if (info.adaOpen) {
       document.getElementById('app').innerHTML = this.pageWrapper('Buka Periode Baru',
         '<div class="info-box" style="margin-top:20px;background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;">⚠ Masih ada periode yang <b>OPEN</b>. Tutup periode aktif terlebih dahulu sebelum membuka periode baru.</div>'
@@ -1755,8 +1756,8 @@ var App = {
     // Simpan rollforward untuk validasi saat submit.
     App._rfTunai = rfTunai; App._rfBank = rfBank; App._adaPrev = adaPrev;
     var noteRf = adaPrev
-      ? '<div class="info-box" style="margin-bottom:12px;">Saldo awal otomatis mengikuti <b>saldo akhir tutup buku sebelumnya</b> (Tunai Rp ' + self.formatNumber(rfTunai) + ', Bank Rp ' + self.formatNumber(rfBank) + '). Ubah hanya bila memang ada selisih — wajib disertai alasan.</div>'
-      : '<div class="info-box" style="margin-bottom:12px;">Ini periode pertama. Isi saldo awal apa adanya.</div>';
+      ? '<div class="info-box" style="margin-bottom:12px;"><b>Terisi otomatis dari penutupan periode lalu:</b> tanggal mulai' + (info.tanggalTutupTerakhir ? ' (sehari setelah tutup ' + self.formatDate(info.tanggalTutupTerakhir) + ')' : '') + ', saldo awal Tunai Rp ' + self.formatNumber(rfTunai) + ', Bank Rp ' + self.formatNumber(rfBank) + '. Ubah saldo hanya bila ada selisih — wajib disertai alasan.</div>'
+      : '<div class="info-box" style="margin-bottom:12px;">Ini periode pertama. Isi tanggal & saldo awal apa adanya.</div>';
     var html = this.pageWrapper('Buka Periode Baru',
       noteRf +
       '<div class="card">' +

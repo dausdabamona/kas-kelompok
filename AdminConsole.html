@@ -498,7 +498,8 @@
       if (info.adaOpen) { toast('Masih ada periode OPEN. Tutup buku dulu.'); return; }
       var nama = prompt('Nama periode baru:', 'Periode ' + new Date().toISOString().substring(0,7));
       if (nama === null || !nama.trim()) return;
-      var tgl = prompt('Tanggal mulai (YYYY-MM-DD):', new Date().toISOString().substring(0,10));
+      var tglDefault = info.tglMulaiSaran || new Date().toISOString().substring(0,10);
+      var tgl = prompt('Tanggal mulai (YYYY-MM-DD)' + (info.tanggalTutupTerakhir ? ' — sehari setelah tutup ' + info.tanggalTutupTerakhir : '') + ':', tglDefault);
       if (tgl === null || !tgl.trim()) return;
       var payload = { nama: nama.trim(), tglMulai: tgl.trim(), catatan: '' };
       if (info.adaPrev) {

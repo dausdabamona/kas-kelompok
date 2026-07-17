@@ -1067,12 +1067,26 @@ function getInfoBukaPeriode() {
         if (String(hGet_(pr[i], ph, 'status', 4)).trim() === CONFIG.STATUS.OPEN) { adaOpen = true; break; }
       }
     }
+    // Tanggal mulai saran = sehari setelah tanggal tutup periode lalu (biar berkesinambungan).
+    var tglMulaiSaran = '';
+    var tanggalTutupTerakhir = '';
+    try {
+      var akhir = getSaldoTutupBukuTerakhir_();
+      if (akhir && /^\d{4}-\d{2}-\d{2}$/.test(akhir.tanggalTutup)) {
+        tanggalTutupTerakhir = akhir.tanggalTutup;
+        var d = new Date(akhir.tanggalTutup);
+        d.setDate(d.getDate() + 1);
+        tglMulaiSaran = toDateStr_(d);
+      }
+    } catch(e) {}
     return {
       success: true,
       adaOpen: adaOpen,
       adaPrev: !!prev,
       rollforwardTunai: prev ? prev.tunai : 0,
-      rollforwardBank: prev ? prev.bank : 0
+      rollforwardBank: prev ? prev.bank : 0,
+      tanggalTutupTerakhir: tanggalTutupTerakhir,
+      tglMulaiSaran: tglMulaiSaran
     };
   } catch(e) {
     return { success: false, message: e.message };
