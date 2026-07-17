@@ -482,9 +482,13 @@
   function renderPeriode(host, res) {
     if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
     var adaOpen = (res.data || []).some(function(p) { return String(p.status).toUpperCase() === 'OPEN'; });
-    var cols = [{t:'Nama Periode'},{t:'Mulai'},{t:'Status'}];
+    var cols = [{t:'Nama Periode'},{t:'Mulai'},{t:'Tutup'},{t:'Status'},{t:'Saldo Awal (T/B)'},{t:'Saldo Akhir (T/B)'},{t:'Total'}];
     var rows = (res.data || []).map(function(p) {
-      return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td class="t-date">' + esc(p.tanggalMulai || '-') + '</td><td>' + statusBadge(p.status) + '</td></tr>';
+      var adaAkhir = (p.saldoAkhirTotal !== null && p.saldoAkhirTotal !== undefined);
+      var awal = 'T ' + rp(p.saldoAwalTunai || 0) + ' / B ' + rp(p.saldoAwalBank || 0);
+      var akhir = adaAkhir ? ('T ' + rp(p.saldoAkhirTunai || 0) + ' / B ' + rp(p.saldoAkhirBank || 0)) : '—';
+      var total = adaAkhir ? rp(p.saldoAkhirTotal) : '—';
+      return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td class="t-date">' + esc(p.tanggalMulai || '-') + '</td><td class="t-date">' + esc(p.tanggalTutup || '-') + '</td><td>' + statusBadge(p.status) + '</td><td>' + esc(awal) + '</td><td>' + esc(akhir) + '</td><td style="font-weight:700;">' + esc(total) + '</td></tr>';
     }).join('');
     var tombol = '<button class="qbtn" onclick="buatPeriodeBaru()"' + (adaOpen ? ' disabled title="Masih ada periode OPEN — tutup dulu"' : '') + '>➕ Buat Periode Baru</button>';
     host.innerHTML = '<div style="margin-bottom:12px;">' + tombol + (adaOpen ? ' <span class="muted" style="font-size:12px;">Masih ada periode OPEN — tutup buku dulu.</span>' : '') + '</div>' +

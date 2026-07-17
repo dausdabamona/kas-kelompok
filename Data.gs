@@ -348,15 +348,47 @@ function getAllPeriode() {
     if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [] };
     var data = sheet.getDataRange().getValues();
     var h = headerMap_(data[0]);
+    // Indeks saldo akhir per periode dari Saldo Tutup Buku (baris 'Tutup').
+    var akhirMap = {};
+    var shT = ss.getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+    if (shT && shT.getLastRow() > 1) {
+      var tr = shT.getDataRange().getValues(); var th = headerMap_(tr[0]);
+      for (var t = 1; t < tr.length; t++) {
+        if (String(hGet_(tr[t], th, 'status', 6)) !== 'Tutup') continue;
+        akhirMap[String(hGet_(tr[t], th, 'periodeid', 1) || '')] = {
+          tunai: Number(hGet_(tr[t], th, 'saldotunaiakhir', 3)) || 0,
+          bank: Number(hGet_(tr[t], th, 'saldobankakhir', 4)) || 0
+        };
+      }
+    }
     var result = [];
     for (var i = 1; i < data.length; i++) {
       if (!data[i][0]) continue;
+      var pid = String(hGet_(data[i], h, 'periode', 0) || data[i][0]);
+      var status = String(hGet_(data[i], h, 'status', 4) || '');
+      var awalTunai = Number(hGet_(data[i], h, 'saldoawaltunai', 5)) || 0;
+      var awalBank = Number(hGet_(data[i], h, 'saldoawalbank', 6)) || 0;
+      // Saldo akhir: CLOSED → dari arsip tutup buku; OPEN → hitung live.
+      var akhirTunai = null, akhirBank = null;
+      if (String(status).toUpperCase() === CONFIG.STATUS.CLOSED && akhirMap[pid]) {
+        akhirTunai = akhirMap[pid].tunai; akhirBank = akhirMap[pid].bank;
+      } else if (String(status).toUpperCase() === CONFIG.STATUS.OPEN) {
+        try {
+          var s = calculateSaldo(pid, { saldoAwalTunai: awalTunai, saldoAwalBank: awalBank });
+          akhirTunai = s.tunai; akhirBank = s.bank;
+        } catch(e) {}
+      }
       result.push({
-        id: String(hGet_(data[i], h, 'periode', 0) || data[i][0]),
+        id: pid,
         nama: String(hGet_(data[i], h, 'nama', 1) || ''),
         tanggalMulai: toDateStr_(hGet_(data[i], h, 'tglmulai', 2)),
         tanggalTutup: toDateStr_(hGet_(data[i], h, 'tgltutup', 3)),
-        status: String(hGet_(data[i], h, 'status', 4) || '')  // ← kolom Status benar (index 4)
+        status: status,
+        saldoAwalTunai: awalTunai,
+        saldoAwalBank: awalBank,
+        saldoAkhirTunai: akhirTunai,   // null bila tak tersedia
+        saldoAkhirBank: akhirBank,
+        saldoAkhirTotal: (akhirTunai === null && akhirBank === null) ? null : (Number(akhirTunai || 0) + Number(akhirBank || 0))
       });
     }
     return { success: true, data: result };
