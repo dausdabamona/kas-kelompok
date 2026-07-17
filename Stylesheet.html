@@ -999,9 +999,9 @@
     --np-line: rgba(24,61,51,.14); --np-line-soft: rgba(24,61,51,.09);
     --np-serif: Georgia, 'Times New Roman', 'Noto Serif', serif;
   }
-  /* Layar penuh: konten mengisi, tab bar menempel di bawah tanpa ruang kosong */
-  .np-screen { display: flex; flex-direction: column; min-height: 100vh; background: #F5F8F4; }
-  .np { flex: 1 0 auto; padding: 0 0 8px; background: #F5F8F4; }
+  /* Layar-penuh: konten scroll DI DALAM, tab bar di-freeze di dasar (di luar scroll) */
+  .np-screen { height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #F5F8F4; }
+  .np { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 0 10px; background: #F5F8F4; }
   /* Emerald header wash */
   .np-header { background: linear-gradient(160deg, #22664F, #1A5040); color: #EAF3EE; padding: 18px 16px 15px; border-radius: 0 0 22px 22px; box-shadow: 0 10px 24px rgba(24,61,51,.16); }
   .np-body { padding: 4px 16px 0; }
@@ -1060,8 +1060,8 @@
   .np-btn-primary { display: block; width: 100%; text-align: center; background: #fff; color: var(--np-accent); border: none; border-radius: 12px; padding: 13px; font-family: inherit; font-weight: 700; font-size: 14px; cursor: pointer; margin-top: 14px; }
   .np-btn-primary:hover { background: #EAF3EE; }
 
-  /* Tab bar: elemen normal di dasar layar-penuh (flex), ringkas & tak menyisakan ruang kosong */
-  .np-tabbar { flex: none; display: flex; background: #fff; border-top: 1px solid var(--np-line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 14px rgba(24,61,51,.05); }
+  /* Tab bar di-FREEZE: flex:none di dasar layar-penuh, di luar area scroll konten */
+  .np-tabbar { flex: none; display: flex; background: #fff; border-top: 1px solid var(--np-line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 14px rgba(24,61,51,.08); z-index: 50; }
   .np-tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: none; cursor: pointer; color: var(--text-muted); text-decoration: none; padding: 3px 2px; }
   .np-tab .ti { font-size: 18px; line-height: 1; }
   .np-tab .tl { font-family: var(--np-serif); font-size: 9.5px; font-weight: 700; }
