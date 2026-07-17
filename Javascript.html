@@ -397,65 +397,144 @@ var App = {
       .getDashboardData();
   },
 
+  // Home per-peran gaya newsprint (Broadsheet). Data dari getDashboardData.
   renderDashboard: function(data) {
+    var self = this;
     var u = data.user || {};
-    var inisial = (u.nama || 'U').charAt(0).toUpperCase();
+    var role = u.role || '';
+    var inisial = (u.nama || 'U').split(' ').map(function(w){ return w.charAt(0); }).join('').substring(0,2).toUpperCase();
     var periode = data.periode;
+    var isPenerobos = (role === 'PENEROBOS');
+    var esc = function(s){ return self.escapeHtml(s == null ? '' : s); };
+    var fn = function(n){ return self.formatNumber(n || 0); };
 
-    var html = '<div class="page-content" style="padding-top:20px;">' +
-      '<div class="user-info">' +
-        '<div class="avatar">' + inisial + '</div>' +
-        '<div>' +
-          '<div class="user-name">' + App.escapeHtml(u.nama || '-') + '</div>' +
-          '<div class="user-role">' + App.escapeHtml(u.role || '') + ' · ' + App.escapeHtml(data.namaKelompok || 'Kas Kelompok') + '</div>' +
-          (periode ? '<div class="text-small text-muted mt-8">Periode: ' + App.escapeHtml(periode.nama) + '</div>' : '<div class="text-small text-danger mt-8">⚠ Tidak ada periode aktif</div>') +
+    // ── Konfigurasi per peran ──
+    var roleLabel = {
+      'ADMIN': 'Admin', 'BENDAHARA_1': 'Bendahara 1 · Kas Umum', 'BENDAHARA_2': 'Bendahara 2 · Kas Bank',
+      'PENULIS': 'Penulis · Pencatat', 'PENEROBOS': 'Penerobos · Kolektor'
+    }[role] || role;
+
+    // ── Masthead + rel tanggal ──
+    var mast =
+      '<div class="np-mast">' +
+        '<div style="min-width:0;">' +
+          '<div class="np-kick' + (isPenerobos ? ' coral' : '') + '">' + esc(roleLabel) + '</div>' +
+          '<div class="np-name">' + esc(u.nama || '-') + '</div>' +
         '</div>' +
-        '<div style="display:flex;gap:6px;">' +
-          '<button class="btn btn-sm" style="background:#EFF6FF;color:#2563EB;border:none;cursor:pointer;" onclick="App.loadDashboard()" title="Refresh">🔄</button>' +
-          '<button class="btn btn-sm" style="background:#FEF2F2;color:#DC2626;border:none;cursor:pointer;" onclick="App.doLogout()">Keluar</button>' +
+        '<div class="np-actions">' +
+          '<button class="np-icobtn" onclick="App.loadDashboard()" title="Muat ulang">🔄</button>' +
+          '<div class="np-av">' + esc(inisial) + '</div>' +
         '</div>' +
       '</div>' +
+      '<div class="np-rail"><div class="np-rail-row">' +
+        '<span>' + esc(this._tglPendek()) + '</span>' +
+        '<span class="mid"><span class="dot"></span>' + (periode ? esc(periode.nama) + ' · ' + ((String(periode.status).toUpperCase()==='OPEN')?'Terbuka':'Tertutup') : 'Tanpa periode') + '</span>' +
+      '</div></div>';
 
-      // K3: peringatan bila tidak ada periode OPEN (angka = saldo arsip tutup buku).
-      (data.peringatan ? '<div class="info-box" style="background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;margin-bottom:14px;">⚠ ' + App.escapeHtml(data.peringatan) + '</div>' : '') +
+    // ── Peringatan (tanpa periode OPEN) ──
+    var warn = data.peringatan ? '<div class="info-box" style="background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;margin-top:14px;">⚠ ' + esc(data.peringatan) + '</div>' : '';
 
-      (u.role !== 'PENEROBOS' ? '<div class="total-card">' +
-        '<div class="total-label">💰 Total Kas</div>' +
-        '<div class="total-amount">' + this.formatNumber(data.totalKas || 0) + '</div>' +
-      '</div>' : '') +
+    // ── Hero per peran ──
+    var hero;
+    if (isPenerobos) {
+      hero = '<div class="np-hero coral">' +
+          '<div class="np-hero-lbl">Kas di Tangan · Belum Diserahkan</div>' +
+          '<div class="np-hero-num">Rp ' + fn(data.kasPenerobos) + '</div>' +
+          (App.can('penerobos.input') && periode ? '<button class="np-btn-primary" onclick="App.pageKasPenerobos()">🤲 Serahkan ke Bendahara</button>' : '') +
+        '</div>';
+    } else if (role === 'BENDAHARA_2') {
+      hero = '<div class="np-hero">' +
+          '<div class="np-hero-lbl">Saldo Bank (Aktual)</div>' +
+          '<div class="np-hero-num">Rp ' + fn(data.kasBank) + '</div>' +
+          '<div class="np-hero-sub">Total kas kelompok Rp ' + fn(data.totalKas) + '</div>' +
+        '</div>';
+    } else {
+      var heroLbl = (role === 'PENULIS') ? 'Kas Kelompok' : 'Total Kas Dikelola';
+      hero = '<div class="np-hero">' +
+          '<div class="np-hero-lbl">' + heroLbl + '</div>' +
+          '<div class="np-hero-num">Rp ' + fn(data.totalKas) + '</div>' +
+          '<div class="np-duo">' +
+            '<div class="np-fig tunai"><div class="np-fig-lbl">Tunai</div><div class="np-fig-num">Rp ' + fn(data.kasTunai) + '</div></div>' +
+            '<div class="np-fig bank"><div class="np-fig-lbl">Bank</div><div class="np-fig-num">Rp ' + fn(data.kasBank) + '</div></div>' +
+          '</div>' +
+        '</div>';
+    }
 
-      (u.role !== 'PENEROBOS' ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">' +
-        '<div class="kas-card tunai">' +
-          '<div class="kas-label">🪙 Kas Tunai</div>' +
-          '<div class="kas-amount">' + this.formatNumber(data.kasTunai || 0) + '</div>' +
-        '</div>' +
-        '<div class="kas-card bank">' +
-          '<div class="kas-label">🏦 Kas Bank</div>' +
-          '<div class="kas-amount">' + this.formatNumber(data.kasBank || 0) + '</div>' +
-        '</div>' +
-      '</div>' : '') +
+    // ── Bagian prioritas (perlu tindakan) ──
+    var prioRows = '';
+    if (App.can('trx.approve') && data.menungguApproval && data.menungguApproval.count > 0) {
+      prioRows += '<div class="np-prio" onclick="App.pageApproval()"><span class="ic">✅</span><div class="bd"><div class="tt">Perlu Persetujuan</div><div class="mt">' + data.menungguApproval.count + ' pengeluaran menunggu</div></div><span class="vv coral">Rp ' + fn(data.menungguApproval.total) + '</span></div>';
+    }
+    if (App.can('bukuIR.input') && data.belumDirincikanCount > 0) {
+      prioRows += '<div class="np-prio" onclick="App.pageBukuIR()"><span class="ic">📖</span><div class="bd"><div class="tt">Perlu Dirinci</div><div class="mt">Buku IR belum dirincikan</div></div><span class="vv coral">' + data.belumDirincikanCount + '</span></div>';
+    }
+    var prio = prioRows ? ('<div class="np-kickh"><span class="t">Perlu Tindakan</span></div>' + prioRows) : '';
 
-      // T7: pos ketiga — kas di tangan penerobos (belum masuk kas kelompok) + aging.
-      ((u.role !== 'PENEROBOS' && ((data.kasPenerobos || 0) > 0 || (data.penerobosTutup && data.penerobosTutup.count > 0))) ? this._renderKasPenerobos(data) : '') +
+    // ── Kartu kas penerobos (untuk non-penerobos yang berhak lihat) ──
+    var kasPenerobosCard = (!isPenerobos && ((data.kasPenerobos || 0) > 0 || (data.penerobosTutup && data.penerobosTutup.count > 0)))
+      ? '<div class="np-kickh"><span class="t">Kas di Tangan Penerobos</span></div>' + this._renderKasPenerobos(data) : '';
 
-      // T12: pengeluaran menunggu persetujuan (untuk penyetuju).
-      ((App.can('trx.approve') && data.menungguApproval && data.menungguApproval.count > 0) ?
-        '<button class="btn btn-outline mb-16" style="border-color:#D97706;color:#D97706;" onclick="App.pageApproval()">✅ Persetujuan Pengeluaran (' + data.menungguApproval.count + ' · ' + this.formatNumber(data.menungguApproval.total) + ')</button>' : '') +
+    // ── Aksi Cepat (gated kapabilitas) ──
+    function qa(icon, label, onclick) { return '<div class="np-qa-item" onclick="' + onclick + '"><div class="qi">' + icon + '</div><span class="ql">' + label + '</span></div>'; }
+    var actions = [];
+    if (periode && App.canInput('masuk')) actions.push(qa('➕', 'Masuk', "App.pageTransaksi('masuk')"));
+    if (periode && App.canInput('keluar')) actions.push(qa('➖', 'Keluar', "App.pageTransaksi()"));
+    if (App.can('bukuIR.input')) actions.push(qa('📖', 'Buku IR', 'App.pageBukuIR()'));
+    if (App.can('bank.input') || App.can('bank.manage')) actions.push(qa('🏦', 'Bank', 'App.pageRekonsiliasi()'));
+    if (App.can('terobosan.bayar') || App.can('view.terobosan')) actions.push(qa('🤝', 'Terobos', 'App.pagePatungan()'));
+    if (App.can('serahterima.konfirmasi') || App.can('penerobos.input')) actions.push(qa('🤲', 'Serah', 'App.pageSerahTerima()'));
+    if (App.can('jamaah.add')) actions.push(qa('👥', 'Jamaah', 'App.pageJamaah()'));
+    var aksiCepat = actions.length ? ('<div class="np-kickh"><span class="t">Aksi Cepat</span></div><div class="np-qa' + (actions.length <= 3 ? ' c3' : '') + '">' + actions.slice(0, 8).join('') + '</div>') : '';
 
-      // K3: input transaksi hanya bila ada periode aktif (OPEN).
-      (periode ? '<button class="btn btn-success mb-16" onclick="App.pageTransaksi()">+ Input Transaksi</button>' : '') +
-
+    // ── Tombol lain + menu lengkap (restyle lama, agar semua fitur tetap terjangkau) ──
+    var lain =
+      '<div class="np-kickh"><span class="t">Lainnya</span></div>' +
       '<button class="btn btn-secondary mb-16" onclick="App.pageRiwayatSaya()">🧾 Riwayat Transaksi Saya</button>' +
+      (role === 'ADMIN' ? '<button class="btn btn-outline mb-16" onclick="App.openAdminConsole()">🖥️ Admin Console (desktop)</button>' : '') +
+      this._renderMenuGroups(data);
 
-      (u.role === 'ADMIN' ? '<button class="btn btn-outline mb-16" onclick="App.openAdminConsole()">🖥️ Admin Console (desktop)</button>' : '') +
+    var footer = '<div class="app-footer">' + esc(data.namaKelompok || 'Kas Kelompok') +
+      (data.buildDate ? ' <span style="opacity:.6;">· build ' + esc(data.buildDate) + '</span>' : '') + '</div>';
 
-      this._renderMenuGroups(data) +
-
-      '<div class="app-footer">' + App.escapeHtml(data.namaKelompok || 'Kas Kelompok') +
-        (data.buildDate ? ' <span style="opacity:.6;">· build ' + App.escapeHtml(data.buildDate) + '</span>' : '') + '</div>' +
-    '</div>';
-
+    var html = '<div class="np">' + mast + warn + hero + prio + kasPenerobosCard + aksiCepat + lain + footer + '</div>' + this._renderTabbar(role, periode);
     document.getElementById('app').innerHTML = html;
+  },
+
+  // Tanggal pendek Bahasa Indonesia untuk rel masthead.
+  _tglPendek: function() {
+    try {
+      var bln = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+      var t = new Date();
+      return t.getDate() + ' ' + bln[t.getMonth()] + ' ' + t.getFullYear();
+    } catch(e) { return ''; }
+  },
+
+  // Bottom tab bar per peran — tab memanggil halaman yang sudah ada.
+  _renderTabbar: function(role, periode) {
+    var self = this;
+    function tab(icon, label, onclick, active) {
+      return '<button class="np-tab' + (active ? ' active' : '') + '" onclick="' + onclick + '"><span class="ti">' + icon + '</span><span class="tl">' + label + '</span></button>';
+    }
+    var tabs = [ tab('📰', 'Beranda', 'App.loadDashboard()', true) ];
+    if (role === 'BENDAHARA_2') {
+      tabs.push(tab('🏦', 'Bank', 'App.pageRekonsiliasi()', false));
+      tabs.push(tab('🤲', 'Serah', 'App.pageSerahTerima()', false));
+      tabs.push(tab('🧮', 'Saldo', 'App.pagePemeriksaanSaldo()', false));
+    } else if (role === 'PENEROBOS') {
+      tabs.push(tab('🤝', 'Terobos', 'App.pagePatungan()', false));
+      tabs.push(tab('💼', 'Kas', 'App.pageKasPenerobos()', false));
+      tabs.push(tab('🤲', 'Serah', 'App.pageSerahTerima()', false));
+    } else if (role === 'PENULIS') {
+      tabs.push(tab('➕', 'Input', 'App.pageTransaksi()', false));
+      tabs.push(tab('📖', 'Buku IR', 'App.pageBukuIR()', false));
+      tabs.push(tab('👥', 'Jamaah', 'App.pageJamaah()', false));
+    } else { // ADMIN / BENDAHARA_1
+      tabs.push(tab('➕', 'Input', 'App.pageTransaksi()', false));
+      tabs.push(tab('📖', 'Buku', 'App.pageBukuIR()', false));
+      if (App.can('trx.approve')) tabs.push(tab('✅', 'Setujui', 'App.pageApproval()', false));
+      else tabs.push(tab('🧾', 'Riwayat', 'App.pageRiwayatSaya()', false));
+    }
+    return '<div class="np-tabbar">' + tabs.join('') + '</div>';
   },
 
   // T7: kartu Kas di Tangan Penerobos + aging.
