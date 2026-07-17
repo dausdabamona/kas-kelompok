@@ -450,12 +450,19 @@ var App = {
         '</div>';
     } else {
       var heroLbl = (role === 'PENULIS') ? 'Kas Kelompok' : 'Total Kas Dikelola';
+      // Kas di tangan penerobos: 'dalam total' bila mode periode, 'di luar total' bila arsip.
+      var penDalam = (data.penerobosDalamTotal !== false);
+      var penNote = penDalam ? 'termasuk Total' : 'di luar Total';
       hero = '<div class="np-hero">' +
           '<div class="np-hero-lbl">' + heroLbl + '</div>' +
           '<div class="np-hero-num">' + fn(data.totalKas) + '</div>' +
           '<div class="np-duo">' +
             '<div class="np-fig tunai"><div class="np-fig-lbl">Tunai</div><div class="np-fig-num">' + fn(data.kasTunai) + '</div></div>' +
             '<div class="np-fig bank"><div class="np-fig-lbl">Bank</div><div class="np-fig-num">' + fn(data.kasBank) + '</div></div>' +
+          '</div>' +
+          '<div class="np-fig pen" style="margin-top:10px;">' +
+            '<div class="np-fig-lbl">🤲 Kas di Tangan Penerobos · ' + penNote + '</div>' +
+            '<div class="np-fig-num">' + fn(data.kasPenerobos) + '</div>' +
           '</div>' +
         '</div>';
     }
