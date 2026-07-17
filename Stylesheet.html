@@ -28,6 +28,10 @@
     color: var(--text);
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
+    font-size: 15px;
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   #app {
@@ -927,4 +931,62 @@
   /* Modal: jangan melebihi layar, bisa di-scroll, jarak aman bawah */
   .modal { max-height: 88vh; overflow-y: auto;
     margin-bottom: env(safe-area-inset-bottom); }
+
+  /* ──────────────────────────────────────────────────────────────
+     SKALA HP: desain awal dirancang untuk lebar 480px, padahal
+     mayoritas HP hanya 360–430px CSS-px sehingga terasa "kebesaran".
+     Blok ini mengecilkan proporsi di layar HP (tetap nyaman disentuh),
+     tanpa mengubah tampilan pada kolom terpusat 480px (desktop).
+     ────────────────────────────────────────────────────────────── */
+  @media (max-width: 440px) {
+    body { font-size: 14px; }
+
+    /* Ruang & kartu lebih rapat */
+    .page-content { padding: 12px; }
+    .card { padding: 13px; border-radius: 10px; }
+    .page-header { padding: 12px 14px; }
+    .page-header h2 { font-size: 17px; }
+
+    /* Kartu saldo / total */
+    .total-card { padding: 15px; }
+    .total-amount { font-size: 23px; }
+    .total-label { font-size: 13px; }
+    .kas-card { padding: 14px; }
+    .kas-amount { font-size: 18px; }
+    .kas-label { font-size: 12px; }
+
+    /* Grid menu */
+    .menu-grid { gap: 9px; }
+    .menu-item { padding: 14px 6px; }
+    .menu-item .icon { font-size: 24px; }
+    .menu-item span { font-size: 11px; }
+
+    /* Info user & judul seksi */
+    .user-name { font-size: 15px; }
+    .user-info { padding: 12px 14px; }
+    .section-title { font-size: 12px; }
+
+    /* Item transaksi/daftar */
+    .trx-item-nama, .trx-item-nominal { font-size: 13px; }
+    .trx-item-meta { font-size: 11px; }
+
+    /* Tombol: tetap mudah disentuh tapi tak berlebihan */
+    .btn { min-height: 44px; font-size: 14px; }
+    .btn-sm { min-height: 34px; }
+    .btn-primary, .btn-success, .btn-secondary, .btn-danger, .btn-warning, .btn-outline { padding: 11px 16px; }
+
+    /* Input: jaga ≥16px agar tak auto-zoom, hanya rapatkan tinggi/padding */
+    input, select, textarea { min-height: 44px; }
+    .form-control, input[type="text"], input[type="date"], input[type="number"] { padding: 10px 12px; }
+
+    /* Info box & badge sedikit lebih kecil */
+    .info-box { padding: 10px 12px; font-size: 13px; }
+  }
+
+  /* Layar sangat kecil (<=360px): rapatkan sedikit lagi */
+  @media (max-width: 360px) {
+    .total-amount { font-size: 21px; }
+    .menu-item .icon { font-size: 22px; }
+    .menu-item span { font-size: 10.5px; }
+  }
 </style>
