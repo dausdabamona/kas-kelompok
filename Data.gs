@@ -1036,6 +1036,35 @@ function saldoAkhirTerakhir_() {
   return null;
 }
 
+// Info untuk form Buka Periode: saldo awal yang WAJIB (rollforward dari tutup buku
+// terakhir). adaPrev=false → periode pertama, saldo awal bebas diisi.
+function getInfoBukaPeriode() {
+  var auth = requirePerm('periode.manage');
+  if (!auth.success) return { success: false, message: auth.message };
+  try {
+    var prev = saldoAkhirTerakhir_();
+    // Cek apakah masih ada periode OPEN (tak boleh buka dua-duanya).
+    var adaOpen = false;
+    var ss = getSS_();
+    var sp = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+    if (sp && sp.getLastRow() > 1) {
+      var pr = sp.getDataRange().getValues(); var ph = headerMap_(pr[0]);
+      for (var i = 1; i < pr.length; i++) {
+        if (String(hGet_(pr[i], ph, 'status', 4)).trim() === CONFIG.STATUS.OPEN) { adaOpen = true; break; }
+      }
+    }
+    return {
+      success: true,
+      adaOpen: adaOpen,
+      adaPrev: !!prev,
+      rollforwardTunai: prev ? prev.tunai : 0,
+      rollforwardBank: prev ? prev.bank : 0
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 function bukaPeriode(data) {
   try {
     var auth = requirePerm('periode.manage');

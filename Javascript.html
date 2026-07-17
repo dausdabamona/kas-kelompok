@@ -1532,7 +1532,7 @@ var App = {
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        self.showToast('Serah terima berhasil dibuat');
+        self.toast('Serah terima berhasil dibuat');
         self.pageKasPenerobos();
       })
       .withFailureHandler(function(e) { self.showError(e.message); })
@@ -1587,7 +1587,7 @@ var App = {
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        self.showToast('Serah terima dikonfirmasi, ' + (res.count || 1) + ' pemasukan dicatat otomatis');
+        self.toast('Serah terima dikonfirmasi, ' + (res.count || 1) + ' pemasukan dicatat otomatis');
         self.pageSerahTerima();
       })
       .withFailureHandler(function(e) { self.showError(e.message); })
@@ -1729,8 +1729,36 @@ var App = {
       );
       return;
     }
+    var self = this;
+    self.showLoading('Memuat info periode...');
+    App.srv()
+      .withSuccessHandler(function(info) {
+        if (!info || !info.success) { self.showError((info && info.message) || 'Gagal memuat info periode.'); return; }
+        self._renderBukaPeriode(info);
+      })
+      .withFailureHandler(function(err) { self.showError(err.message); })
+      .getInfoBukaPeriode();
+  },
+
+  _renderBukaPeriode: function(info) {
+    var self = this;
     var today = new Date().toISOString().split('T')[0];
+    if (info.adaOpen) {
+      document.getElementById('app').innerHTML = this.pageWrapper('Buka Periode Baru',
+        '<div class="info-box" style="margin-top:20px;background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;">⚠ Masih ada periode yang <b>OPEN</b>. Tutup periode aktif terlebih dahulu sebelum membuka periode baru.</div>'
+      );
+      return;
+    }
+    var adaPrev = !!info.adaPrev;
+    var rfTunai = Number(info.rollforwardTunai) || 0;
+    var rfBank = Number(info.rollforwardBank) || 0;
+    // Simpan rollforward untuk validasi saat submit.
+    App._rfTunai = rfTunai; App._rfBank = rfBank; App._adaPrev = adaPrev;
+    var noteRf = adaPrev
+      ? '<div class="info-box" style="margin-bottom:12px;">Saldo awal otomatis mengikuti <b>saldo akhir tutup buku sebelumnya</b> (Tunai Rp ' + self.formatNumber(rfTunai) + ', Bank Rp ' + self.formatNumber(rfBank) + '). Ubah hanya bila memang ada selisih — wajib disertai alasan.</div>'
+      : '<div class="info-box" style="margin-bottom:12px;">Ini periode pertama. Isi saldo awal apa adanya.</div>';
     var html = this.pageWrapper('Buka Periode Baru',
+      noteRf +
       '<div class="card">' +
         '<div class="form-group"><label>Nama Periode <span class="text-danger">*</span></label>' +
           '<input type="text" id="bpNama" class="form-control" placeholder="Contoh: Periode Juli 2026">' +
@@ -1739,11 +1767,22 @@ var App = {
           '<input type="date" id="bpTglMulai" class="form-control" value="' + today + '">' +
         '</div>' +
         '<div class="form-group"><label>Saldo Awal Tunai</label>' +
-          '<input type="text" id="bpTunai" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0">' +
+          '<input type="text" id="bpTunai" class="form-control" inputmode="numeric" data-tsep="1" value="' + rfTunai + '"' + (adaPrev ? ' readonly' : '') + '>' +
         '</div>' +
         '<div class="form-group"><label>Saldo Awal Bank</label>' +
-          '<input type="text" id="bpBank" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0">' +
+          '<input type="text" id="bpBank" class="form-control" inputmode="numeric" data-tsep="1" value="' + rfBank + '"' + (adaPrev ? ' readonly' : '') + '>' +
         '</div>' +
+        (adaPrev ?
+          '<div class="form-group" style="border-top:1px solid var(--border);padding-top:10px;">' +
+            '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+              '<input type="checkbox" id="bpSelisih" onchange="App._toggleBpSelisih()" style="width:18px;height:18px;"> Ada selisih dari saldo tutup buku' +
+            '</label>' +
+            '<div id="bpSelisihBox" style="display:none;margin-top:8px;">' +
+              '<input type="text" id="bpAlasan" class="form-control" placeholder="Alasan selisih (wajib)">' +
+              '<div class="text-small text-muted" style="margin-top:4px;">Selisih akan dicatat sebagai penyesuaian eksplisit di periode baru.</div>' +
+            '</div>' +
+          '</div>'
+        : '') +
         '<div class="form-group"><label>Catatan</label>' +
           '<input type="text" id="bpCatatan" class="form-control" placeholder="Opsional">' +
         '</div>' +
@@ -1756,18 +1795,45 @@ var App = {
     });
   },
 
+  _toggleBpSelisih: function() {
+    var chk = document.getElementById('bpSelisih');
+    var box = document.getElementById('bpSelisihBox');
+    var on = chk && chk.checked;
+    if (box) box.style.display = on ? 'block' : 'none';
+    // Saldo awal jadi bisa diedit hanya bila ada selisih.
+    ['bpTunai','bpBank'].forEach(function(id) {
+      var el = document.getElementById(id); if (el) { if (on) el.removeAttribute('readonly'); else { el.setAttribute('readonly', 'readonly'); } }
+    });
+    if (!on) {
+      var t = document.getElementById('bpTunai'), b = document.getElementById('bpBank');
+      if (t) t.value = App._rfTunai; if (b) b.value = App._rfBank;
+      ['bpTunai','bpBank'].forEach(function(id) { var el = document.getElementById(id); if (el) App._formatTsep(el); });
+    }
+  },
+
   submitBukaPeriode: function() {
     var nama     = (document.getElementById('bpNama') || {}).value || '';
     var tglMulai = (document.getElementById('bpTglMulai') || {}).value || '';
     var catatan  = (document.getElementById('bpCatatan') || {}).value || '';
     if (!nama) { alert('Nama periode wajib diisi'); return; }
     if (!tglMulai) { alert('Tanggal mulai wajib diisi'); return; }
+    var adaSelisih = !!(document.getElementById('bpSelisih') && document.getElementById('bpSelisih').checked);
+    var alasan = (document.getElementById('bpAlasan') || {}).value || '';
+    if (adaSelisih && !alasan.trim()) { alert('Alasan selisih wajib diisi.'); return; }
     var self = this;
     self.showLoading('Membuka periode...');
     App.srv()
       .withSuccessHandler(function(res) {
-        if (!res.success) { self.showError(res.message); return; }
-        self.showToast('Periode baru berhasil dibuka!');
+        if (!res.success) {
+          // Bila backend menolak karena rollforward, jelaskan & tawarkan opsi selisih.
+          if (res.rollforward) {
+            self._renderBukaPeriode({ success: true, adaOpen: false, adaPrev: true, rollforwardTunai: res.rollforward.tunai, rollforwardBank: res.rollforward.bank });
+            self.toast('Saldo awal harus mengikuti tutup buku. Centang "Ada selisih" bila memang berbeda.');
+            return;
+          }
+          self.showError(res.message); return;
+        }
+        self.toast('Periode baru berhasil dibuka!');
         self.loadDashboard();
       })
       .withFailureHandler(function(err) { self.showError(err.message); })
@@ -1776,7 +1842,9 @@ var App = {
         tglMulai: tglMulai,
         saldoAwalTunai: App.num('bpTunai'),
         saldoAwalBank: App.num('bpBank'),
-        catatan: catatan
+        catatan: catatan,
+        overrideRollforward: adaSelisih,
+        alasanRollforward: alasan
       });
   },
 
@@ -2697,7 +2765,7 @@ var App = {
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        self.showToast('Migrasi selesai: ' + res.count + ' transaksi dipindahkan');
+        self.toast('Migrasi selesai: ' + res.count + ' transaksi dipindahkan');
         self.pageSetting();
       })
       .withFailureHandler(function(e) { self.showError(e.message); })

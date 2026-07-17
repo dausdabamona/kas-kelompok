@@ -288,3 +288,29 @@ Melengkapi L2b/L2c sebelumnya dengan penyempurnaan sesuai insiden serah terima:
 | 4 | Batalkan baris di periode CLOSED | Boleh (setelah konfirmasi); tercatat `PRIVILEGED_BATAL_KAS_PENEROBOS_TUTUP`. |
 | 5 | Buka Aktivitas Istimewa | Aksi PRIVILEGED muncul (waktu, user, detail). |
 | 6 | `cekIntegritas()` | Ringkas memuat jumlah aman / perlu dikonfirmasi / bahaya. |
+
+---
+
+## Perbaikan — Tidak bisa buka periode baru (rollforward form)
+
+**Akar masalah:** `bukaPeriode` mengunci saldo awal = saldo akhir tutup buku sebelumnya
+dan menolak bila berbeda, tetapi form Buka Periode menampilkan field saldo **kosong (0)**
+tanpa prefill rollforward & tanpa opsi "Ada selisih". Karena 0 ≠ saldo tutup buku, setiap
+percakapan ditolak dan periode tak pernah bisa dibuat. Ditambah `showToast` (tak
+terdefinisi) melempar error di success handler sehingga dashboard tak dimuat ulang.
+
+**Perbaikan:**
+- Endpoint baru `getInfoBukaPeriode` (cap `periode.manage`): mengirim `adaOpen`, `adaPrev`,
+  dan saldo rollforward. Form otomatis **prefill** saldo awal = saldo tutup buku terakhir
+  (read-only) + checkbox **"Ada selisih"** untuk override dengan alasan wajib.
+- Bila masih ada periode OPEN, form menampilkan pesan jelas (tutup dulu).
+- `showToast` → `toast` (4 lokasi) — memperbaiki bug success handler.
+
+### Checklist uji
+| # | Langkah | Hasil |
+|---|---------|-------|
+| 1 | Setelah tutup buku, buka menu Buka Periode | Saldo awal terisi otomatis = saldo akhir tutup buku (read-only). |
+| 2 | Isi nama + tanggal, klik Buka Periode (tanpa ubah saldo) | Periode baru terbuka; dashboard tampil periode aktif. |
+| 3 | Centang "Ada selisih", ubah saldo, isi alasan | Periode terbuka; selisih tercatat sebagai penyesuaian. |
+| 4 | Centang "Ada selisih" tanpa alasan | Ditolak (alasan wajib). |
+| 5 | Ada periode OPEN → buka menu | Pesan "tutup periode aktif dulu", form tidak muncul. |
