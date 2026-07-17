@@ -340,15 +340,29 @@ function getPeriodeAktif() {
 }
 
 function getAllPeriode() {
-  var ss = getSS_();
-  var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
-  if (!sheet) return { success: true, data: [] };
-  var data = sheet.getDataRange().getValues();
-  var result = [];
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0]) result.push({ id: data[i][0], nama: data[i][1], tanggalMulai: data[i][2], status: data[i][3] });
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [] };
+    var data = sheet.getDataRange().getValues();
+    var h = headerMap_(data[0]);
+    var result = [];
+    for (var i = 1; i < data.length; i++) {
+      if (!data[i][0]) continue;
+      result.push({
+        id: String(hGet_(data[i], h, 'periode', 0) || data[i][0]),
+        nama: String(hGet_(data[i], h, 'nama', 1) || ''),
+        tanggalMulai: toDateStr_(hGet_(data[i], h, 'tglmulai', 2)),
+        tanggalTutup: toDateStr_(hGet_(data[i], h, 'tgltutup', 3)),
+        status: String(hGet_(data[i], h, 'status', 4) || '')  // ← kolom Status benar (index 4)
+      });
+    }
+    return { success: true, data: result };
+  } catch(e) {
+    return { success: false, message: 'Gagal memuat periode: ' + e.message };
   }
-  return { success: true, data: result };
 }
 
 // ──────────────────────────────────────────────────────

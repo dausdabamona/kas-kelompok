@@ -481,11 +481,53 @@
   // ── VIEW: Periode ──
   function renderPeriode(host, res) {
     if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var adaOpen = (res.data || []).some(function(p) { return String(p.status).toUpperCase() === 'OPEN'; });
     var cols = [{t:'Nama Periode'},{t:'Mulai'},{t:'Status'}];
     var rows = (res.data || []).map(function(p) {
       return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td class="t-date">' + esc(p.tanggalMulai || '-') + '</td><td>' + statusBadge(p.status) + '</td></tr>';
     }).join('');
-    host.innerHTML = panelBox('Periode', (res.data || []).length + ' periode', tableHtml(cols, rows));
+    var tombol = '<button class="qbtn" onclick="buatPeriodeBaru()"' + (adaOpen ? ' disabled title="Masih ada periode OPEN — tutup dulu"' : '') + '>➕ Buat Periode Baru</button>';
+    host.innerHTML = '<div style="margin-bottom:12px;">' + tombol + (adaOpen ? ' <span class="muted" style="font-size:12px;">Masih ada periode OPEN — tutup buku dulu.</span>' : '') + '</div>' +
+      panelBox('Periode', (res.data || []).length + ' periode', tableHtml(cols, rows));
+  }
+
+  // Buat periode baru dari Admin Console. Saldo awal mengikuti rollforward tutup buku.
+  function buatPeriodeBaru() {
+    call('getInfoBukaPeriode', [], function(info) {
+      if (!info || !info.success) { toast((info && info.message) || 'Gagal memuat info periode.'); return; }
+      if (info.adaOpen) { toast('Masih ada periode OPEN. Tutup buku dulu.'); return; }
+      var nama = prompt('Nama periode baru:', 'Periode ' + new Date().toISOString().substring(0,7));
+      if (nama === null || !nama.trim()) return;
+      var tgl = prompt('Tanggal mulai (YYYY-MM-DD):', new Date().toISOString().substring(0,10));
+      if (tgl === null || !tgl.trim()) return;
+      var payload = { nama: nama.trim(), tglMulai: tgl.trim(), catatan: '' };
+      if (info.adaPrev) {
+        // Saldo awal terkunci ke rollforward; tawarkan override bila ada selisih.
+        var pakaiRf = confirm('Saldo awal akan mengikuti tutup buku terakhir:\nTunai Rp ' + rp(info.rollforwardTunai) + '\nBank Rp ' + rp(info.rollforwardBank) + '\n\nOK = pakai angka itu. Cancel = ada selisih (isi manual + alasan).');
+        if (pakaiRf) {
+          payload.saldoAwalTunai = info.rollforwardTunai; payload.saldoAwalBank = info.rollforwardBank;
+        } else {
+          var t = prompt('Saldo Awal Tunai:', String(info.rollforwardTunai));
+          if (t === null) return;
+          var b = prompt('Saldo Awal Bank:', String(info.rollforwardBank));
+          if (b === null) return;
+          var alasan = prompt('Alasan selisih (wajib):', '');
+          if (alasan === null || !alasan.trim()) { toast('Alasan selisih wajib diisi.'); return; }
+          payload.saldoAwalTunai = Number(String(t).replace(/[^0-9]/g,'')) || 0;
+          payload.saldoAwalBank = Number(String(b).replace(/[^0-9]/g,'')) || 0;
+          payload.overrideRollforward = true; payload.alasanRollforward = alasan.trim();
+        }
+      } else {
+        var t2 = prompt('Saldo Awal Tunai:', '0'); if (t2 === null) return;
+        var b2 = prompt('Saldo Awal Bank:', '0'); if (b2 === null) return;
+        payload.saldoAwalTunai = Number(String(t2).replace(/[^0-9]/g,'')) || 0;
+        payload.saldoAwalBank = Number(String(b2).replace(/[^0-9]/g,'')) || 0;
+      }
+      call('bukaPeriode', [payload], function(res) {
+        if (res && res.success) { toast('Periode baru dibuka ✓'); go('periode'); }
+        else toast((res && res.message) || 'Gagal membuka periode.');
+      });
+    });
   }
 
   // Sparkline SVG dari array angka.
