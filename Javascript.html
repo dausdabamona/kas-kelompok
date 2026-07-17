@@ -439,23 +439,23 @@ var App = {
     if (isPenerobos) {
       hero = '<div class="np-hero coral">' +
           '<div class="np-hero-lbl">Kas di Tangan · Belum Diserahkan</div>' +
-          '<div class="np-hero-num">Rp ' + fn(data.kasPenerobos) + '</div>' +
+          '<div class="np-hero-num">' + fn(data.kasPenerobos) + '</div>' +
           (App.can('penerobos.input') && periode ? '<button class="np-btn-primary" onclick="App.pageKasPenerobos()">🤲 Serahkan ke Bendahara</button>' : '') +
         '</div>';
     } else if (role === 'BENDAHARA_2') {
       hero = '<div class="np-hero">' +
           '<div class="np-hero-lbl">Saldo Bank (Aktual)</div>' +
-          '<div class="np-hero-num">Rp ' + fn(data.kasBank) + '</div>' +
-          '<div class="np-hero-sub">Total kas kelompok Rp ' + fn(data.totalKas) + '</div>' +
+          '<div class="np-hero-num">' + fn(data.kasBank) + '</div>' +
+          '<div class="np-hero-sub">Total kas kelompok ' + fn(data.totalKas) + '</div>' +
         '</div>';
     } else {
       var heroLbl = (role === 'PENULIS') ? 'Kas Kelompok' : 'Total Kas Dikelola';
       hero = '<div class="np-hero">' +
           '<div class="np-hero-lbl">' + heroLbl + '</div>' +
-          '<div class="np-hero-num">Rp ' + fn(data.totalKas) + '</div>' +
+          '<div class="np-hero-num">' + fn(data.totalKas) + '</div>' +
           '<div class="np-duo">' +
-            '<div class="np-fig tunai"><div class="np-fig-lbl">Tunai</div><div class="np-fig-num">Rp ' + fn(data.kasTunai) + '</div></div>' +
-            '<div class="np-fig bank"><div class="np-fig-lbl">Bank</div><div class="np-fig-num">Rp ' + fn(data.kasBank) + '</div></div>' +
+            '<div class="np-fig tunai"><div class="np-fig-lbl">Tunai</div><div class="np-fig-num">' + fn(data.kasTunai) + '</div></div>' +
+            '<div class="np-fig bank"><div class="np-fig-lbl">Bank</div><div class="np-fig-num">' + fn(data.kasBank) + '</div></div>' +
           '</div>' +
         '</div>';
     }
@@ -463,7 +463,7 @@ var App = {
     // ── Bagian prioritas (perlu tindakan) ──
     var prioRows = '';
     if (App.can('trx.approve') && data.menungguApproval && data.menungguApproval.count > 0) {
-      prioRows += '<div class="np-prio" onclick="App.pageApproval()"><span class="ic">✅</span><div class="bd"><div class="tt">Perlu Persetujuan</div><div class="mt">' + data.menungguApproval.count + ' pengeluaran menunggu</div></div><span class="vv coral">Rp ' + fn(data.menungguApproval.total) + '</span></div>';
+      prioRows += '<div class="np-prio" onclick="App.pageApproval()"><span class="ic">✅</span><div class="bd"><div class="tt">Perlu Persetujuan</div><div class="mt">' + data.menungguApproval.count + ' pengeluaran menunggu</div></div><span class="vv coral">' + fn(data.menungguApproval.total) + '</span></div>';
     }
     if (App.can('bukuIR.input') && data.belumDirincikanCount > 0) {
       prioRows += '<div class="np-prio gold" onclick="App.pageBukuIR()"><span class="ic">📖</span><div class="bd"><div class="tt">Perlu Dirinci</div><div class="mt">Buku IR belum dirincikan</div></div><span class="vv coral">' + data.belumDirincikanCount + '</span></div>';
@@ -555,7 +555,7 @@ var App = {
     // L2b: peringatan baris di periode CLOSED yang masih Aktif.
     var pt = data.penerobosTutup || { total: 0, count: 0 };
     var warnTutup = (pt.count > 0)
-      ? '<div style="font-size:11px;color:#B91C1C;background:#FEE2E2;border-radius:6px;padding:6px 8px;margin-top:8px;">⚠ ' + pt.count + ' baris (Rp ' + self.formatNumber(pt.total) + ') masih di luar kas padahal bukunya sudah ditutup. Perlu serah terima / koreksi.</div>'
+      ? '<div style="font-size:11px;color:#B91C1C;background:#FEE2E2;border-radius:6px;padding:6px 8px;margin-top:8px;">⚠ ' + pt.count + ' baris (' + self.formatNumber(pt.total) + ') masih di luar kas padahal bukunya sudah ditutup. Perlu serah terima / koreksi.</div>'
       : '';
     // L2b: label berbeda antara mode periode (komponen Total) vs arsip (di luar Total).
     var ket = dalamTotal
@@ -1474,7 +1474,7 @@ var App = {
       // Kandidat pasangan (kemungkinan sudah dicatat langsung oleh bendahara).
       var pairTxt = a.kandidatPasangan
         ? '<div style="font-size:11px;color:#92400E;background:#FEF3C7;border-radius:5px;padding:4px 6px;margin-top:4px;">🔎 Mungkin sudah dicatat langsung: ' +
-            self.escapeHtml(a.kandidatPasangan.id) + ' · ' + self.formatDate(a.kandidatPasangan.tanggal) + ' · Rp ' + self.formatNumber(a.kandidatPasangan.nominal) + '</div>'
+            self.escapeHtml(a.kandidatPasangan.id) + ' · ' + self.formatDate(a.kandidatPasangan.tanggal) + ' · ' + self.formatNumber(a.kandidatPasangan.nominal) + '</div>'
         : '';
       var aksi = '';
       if (a.status === 'Aktif') {
@@ -1838,7 +1838,7 @@ var App = {
     // Simpan rollforward untuk validasi saat submit.
     App._rfTunai = rfTunai; App._rfBank = rfBank; App._adaPrev = adaPrev;
     var noteRf = adaPrev
-      ? '<div class="info-box" style="margin-bottom:12px;"><b>Terisi otomatis dari penutupan periode lalu:</b> tanggal mulai' + (info.tanggalTutupTerakhir ? ' (sehari setelah tutup ' + self.formatDate(info.tanggalTutupTerakhir) + ')' : '') + ', saldo awal Tunai Rp ' + self.formatNumber(rfTunai) + ', Bank Rp ' + self.formatNumber(rfBank) + '. Ubah saldo hanya bila ada selisih — wajib disertai alasan.</div>'
+      ? '<div class="info-box" style="margin-bottom:12px;"><b>Terisi otomatis dari penutupan periode lalu:</b> tanggal mulai' + (info.tanggalTutupTerakhir ? ' (sehari setelah tutup ' + self.formatDate(info.tanggalTutupTerakhir) + ')' : '') + ', saldo awal Tunai ' + self.formatNumber(rfTunai) + ', Bank ' + self.formatNumber(rfBank) + '. Ubah saldo hanya bila ada selisih — wajib disertai alasan.</div>'
       : '<div class="info-box" style="margin-bottom:12px;">Ini periode pertama. Isi tanggal & saldo awal apa adanya.</div>';
     var html = this.pageWrapper('Buka Periode Baru',
       noteRf +
