@@ -496,10 +496,13 @@ var App = {
     var footer = '<div class="app-footer">' + esc(data.namaKelompok || 'Kas Kelompok') +
       (data.buildDate ? ' <span style="opacity:.6;">· build ' + esc(data.buildDate) + '</span>' : '') + '</div>';
 
-    var html = '<div class="np">' +
-        '<div class="np-header">' + mast + '</div>' +
-        '<div class="np-body">' + warn + hero + prio + kasPenerobosCard + aksiCepat + lain + footer + '</div>' +
-      '</div>' + this._renderTabbar(role, periode);
+    var html = '<div class="np-screen">' +
+        '<div class="np">' +
+          '<div class="np-header">' + mast + '</div>' +
+          '<div class="np-body">' + warn + hero + prio + kasPenerobosCard + aksiCepat + lain + footer + '</div>' +
+        '</div>' +
+        this._renderTabbar(role, periode) +
+      '</div>';
     document.getElementById('app').innerHTML = html;
   },
 
