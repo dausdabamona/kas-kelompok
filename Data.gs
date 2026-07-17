@@ -1147,21 +1147,29 @@ function bukaPeriode(data) {
     }
 
     // FASE 2: rollforward terkunci (T1). Saldo awal = saldo akhir periode CLOSED
-    // terakhir. Beda dari itu wajib override + alasan; selisih dicatat sebagai
-    // penyesuaian eksplisit di periode baru (bukan mengubah saldo awal diam-diam).
+    // terakhir. Secara default kita LANGSUNG memakai nilai rollforward (tidak
+    // membandingkan input agar tidak gagal karena beda pembulatan/format). Hanya
+    // bila pengurus SENGAJA menyatakan "Ada selisih" (override + alasan) input
+    // dipakai & selisihnya dicatat sebagai penyesuaian eksplisit.
     var prev = saldoAkhirTerakhir_();
     var awalTunai, awalBank, adjust = null;
     if (prev) {
-      awalTunai = prev.tunai; awalBank = prev.bank;
-      var claimT = Number(data.saldoAwalTunai), claimB = Number(data.saldoAwalBank);
-      var difT = (isFinite(claimT) ? claimT : prev.tunai) - prev.tunai;
-      var difB = (isFinite(claimB) ? claimB : prev.bank) - prev.bank;
-      if (difT !== 0 || difB !== 0) {
-        if (!data.overrideRollforward || !String(data.alasanRollforward || '').trim()) {
-          return { success: false, rollforward: { tunai: prev.tunai, bank: prev.bank },
-            message: 'Saldo awal harus = saldo akhir periode sebelumnya (Tunai Rp ' + prev.tunai.toLocaleString('id-ID') + ', Bank Rp ' + prev.bank.toLocaleString('id-ID') + '). Untuk berbeda, centang "Ada selisih" & isi alasan.' };
+      var mauOverride = !!data.overrideRollforward;
+      if (mauOverride) {
+        if (!String(data.alasanRollforward || '').trim()) {
+          return { success: false, message: 'Untuk saldo awal berbeda dari tutup buku, alasan selisih wajib diisi.' };
         }
-        adjust = { tunai: difT, bank: difB, alasan: String(data.alasanRollforward).trim() };
+        var claimT = Number(data.saldoAwalTunai), claimB = Number(data.saldoAwalBank);
+        awalTunai = isFinite(claimT) ? claimT : prev.tunai;
+        awalBank  = isFinite(claimB) ? claimB : prev.bank;
+        var difT = Math.round(awalTunai) - Math.round(prev.tunai);
+        var difB = Math.round(awalBank) - Math.round(prev.bank);
+        if (difT !== 0 || difB !== 0) {
+          adjust = { tunai: difT, bank: difB, alasan: String(data.alasanRollforward).trim() };
+        }
+      } else {
+        // Default: kunci ke rollforward. Input diabaikan → selalu bisa disimpan.
+        awalTunai = prev.tunai; awalBank = prev.bank;
       }
     } else {
       awalTunai = Number(data.saldoAwalTunai) || 0;
