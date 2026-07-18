@@ -533,17 +533,39 @@
   function renderPeriode(host, res) {
     if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
     var adaOpen = (res.data || []).some(function(p) { return String(p.status).toUpperCase() === 'OPEN'; });
-    var cols = [{t:'Nama Periode'},{t:'Mulai'},{t:'Tutup'},{t:'Status'},{t:'Saldo Awal (T/B)'},{t:'Saldo Akhir (T/B)'},{t:'Total'}];
+    var cols = [{t:'Nama Periode'},{t:'Mulai'},{t:'Tutup'},{t:'Status'},{t:'Saldo Awal (T/B)'},{t:'Saldo Akhir (T/B)'},{t:'Total'},{t:'Aksi'}];
     var rows = (res.data || []).map(function(p) {
       var adaAkhir = (p.saldoAkhirTotal !== null && p.saldoAkhirTotal !== undefined);
       var awal = 'T ' + rp(p.saldoAwalTunai || 0) + ' / B ' + rp(p.saldoAwalBank || 0);
       var akhir = adaAkhir ? ('T ' + rp(p.saldoAkhirTunai || 0) + ' / B ' + rp(p.saldoAkhirBank || 0)) : '—';
       var total = adaAkhir ? rp(p.saldoAkhirTotal) : '—';
-      return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td class="t-date">' + esc(p.tanggalMulai || '-') + '</td><td class="t-date">' + esc(p.tanggalTutup || '-') + '</td><td>' + statusBadge(p.status) + '</td><td>' + esc(awal) + '</td><td>' + esc(akhir) + '</td><td style="font-weight:700;">' + esc(total) + '</td></tr>';
+      var closed = String(p.status).toUpperCase() === 'CLOSED';
+      var aksi = closed ? '<button class="abtn" onclick="bukaKembaliPeriode(\'' + esc(p.id) + '\',\'' + esc(String(p.nama).replace(/'/g,"\\'")) + '\')">↩️ Buka Kembali</button>' : '—';
+      return '<tr><td class="t-jenis">' + esc(p.nama) + '</td><td class="t-date">' + esc(p.tanggalMulai || '-') + '</td><td class="t-date">' + esc(p.tanggalTutup || '-') + '</td><td>' + statusBadge(p.status) + '</td><td>' + esc(awal) + '</td><td>' + esc(akhir) + '</td><td style="font-weight:700;">' + esc(total) + '</td><td>' + aksi + '</td></tr>';
     }).join('');
     var tombol = '<button class="qbtn" onclick="buatPeriodeBaru()"' + (adaOpen ? ' disabled title="Masih ada periode OPEN — tutup dulu"' : '') + '>➕ Buat Periode Baru</button>';
     host.innerHTML = '<div style="margin-bottom:12px;">' + tombol + (adaOpen ? ' <span class="muted" style="font-size:12px;">Masih ada periode OPEN — tutup buku dulu.</span>' : '') + '</div>' +
       panelBox('Periode', (res.data || []).length + ' periode', tableHtml(cols, rows));
+  }
+
+  // Buka kembali periode CLOSED (perbaiki salah tutup buku). PRIVILEGED.
+  function bukaKembaliPeriode(id, nama) {
+    if (!confirm('BUKA KEMBALI periode "' + nama + '"?\nPeriode aktif saat ini akan OTOMATIS DITUTUP. Aksi dicatat sebagai Aktivitas Istimewa.\n\nLanjut?')) return;
+    var alasan = prompt('Alasan (minimal 10 karakter):');
+    if (alasan === null || alasan.trim().length < 10) { toast('Alasan minimal 10 karakter.'); return; }
+    function kirim(konf) {
+      call('bukaKembaliPeriode', [id, alasan.trim(), konf], function(r) {
+        if (r && r.success) { toast('Periode "' + (r.dibukaKembali || nama) + '" dibuka kembali'); go('periode'); return; }
+        if (r && r.butuhKonfirmasiNama) {
+          var k = prompt('Ketik ULANG nama periode untuk konfirmasi:\n"' + r.nama + '"');
+          if (k === null) return;
+          if (k.trim() !== r.nama) { toast('Nama tidak cocok.'); return; }
+          kirim(k.trim()); return;
+        }
+        toast((r && r.message) || 'Gagal membuka kembali.');
+      });
+    }
+    kirim('');
   }
 
   // Buat periode baru dari Admin Console. Saldo awal mengikuti rollforward tutup buku.

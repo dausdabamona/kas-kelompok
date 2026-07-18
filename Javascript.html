@@ -3427,6 +3427,8 @@ var App = {
       var pidS = self.escapeHtml(p.id).replace(/'/g, "\\'");
       var tutupBtn = (open && bisaKelola) ? '<button class="btn btn-sm btn-outline" style="margin-top:8px;" onclick="App.pageTutupBuku()">🔒 Tutup Buku</button>' : '';
       var arsipBtn = (!open) ? '<button class="btn btn-sm btn-outline" style="margin-top:8px;" onclick="App.bukaArsipPeriode(\'' + pidS + '\')">📄 Laporan (arsip)</button>' : '';
+      var namaJs = self.escapeHtml(p.nama || '').replace(/'/g, "\\'");
+      var bukaKembaliBtn = (!open && bisaKelola) ? '<button class="btn btn-sm" style="margin-top:8px;background:#F3E6CF;color:#6f5220;border:none;" onclick="App.bukaKembaliPeriode(\'' + pidS + '\',\'' + namaJs + '\')">↩️ Buka Kembali (perbaiki)</button>' : '';
       var adaAkhir = (p.saldoAkhirTotal !== null && p.saldoAkhirTotal !== undefined);
       var labelAkhir = open ? 'Saldo saat ini' : 'Saldo akhir';
       var saldoBox =
@@ -3445,7 +3447,7 @@ var App = {
             '<div><div style="font-weight:700;">' + self.escapeHtml(p.nama || '-') + ' ' + badge + '</div>' +
               '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Mulai: ' + self.formatDate(p.tanggalMulai) + (p.tanggalTutup ? ' · Tutup: ' + self.formatDate(p.tanggalTutup) : '') + '</div>' +
             '</div>' +
-          '</div>' + saldoBox + tutupBtn + arsipBtn +
+          '</div>' + saldoBox + tutupBtn + arsipBtn + bukaKembaliBtn +
         '</div>';
     }).join('') || '<div class="info-box">Belum ada periode.</div>';
 
@@ -3497,6 +3499,36 @@ var App = {
   },
 
   // Buka arsip laporan PDF periode yang sudah ditutup.
+  // Buka kembali periode CLOSED (perbaiki salah tutup buku). Admin, PRIVILEGED.
+  bukaKembaliPeriode: function(periodeId, nama) {
+    var self = this;
+    if (!confirm('BUKA KEMBALI periode "' + nama + '"?\n\n⚠ Periode yang sedang aktif akan OTOMATIS DITUTUP (hanya boleh ada satu periode aktif).\nAksi ini dicatat sebagai Aktivitas Istimewa.\n\nLanjut?')) return;
+    var alasan = prompt('Alasan membuka kembali periode ini (minimal 10 karakter):');
+    if (alasan === null) return;
+    if (alasan.trim().length < 10) { self.toast('Alasan minimal 10 karakter.'); return; }
+    function kirim(konfirmasiNama) {
+      App.srv()
+        .withSuccessHandler(function(r) {
+          if (r && r.success) {
+            self.toast('Periode "' + (r.dibukaKembali || nama) + '" dibuka kembali ✓');
+            self.pagePeriode();
+            return;
+          }
+          if (r && r.butuhKonfirmasiNama) {
+            var k = prompt('Ketik ULANG nama periode untuk konfirmasi:\n"' + r.nama + '"');
+            if (k === null) return;
+            if (k.trim() !== r.nama) { self.toast('Nama tidak cocok. Dibatalkan.'); return; }
+            kirim(k.trim());
+            return;
+          }
+          self.toast((r && r.message) || 'Gagal membuka kembali periode.');
+        })
+        .withFailureHandler(function() { self.toast('Gagal terhubung.'); })
+        .bukaKembaliPeriode(periodeId, alasan.trim(), konfirmasiNama);
+    }
+    kirim('');
+  },
+
   bukaArsipPeriode: function(periodeId) {
     var self = this;
     var win = window.open('', '_blank');

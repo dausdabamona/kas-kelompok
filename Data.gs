@@ -1125,6 +1125,72 @@ function getInfoBukaPeriode() {
   }
 }
 
+// Buka kembali periode yang sudah CLOSED (mis. salah tutup buku). PRIVILEGED — ADMIN.
+// Periode OPEN saat ini otomatis ditutup (hanya boleh 1 periode OPEN). Wajib alasan +
+// ketik ulang nama periode untuk konfirmasi. Arsip tutup buku periode itu ditandai
+// 'Dibuka Kembali' agar tak lagi dianggap sebagai penutupan.
+function bukaKembaliPeriode(periodeId, alasan, konfirmasiNama) {
+  var auth = requirePerm('periode.manage');
+  if (!auth.success) return { success: false, message: auth.message };
+  if (!periodeId) return { success: false, message: 'ID periode wajib.' };
+  var alasanBersih = String(alasan || '').trim();
+  if (alasanBersih.length < 10) return { success: false, message: 'Alasan wajib diisi (minimal 10 karakter).' };
+  return withLock_(function() {
+    var ss = getSS_();
+    var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
+    if (!sheet || sheet.getLastRow() < 2) return { success: false, message: 'Master Period tidak ditemukan.' };
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    var colStatus  = (h['status']   !== undefined ? h['status']   : 4) + 1;
+    var colTutup   = (h['tgltutup'] !== undefined ? h['tgltutup'] : 3) + 1;
+    var colCatatan = (h['catatan']  !== undefined ? h['catatan']  : 7) + 1;
+    var targetRow = -1, targetNama = '', targetStatus = '';
+    var openRows = [];
+    for (var i = 1; i < rows.length; i++) {
+      var pid = String(hGet_(rows[i], h, 'periode', 0) || rows[i][0]);
+      var st = String(hGet_(rows[i], h, 'status', 4) || '').toUpperCase();
+      if (pid === String(periodeId)) { targetRow = i + 1; targetNama = String(hGet_(rows[i], h, 'nama', 1) || ''); targetStatus = st; }
+      else if (st === CONFIG.STATUS.OPEN) openRows.push({ row: i + 1, nama: String(hGet_(rows[i], h, 'nama', 1) || '') });
+    }
+    if (targetRow < 0) return { success: false, message: 'Periode tidak ditemukan.' };
+    if (targetStatus !== CONFIG.STATUS.CLOSED) return { success: false, message: 'Hanya periode CLOSED yang bisa dibuka kembali (status saat ini: ' + targetStatus + ').' };
+    // Konfirmasi: ketik ulang nama periode.
+    if (String(konfirmasiNama || '').trim() !== targetNama) {
+      return { success: false, butuhKonfirmasiNama: true, nama: targetNama,
+        message: 'Buka kembali periode "' + targetNama + '"? Periode aktif saat ini akan otomatis ditutup. Ketik ulang nama periode untuk konfirmasi.' };
+    }
+    var now = new Date();
+    // Tutup periode OPEN saat ini (otomatis).
+    var ditutup = [];
+    for (var o = 0; o < openRows.length; o++) {
+      sheet.getRange(openRows[o].row, colStatus).setValue(CONFIG.STATUS.CLOSED);
+      sheet.getRange(openRows[o].row, colTutup).setValue(toDateStr_(now));
+      var catLama = String(sheet.getRange(openRows[o].row, colCatatan).getValue() || '');
+      sheet.getRange(openRows[o].row, colCatatan).setValue((catLama ? catLama + ' | ' : '') + 'Ditutup otomatis: periode ' + targetNama + ' dibuka kembali');
+      ditutup.push(openRows[o].nama);
+    }
+    // Buka kembali target: status OPEN, kosongkan Tgl Tutup.
+    sheet.getRange(targetRow, colStatus).setValue(CONFIG.STATUS.OPEN);
+    sheet.getRange(targetRow, colTutup).setValue('');
+    // Tandai arsip tutup buku periode target agar tak lagi dianggap 'Tutup'.
+    var arsipDitandai = 0;
+    var shT = ss.getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+    if (shT && shT.getLastRow() > 1) {
+      var tr = shT.getDataRange().getValues(); var th = headerMap_(tr[0]);
+      var colTS = (th['status'] !== undefined ? th['status'] : 6) + 1;
+      for (var t = 1; t < tr.length; t++) {
+        if (String(hGet_(tr[t], th, 'periodeid', 1)) === String(periodeId) && String(hGet_(tr[t], th, 'status', 6)) === 'Tutup') {
+          shT.getRange(t + 1, colTS).setValue('Dibuka Kembali'); arsipDitandai++;
+        }
+      }
+    }
+    logActivityWajib_(auth.user.email, 'PRIVILEGED_BUKA_KEMBALI_PERIODE',
+      'Periode: ' + targetNama + ' | ALASAN: ' + alasanBersih + ' | Ditutup otomatis: ' + (ditutup.join(', ') || '-') + ' | Arsip ditandai: ' + arsipDitandai);
+    try { var c = CacheService.getScriptCache(); c.remove('dashboard_saldo'); c.remove('buku_ir_data'); c.remove('master_trx_data'); } catch(e) {}
+    return { success: true, dibukaKembali: targetNama, ditutup: ditutup };
+  });
+}
+
 function bukaPeriode(data) {
   try {
     var auth = requirePerm('periode.manage');
