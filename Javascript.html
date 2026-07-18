@@ -2216,15 +2216,43 @@ var App = {
   // ─────────────────────────────────────────────────
   pageLaporanPDF: function() {
     this.history.push('dashboard');
+    var self = this;
+    self.showLoading('Memuat periode...');
+    // Ambil daftar periode agar pengguna bisa memilih periode mana yang dilaporkan.
+    App.srv()
+      .withSuccessHandler(function(r) { self._renderLaporanPDF((r && r.success) ? (r.data || []) : []); })
+      .withFailureHandler(function() { self._renderLaporanPDF([]); })
+      .getAllPeriode();
+  },
+
+  _renderLaporanPDF: function(periodeList) {
+    var self = this;
+    // Urutkan: OPEN dulu, lalu terbaru. Tandai status.
+    var opts = (periodeList || []).map(function(p) {
+      var open = String(p.status).toUpperCase() === 'OPEN';
+      return { id: p.id, nama: p.nama, open: open, tutup: p.tanggalTutup };
+    });
+    // Periode aktif (OPEN) sebagai default terpilih.
+    var defId = '';
+    for (var i = 0; i < opts.length; i++) { if (opts[i].open) { defId = opts[i].id; break; } }
+    if (!defId && opts.length) defId = opts[0].id;
+    var selectOpts = opts.length
+      ? opts.map(function(o) {
+          return '<option value="' + self.escapeHtml(o.id) + '"' + (o.id === defId ? ' selected' : '') + '>' +
+            self.escapeHtml(o.nama) + ' — ' + (o.open ? 'Aktif (interim)' : 'Tutup (final)') + '</option>';
+        }).join('')
+      : '<option value="">(belum ada periode)</option>';
     var html = this.pageWrapper('Laporan PDF',
       '<div class="info-box mb-16">' +
         '<strong>Laporan Keuangan Lengkap</strong><br>' +
-        'Laporan tersedia kapan saja. Sebelum Tutup Buku akan menghasilkan laporan <strong>INTERIM</strong>; sesudah Tutup Buku menghasilkan laporan <strong>FINAL</strong>.<br>' +
-        'Laporan mencakup: semua pemasukan, semua pengeluaran, dan arus kas (cash flow) lengkap per sumber kas (Tunai/Bank).' +
+        'Pilih periode yang mau dilaporkan. Periode <strong>Aktif</strong> menghasilkan laporan <strong>INTERIM</strong> (data hidup); periode <strong>Tutup</strong> menghasilkan laporan <strong>FINAL</strong> dari arsip saat tutup buku.' +
       '</div>' +
       '<div class="card">' +
         '<div class="section-title mb-8">Buat Laporan</div>' +
-        '<p style="font-size:13px;color:#555;margin-bottom:16px;">Klik tombol di bawah untuk membuat laporan. Laporan akan terbuka di tab baru dan siap dicetak (Ctrl+P).</p>' +
+        '<div class="form-group"><label>Periode</label>' +
+          '<select id="pdfPeriodeId" class="form-control">' + selectOpts + '</select>' +
+        '</div>' +
+        '<p style="font-size:13px;color:#555;margin:8px 0 16px;">Laporan terbuka di tab baru dan siap dicetak (Ctrl+P).</p>' +
         '<div id="laporanPDFError"></div>' +
         '<div id="laporanPDFResult" style="display:none;" class="info-box mb-12"></div>' +
         '<button class="btn btn-primary" id="btnLaporanPDF" onclick="App.buatLaporanPDF()">📄 Buat &amp; Unduh Laporan</button>' +
@@ -2234,6 +2262,8 @@ var App = {
   },
 
   buatLaporanPDF: function() {
+    var sel = document.getElementById('pdfPeriodeId');
+    var periodeId = sel ? sel.value : '';
     var btn = document.getElementById('btnLaporanPDF');
     var errEl = document.getElementById('laporanPDFError');
     var resEl = document.getElementById('laporanPDFResult');
@@ -2273,7 +2303,7 @@ var App = {
         if (win) win.close();
         errEl.innerHTML = '<div class="error-box">' + err.message + '</div>';
       })
-      .generatePDF();
+      .generatePDF(periodeId || null);
   },
 
   _openLaporanManual: function() {
