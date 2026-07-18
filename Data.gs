@@ -95,7 +95,11 @@ function getPeriodeById_(periodeId) {
           id: String(rows[i][0]),
           nama: String(hGet_(rows[i], h, 'nama', 1) || ''),
           tanggalMulai: toDateStr_(hGet_(rows[i], h, 'tglmulai', 2)),
-          status: String(hGet_(rows[i], h, 'status', 4) || '')
+          tanggalTutup: toDateStr_(hGet_(rows[i], h, 'tgltutup', 3)),
+          status: String(hGet_(rows[i], h, 'status', 4) || ''),
+          saldoAwalTunai: Number(hGet_(rows[i], h, 'saldoawaltunai', 5)) || 0,
+          saldoAwalBank: Number(hGet_(rows[i], h, 'saldoawalbank', 6)) || 0,
+          catatan: String(hGet_(rows[i], h, 'catatan', 7) || '')
         };
       }
     }
@@ -2643,12 +2647,14 @@ function submitRincianIR(data) {
 // ──────────────────────────────────────────────────────
 // REKAPITULASI
 // ──────────────────────────────────────────────────────
-function getRekapitulasiData() {
+function getRekapitulasiData(periodeIdParam) {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
-    var periode = getPeriodeAktif();
+    // Bila periodeIdParam diberikan, laporkan periode itu (mis. periode CLOSED untuk
+    // laporan historis); jika tidak, pakai periode aktif.
+    var periode = periodeIdParam ? getPeriodeById_(periodeIdParam) : getPeriodeAktif();
     var periodeId = periode ? periode.id : null;
 
     var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
@@ -3346,39 +3352,45 @@ function generatePDF(periodeId) {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
 
-    // T14: laporan periode yang SUDAH DITUTUP selalu disajikan dari ARSIP
-    // (snapshot saat tutup buku), bukan di-generate ulang dari data hidup.
+    // T14: laporan periode yang SUDAH DITUTUP diutamakan dari ARSIP (snapshot saat
+    // tutup buku). Bila arsip TIDAK ada (mis. FOLDER_ARSIP_ID belum diset waktu tutup
+    // buku), laporan tetap dibuat dari DATA HISTORIS periode itu (mode 'historis').
+    var historis = false;
     if (periodeId) {
       var p = getPeriodeById_(periodeId);
       if (p && String(p.status) === CONFIG.STATUS.CLOSED) {
         var arsipUrl = _arsipUrlPeriode_(periodeId);
         if (arsipUrl) return { success: true, dariArsip: true, arsipUrl: arsipUrl, periodeNama: p.nama };
-        return { success: false, message: 'Laporan periode tertutup tidak diarsipkan (arsip belum dikonfigurasi saat tutup buku).' };
+        historis = true; // tak ada arsip → susun dari data historis periode ini
       }
     }
 
-    var rekap = getRekapitulasiData();
+    // Laporkan periode yang diminta (periodeId) atau periode aktif bila null.
+    var rekap = getRekapitulasiData(periodeId || null);
     if (!rekap.success) return rekap;
 
-    // Lampirkan data tambahan (best-effort; jika gagal, section dilewati)
-    try { var ls = getLaporanSetoran(); if (ls && ls.success) rekap.setoran = ls; } catch(e) {}
-    try { var pb = getPembelaanData(); if (pb && pb.success) rekap.pembelaan = pb; } catch(e) {}
-    try {
-      var pl = getPatunganList();
-      if (pl && pl.success) {
-        var terobosan = [];
-        (pl.data || []).forEach(function(pat) {
-          var t = getTagihanPatungan(pat.id);
-          if (t && t.success) terobosan.push(t);
-        });
-        rekap.terobosan = terobosan;
-      }
-    } catch(e) {}
-    try {
-      var ss2 = getSS_();
-      var stList = getSerahTerimaForPDF_(ss2, (rekap.periode && rekap.periode.id) ? rekap.periode.id : '');
-      if (stList && stList.length > 0) rekap.serahTerima = stList;
-    } catch(e) {}
+    // Lampiran seksi tambahan hanya untuk laporan periode AKTIF (data hidup).
+    // Untuk laporan historis, seksi tsb dilewati agar tidak mencampur data periode lain.
+    if (!historis) {
+      try { var ls = getLaporanSetoran(); if (ls && ls.success) rekap.setoran = ls; } catch(e) {}
+      try { var pb = getPembelaanData(); if (pb && pb.success) rekap.pembelaan = pb; } catch(e) {}
+      try {
+        var pl = getPatunganList();
+        if (pl && pl.success) {
+          var terobosan = [];
+          (pl.data || []).forEach(function(pat) {
+            var t = getTagihanPatungan(pat.id);
+            if (t && t.success) terobosan.push(t);
+          });
+          rekap.terobosan = terobosan;
+        }
+      } catch(e) {}
+      try {
+        var ss2 = getSS_();
+        var stList = getSerahTerimaForPDF_(ss2, (rekap.periode && rekap.periode.id) ? rekap.periode.id : '');
+        if (stList && stList.length > 0) rekap.serahTerima = stList;
+      } catch(e) {}
+    }
 
     var html = buildPDFHTML(rekap);
     // Kirim HTML string ke client — browser akan render langsung via window.open
@@ -3390,7 +3402,7 @@ function generatePDF(periodeId) {
 
 function buildPDFHTML(data) {
   var p = data.periode || {};
-  var isFinal = p.status === 'Tutup';
+  var isFinal = (p.status === 'Tutup' || String(p.status).toUpperCase() === 'CLOSED');
   var statusLabel = isFinal ? 'LAPORAN FINAL' : 'LAPORAN INTERIM';
   var statusColor = isFinal ? '#166534' : '#92400e';
   var statusBg   = isFinal ? '#dcfce7' : '#fef3c7';
