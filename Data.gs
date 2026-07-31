@@ -1306,12 +1306,18 @@ function submitTransaksi(data) {
     var tgl = tglCek.tgl;
 
     // T10: pengeluaran di atas ambang wajib ada bukti (lampiran).
+    // SEMENTARA DINONAKTIFKAN: hanya diwajibkan bila Script Property WAJIB_BUKTI = 'true'.
+    // Default (properti kosong/'false') → bukti bersifat OPSIONAL (tak menolak simpan).
     if (data.tipe === 'keluar') {
-      var ambang = 500000;
-      try { var av = PropertiesService.getScriptProperties().getProperty('AMBANG_BUKTI'); if (av) ambang = Number(av) || 500000; } catch(e) {}
-      var jmlBukti = (data.buktiList && data.buktiList.length) ? data.buktiList.length : 0;
-      if (nominal > ambang && jmlBukti === 0) {
-        return { success: false, butuhBukti: true, message: 'Pengeluaran di atas Rp ' + ambang.toLocaleString('id-ID') + ' wajib melampirkan minimal 1 bukti (foto nota).' };
+      var wajibBukti = false;
+      try { wajibBukti = String(PropertiesService.getScriptProperties().getProperty('WAJIB_BUKTI') || '').toLowerCase() === 'true'; } catch(e) {}
+      if (wajibBukti) {
+        var ambang = 500000;
+        try { var av = PropertiesService.getScriptProperties().getProperty('AMBANG_BUKTI'); if (av) ambang = Number(av) || 500000; } catch(e) {}
+        var jmlBukti = (data.buktiList && data.buktiList.length) ? data.buktiList.length : 0;
+        if (nominal > ambang && jmlBukti === 0) {
+          return { success: false, butuhBukti: true, message: 'Pengeluaran di atas Rp ' + ambang.toLocaleString('id-ID') + ' wajib melampirkan minimal 1 bukti (foto nota).' };
+        }
       }
     }
 
