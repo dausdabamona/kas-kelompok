@@ -4046,6 +4046,75 @@ function mapPosNamaToBukuIRCol(formula, nama, irColMap) {
   return -1;
 }
 
+// Bagi hasil: hitung hak Kelompok / Desa / Daerah dari pemasukan periode.
+// Tiap jenis pemasukan punya %Kelompok, %Desa, %Daerah (Master Pemasukan).
+// periodeId opsional → default periode aktif. Baris dibatalkan diabaikan.
+function getBagiHasil(periodeId) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = periodeId ? getPeriodeById_(periodeId) : getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode untuk dihitung.' };
+    var pid = periode.id;
+
+    // Master Pemasukan → jenis + persentase.
+    var jenis = {}; // kode → {nama, pctK, pctD, pctDr}
+    var shM = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+    if (shM && shM.getLastRow() > 1) {
+      var mr = shM.getDataRange().getValues(); var mh = headerMap_(mr[0]);
+      for (var i = 1; i < mr.length; i++) {
+        var kode = String(hGet_(mr[i], mh, 'kode', 0) || '');
+        if (!kode) continue;
+        jenis[kode] = {
+          nama: String(hGet_(mr[i], mh, 'namapemasukan', 1) || hGet_(mr[i], mh, 'nama', 1) || kode),
+          pctK: Number(hGet_(mr[i], mh, '%kelompok', 3)) || 0,
+          pctD: Number(hGet_(mr[i], mh, '%desa', 4)) || 0,
+          pctDr: Number(hGet_(mr[i], mh, '%daerah', 5)) || 0
+        };
+      }
+    }
+
+    // Total pemasukan per jenis untuk periode ini (skip dibatalkan).
+    var masukPerJenis = {};
+    var shP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (shP && shP.getLastRow() > 1) {
+      var pr = shP.getDataRange().getValues(); var ph = headerMap_(pr[0]);
+      for (var r = 1; r < pr.length; r++) {
+        if (!hGet_(pr[r], ph, 'id', 0)) continue;
+        if (barisDibatalkan_(pr[r], ph)) continue;
+        if (String(hGet_(pr[r], ph, 'periodeid', 1)) !== String(pid)) continue;
+        var jid = String(hGet_(pr[r], ph, 'jenisid', 2) || '');
+        masukPerJenis[jid] = (masukPerJenis[jid] || 0) + (Number(hGet_(pr[r], ph, 'nominal', 5)) || 0);
+      }
+    }
+
+    var totKel = 0, totDesa = 0, totDaerah = 0, totMasuk = 0;
+    var rincian = [];
+    Object.keys(masukPerJenis).forEach(function(jid) {
+      var m = masukPerJenis[jid] || 0;
+      if (m <= 0) return;
+      var j = jenis[jid] || { nama: jid, pctK: 100, pctD: 0, pctDr: 0 };
+      var kel = Math.round(m * j.pctK / 100);
+      var desa = Math.round(m * j.pctD / 100);
+      var daerah = Math.round(m * j.pctDr / 100);
+      totMasuk += m; totKel += kel; totDesa += desa; totDaerah += daerah;
+      rincian.push({ jenis: j.nama, masuk: m, pctK: j.pctK, pctD: j.pctD, pctDr: j.pctDr, kelompok: kel, desa: desa, daerah: daerah });
+    });
+    rincian.sort(function(a, b) { return b.masuk - a.masuk; });
+
+    return {
+      success: true,
+      periode: { id: pid, nama: periode.nama, status: periode.status },
+      totalMasuk: totMasuk,
+      kelompok: totKel, desa: totDesa, daerah: totDaerah,
+      rincian: rincian
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 function getLaporanSetoran() {
   try {
     var auth = checkAuth();
