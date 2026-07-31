@@ -11,9 +11,29 @@ REM ============================================================
 
 REM  >>> ISI SEKALI: ID deployment web app Anda (lihat langkah di bawah) <<<
 set "DEPLOYMENT_ID=AKfycbzAqaIYpcoVWJhJaZ01VpDKJ-FIcf6doR_2tefxO3r1_1BFINu_tBVj94mgdqFOC_96"
+set "BRANCH=claude/vigilant-goldberg-5aiati"
 
 echo.
-echo === [1/2] clasp push (unggah kode) ===
+echo === [1/3] git pull (tarik kode terbaru dari GitHub) ===
+call git pull --ff-only origin %BRANCH%
+if errorlevel 1 (
+  echo.
+  echo ############################################################
+  echo  GAGAL menarik dari GitHub ^(mungkin ada perubahan lokal yang
+  echo  belum di-commit, atau riwayat menyimpang^).
+  echo  Deploy DIBATALKAN agar tidak mengunggah kode lama ke Apps Script.
+  echo.
+  echo  Perbaikan umum ^(hati-hati, membuang perubahan lokal^):
+  echo     git stash            ^(simpan sementara perubahan lokal^)
+  echo     git pull origin %BRANCH%
+  echo  atau jika yakin mau ikut GitHub sepenuhnya:
+  echo     git fetch origin ^&^& git reset --hard origin/%BRANCH%
+  echo ############################################################
+  goto :end
+)
+
+echo.
+echo === [2/3] clasp push (unggah kode) ===
 call clasp push --force
 if errorlevel 1 goto :error
 
@@ -34,7 +54,7 @@ if "%DEPLOYMENT_ID%"=="" (
 )
 
 echo.
-echo === [2/2] clasp deploy (buat versi baru pada deployment yang sama) ===
+echo === [3/3] clasp deploy (buat versi baru pada deployment yang sama) ===
 call clasp deploy --deploymentId %DEPLOYMENT_ID% --description "auto-deploy %date% %time%"
 if errorlevel 1 goto :error
 
