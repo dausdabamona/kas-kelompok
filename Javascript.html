@@ -485,7 +485,8 @@ var App = {
     function qa(icon, label, onclick) { return '<div class="np-qa-item" onclick="' + onclick + '"><div class="qi">' + icon + '</div><span class="ql">' + label + '</span></div>'; }
     var actions = [];
     if (periode && App.canInput('masuk')) actions.push(qa('➕', 'Masuk', "App.pageTransaksi('masuk')"));
-    if (periode && App.canInput('keluar')) actions.push(qa('➖', 'Keluar', "App.pageTransaksi()"));
+    if (periode && App.canInput('keluar')) actions.push(qa('➖', 'Keluar', "App.pageTransaksi('keluar')"));
+    if (periode && App.canInput('keluar')) actions.push(qa('🔄', 'Mutasi', "App.pageTransaksi('mutasi')"));
     if (App.can('bukuIR.input')) actions.push(qa('📖', 'Buku IR', 'App.pageBukuIR()'));
     if (App.can('bank.input') || App.can('bank.manage')) actions.push(qa('🏦', 'Bank', 'App.pageRekonsiliasi()'));
     if (App.can('terobosan.bayar') || App.can('view.terobosan')) actions.push(qa('🤝', 'Terobos', 'App.pagePatungan()'));
@@ -621,21 +622,25 @@ var App = {
   // ─────────────────────────────────────────────────
   // TRANSAKSI
   // ─────────────────────────────────────────────────
-  pageTransaksi: function() {
+  pageTransaksi: function(tipeAwal) {
     this.history.push('dashboard');
+    // Tab awal: 'masuk' (default), 'keluar', atau 'mutasi'.
+    var tipe = (tipeAwal === 'keluar' || tipeAwal === 'mutasi') ? tipeAwal : 'masuk';
+    // Hormati izin: bila tak berwenang input keluar, jangan buka tab keluar/mutasi.
+    if ((tipe === 'keluar' || tipe === 'mutasi') && !App.canInput('keluar')) tipe = 'masuk';
     this.showLoading('Memuat data transaksi...');
     var self = this;
     App.srv()
       .withSuccessHandler(function(r) {
         if (r && r.success) {
-          self.renderTransaksiForm('masuk', r.pemasukan || [], r.pengeluaran || [], r.anggota || []);
+          self.renderTransaksiForm(tipe, r.pemasukan || [], r.pengeluaran || [], r.anggota || []);
         } else {
           self.showError((r && r.message) || 'Gagal memuat data');
         }
       })
       .withFailureHandler(function(err) {
         // Fallback: render form kosong agar tetap bisa dipakai
-        self.renderTransaksiForm('masuk', [], [], []);
+        self.renderTransaksiForm(tipe, [], [], []);
       })
       .getTransaksiMasterData();
     this._masterP = null; this._masterPK = null; this._anggota = null;
