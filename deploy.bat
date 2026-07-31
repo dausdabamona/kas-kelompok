@@ -10,7 +10,7 @@ REM  URL /exec tetap sama, hanya kodenya diperbarui ke versi baru.
 REM ============================================================
 
 REM  >>> ISI SEKALI: ID deployment web app Anda (lihat langkah di bawah) <<<
-set "DEPLOYMENT_ID="
+set "DEPLOYMENT_ID=AKfycbzAqaIYpcoVWJhJaZ01VpDKJ-FIcf6doR_2tefxO3r1_1BFINu_tBVj94mgdqFOC_96"
 
 echo.
 echo === [1/2] clasp push (unggah kode) ===
