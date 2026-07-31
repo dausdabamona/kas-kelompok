@@ -105,7 +105,7 @@ function getDefaultPermMatrix_() {
     'view.setting': [R.ADMIN],
     'trx.input': allRoles, // dipertahankan demi kompatibilitas; enforcement kini via masuk/keluar
     'trx.input.masuk': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS, R.PENEROBOS],
-    'trx.input.keluar': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
+    'trx.input.keluar': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS],
     'bukuIR.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS],
     'jamaah.add': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
     'jamaah.edit': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
