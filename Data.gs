@@ -3378,7 +3378,22 @@ function generatePDF(periodeId) {
     // Lampiran seksi tambahan hanya untuk laporan periode AKTIF (data hidup).
     // Untuk laporan historis, seksi tsb dilewati agar tidak mencampur data periode lain.
     if (!historis) {
-      try { var ls = getLaporanSetoran(); if (ls && ls.success) rekap.setoran = ls; } catch(e) {}
+      // Seksi D ambil dari POS SETORAN (tempat realisasi benar-benar dicatat).
+      // Sebelumnya memakai getLaporanSetoran yang mencocokkan realisasi lewat kode
+      // jenis pemasukan, padahal sheet Setoran Desa menyimpan PosID → tak pernah
+      // cocok sehingga "Sudah Setor" selalu Rp 0 meski setoran sudah dilakukan.
+      try {
+        var rs = getRekapSetoran();
+        if (rs && rs.success) {
+          var sdBaris = (rs.data || []).map(function(p) {
+            return { nama: p.nama, kewajiban: p.target, sudahSetor: p.realisasi, sisa: p.sisa, status: p.status };
+          });
+          var sT = 0, sS = 0;
+          sdBaris.forEach(function(b) { sT += Number(b.kewajiban) || 0; sS += Number(b.sudahSetor) || 0; });
+          rekap.setoran = { success: true, data: sdBaris,
+            summary: { totalTarget: sT, totalSudahSetor: sS, totalSisa: sT - sS } };
+        }
+      } catch(e) {}
       try { var pb = getPembelaanData(); if (pb && pb.success) rekap.pembelaan = pb; } catch(e) {}
       try {
         var pl = getPatunganList();
