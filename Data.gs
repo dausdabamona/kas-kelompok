@@ -4115,6 +4115,52 @@ function getBagiHasil(periodeId) {
   }
 }
 
+// Kepemilikan saldo: dari Total Kas saat ini, berapa MILIK Kelompok vs masih
+// TITIPAN/kewajiban ke Desa & Daerah (hak yang belum disetor).
+//   Milik Desa   = hak Desa periode − yang sudah disetor ke desa
+//   Milik Daerah = hak Daerah periode − yang sudah disetor ke daerah (0 bila tak dilacak)
+//   Milik Kelompok = Total Kas − Milik Desa − Milik Daerah
+function getKepemilikanSaldo() {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var periode = getPeriodeAktif();
+    var pid = periode ? periode.id : null;
+    var saldo = saldoSaatIni_(pid, periode); // {tunai, bank}
+    var totalKas = (Number(saldo.tunai) || 0) + (Number(saldo.bank) || 0);
+
+    var hakDesa = 0, hakDaerah = 0, sudahSetorDesa = 0;
+    if (periode) {
+      try {
+        var ls = getLaporanSetoran();
+        if (ls && ls.success && ls.summary) {
+          hakDesa = Number(ls.summary.totalJatahDesa) || 0;
+          hakDaerah = Number(ls.summary.totalJatahDaerah) || 0;
+          sudahSetorDesa = Number(ls.summary.totalSudahSetor) || 0;
+        }
+      } catch(e) {}
+    }
+    var milikDesa = Math.max(0, hakDesa - sudahSetorDesa);
+    var milikDaerah = Math.max(0, hakDaerah); // setoran daerah belum dilacak terpisah
+    var milikKelompok = totalKas - milikDesa - milikDaerah;
+
+    return {
+      success: true,
+      periode: periode ? { id: pid, nama: periode.nama, status: periode.status } : null,
+      totalKas: totalKas,
+      milikKelompok: milikKelompok,
+      milikDesa: milikDesa,
+      milikDaerah: milikDaerah,
+      hakDesa: hakDesa,
+      hakDaerah: hakDaerah,
+      sudahSetorDesa: sudahSetorDesa,
+      kelompokNegatif: milikKelompok < 0
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 function getLaporanSetoran() {
   try {
     var auth = checkAuth();

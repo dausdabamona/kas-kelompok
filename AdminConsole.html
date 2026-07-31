@@ -775,7 +775,7 @@
       + '</div>'
       + '<div class="rail">'
         + '<div class="panel"><div class="panel-head"><div class="panel-title">Perlu Tindakan</div><span class="count-badge" style="margin-left:auto;">' + actCount + '</span></div>' + actHtml + '</div>'
-        + '<div class="panel" id="bhPanel"><div class="panel-head"><div class="panel-title">Bagi Hasil <small>periode berjalan</small></div><span class="link" style="margin-left:auto;" onclick="go(\'bagihasil\')">Rincian →</span></div><div class="sec-body" id="bhBody"><div class="empty" style="padding:14px 0;">Menghitung…</div></div></div>'
+        + '<div class="panel" id="bhPanel"><div class="panel-head"><div class="panel-title">Kepemilikan Saldo <small>dari Total Kas</small></div><span class="link" style="margin-left:auto;" onclick="go(\'bagihasil\')">Bagi hasil →</span></div><div class="sec-body" id="bhBody"><div class="empty" style="padding:14px 0;">Menghitung…</div></div></div>'
         + '<div class="panel pc"><span class="pc-status ' + (periodeOpen ? '' : 'closed') + '"><span style="width:5px;height:5px;border-radius:99px;background:currentColor;display:inline-block;"></span> ' + (periodeOpen ? 'Buku Terbuka' : 'Buku Tertutup') + '</span>'
           + '<div class="pc-name">' + esc((d.periode && d.periode.nama) || '—') + '</div>'
           + '<div class="pc-range">Mulai: ' + esc((d.periode && d.periode.mulai) || '—') + '</div>'
@@ -801,30 +801,30 @@
       document.querySelectorAll('.bar').forEach(function(b) { var h = b.style.height; b.style.height = '0'; requestAnimationFrame(function(){ b.style.height = h; }); });
     }, 30);
 
-    // Isi panel Bagi Hasil (Kelompok/Desa/Daerah) periode berjalan — async.
-    call('getBagiHasil', [], function(r) {
+    // Isi panel Kepemilikan Saldo — dari Total Kas: milik Kelompok/Desa/Daerah (async).
+    call('getKepemilikanSaldo', [], function(r) {
       var el = document.getElementById('bhBody');
       if (!el) return;
       if (!r || !r.success) { el.innerHTML = '<div class="empty" style="padding:14px 0;">' + esc((r && r.message) || 'Gagal memuat.') + '</div>'; return; }
-      var tot = r.totalMasuk || 0;
-      function pc(v) { return tot > 0 ? Math.round(v / tot * 100) : 0; }
+      var tot = r.totalKas || 0;
+      function pc(v) { return tot > 0 ? Math.round(Math.max(0, v) / tot * 100) : 0; }
       var bar = tot > 0
         ? '<div style="display:flex;height:12px;border-radius:7px;overflow:hidden;margin:2px 0 12px;">' +
-            '<div style="width:' + pc(r.kelompok) + '%;background:var(--g-mid);"></div>' +
-            '<div style="width:' + pc(r.desa) + '%;background:var(--g-soft);"></div>' +
-            '<div style="width:' + pc(r.daerah) + '%;background:var(--g-gold);"></div>' +
+            '<div style="width:' + pc(r.milikKelompok) + '%;background:var(--g-mid);"></div>' +
+            '<div style="width:' + pc(r.milikDesa) + '%;background:var(--g-soft);"></div>' +
+            '<div style="width:' + pc(r.milikDaerah) + '%;background:var(--g-gold);"></div>' +
           '</div>'
         : '';
-      function row(sw, nama, val, p) {
+      function row(sw, nama, val, sub) {
         return '<div class="stat-row"><span class="sw" style="width:11px;height:11px;border-radius:3px;background:' + sw + ';flex:none;"></span>' +
-          '<div><div class="stat-name">' + nama + '</div><div class="stat-sub">' + p + '% dari pemasukan</div></div>' +
+          '<div><div class="stat-name">' + nama + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>' +
           '<div class="stat-val">' + rp(val) + '</div></div>';
       }
       el.innerHTML = bar +
-        row('var(--g-mid)', 'Hak Kelompok', r.kelompok, pc(r.kelompok)) +
-        row('var(--g-soft)', 'Hak Desa', r.desa, pc(r.desa)) +
-        row('var(--g-gold)', 'Hak Daerah', r.daerah, pc(r.daerah)) +
-        '<div class="stat-row" style="border-top:1px solid var(--border-soft);"><span class="sw" style="width:11px;flex:none;"></span><div><div class="stat-name">Total Pemasukan</div></div><div class="stat-val">' + rp(tot) + '</div></div>';
+        row('var(--g-mid)', 'Milik Kelompok', r.milikKelompok, r.kelompokNegatif ? '⚠ kas kurang dari kewajiban' : 'hak kelompok') +
+        row('var(--g-soft)', 'Titipan Desa', r.milikDesa, 'hak desa belum disetor') +
+        row('var(--g-gold)', 'Titipan Daerah', r.milikDaerah, 'hak daerah belum disetor') +
+        '<div class="stat-row" style="border-top:1px solid var(--border-soft);"><span class="sw" style="width:11px;flex:none;"></span><div><div class="stat-name">Total Kas</div></div><div class="stat-val">' + rp(tot) + '</div></div>';
     });
   }
 
