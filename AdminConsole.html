@@ -280,7 +280,7 @@
   function menuDef() {
     return [
       { grp:'Ringkasan', items:[ ['dashboard','📊','Dashboard'], ['saldo','🧮','Pemeriksaan Saldo'], ['pdf','📄','Laporan PDF'] ] },
-      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['bagihasil','⚖️','Bagi Hasil'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'] ] },
+      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['rincianir','🧾','Rincian IR'], ['bagihasil','⚖️','Bagi Hasil'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'] ] },
       { grp:'Jamaah', items:[ ['anggota','👥','Anggota'], ['terobosan','🤝','Terobosan Kelompok'], ['serah','🤲','Serah Terima'] ] },
       { grp:'Tata Kelola', items:[ ['users','🔑','Kelola User'], ['hakakses','🛡️','Hak Akses'], ['devices','📱','Perangkat &amp; Sesi'], ['master','🗂️','Master &amp; Pos'], ['periode','🗓️','Periode'], ['log','📜','Activity Log'] ] }
     ];
@@ -292,6 +292,7 @@
     pdf:            { title:'Laporan PDF', run: renderPdf },
     bukuir:         { title:'Buku IR', ep:'getBukuIRData', run: renderBukuIR },
     bagihasil:      { title:'Bagi Hasil', ep:'getBagiHasil', run: renderBagiHasil },
+    rincianir:      { title:'Rincian IR', ep:'getRincianIR', run: renderRincianIR },
     setorandesa:    { title:'Setoran Desa', ep:'getRekapSetoran', run: renderSetoranDesa },
     bank:           { title:'Bank & Rekonsiliasi', ep:'getRekonsiliasiData', run: renderBank },
     laporansetoran: { title:'Laporan Setoran', ep:'getLaporanSetoran', run: renderLaporanSetoran },
@@ -398,6 +399,28 @@
       { label:'Saldo Bank (Sistem)', val: rp(s.bank), color:'var(--bank)' },
       { label:'Total Kas', val: rp(s.total), color:'var(--admin)' }
     ]) + panelBox('Pemeriksaan Saldo', res.periode ? res.periode.nama : '', '<div class="sec-body"><p style="color:var(--text-muted);padding:6px 0;">Input saldo aktual & tutup buku dilakukan di aplikasi.</p><a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl()) + '">Buka di Aplikasi →</a></div>');
+  }
+
+  // ── VIEW: Rincian IR (per jamaah + komponen) ──
+  function renderRincianIR(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var t = res.total || {};
+    var cols = [{t:'Tanggal'},{t:'Jamaah'},{t:'IR',r:true},{t:'1/10 IR',r:true},{t:'Cicilan',r:true},{t:'Infak Daerah',r:true},{t:'Index',r:true},{t:'Total',r:true}];
+    var body = (res.rows || []).map(function(x) {
+      return '<tr><td class="t-date">' + esc(x.tanggal) + '</td><td class="t-jenis">' + esc(x.anggota) + '</td>' +
+        '<td class="r amt">' + num(x.ir) + '</td>' +
+        '<td class="r amt">' + num(x.ir10) + '</td>' +
+        '<td class="r amt">' + num(x.cicilan) + '</td>' +
+        '<td class="r amt">' + num(x.infakdaerah) + '</td>' +
+        '<td class="r amt" style="color:var(--g-mid);">' + num(x.index) + '</td>' +
+        '<td class="r amt" style="font-weight:800;">' + num(x.total) + '</td></tr>';
+    }).join('');
+    var foot = '<tr style="font-weight:800;border-top:2px solid var(--admin-soft);"><td colspan="2">TOTAL (' + (res.jumlah || 0) + ' rincian)</td>' +
+      '<td class="r amt">' + num(t.ir) + '</td><td class="r amt">' + num(t.ir10) + '</td><td class="r amt">' + num(t.cicilan) + '</td>' +
+      '<td class="r amt">' + num(t.infakdaerah) + '</td><td class="r amt" style="color:var(--g-mid);">' + num(t.index) + '</td>' +
+      '<td class="r amt">' + num(t.total) + '</td></tr>';
+    host.innerHTML = panelBox('Rincian IR', (res.periode && res.periode.nama) || '', tableHtml(cols, body + foot)) +
+      '<p style="color:var(--text-muted);font-size:12px;margin-top:-6px;">IR, 1/10 IR, Cicilan, Infak Daerah = hak Desa; Index = hak Kelompok. Rincian dari transaksi yang dibatalkan tidak ditampilkan.</p>';
   }
 
   // ── VIEW: Bagi Hasil (Hak Kelompok / Desa / Daerah) ──

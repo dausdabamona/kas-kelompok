@@ -4159,6 +4159,51 @@ function getBagiHasil(periodeId) {
   }
 }
 
+// Rincian IR periode berjalan: daftar per jamaah + komponen (IR, 1/10 IR,
+// Cicilan, Infak Daerah, Index) + total per baris & total kolom.
+function getRincianIR(periodeId) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var ss = getSS_();
+    var periode = periodeId ? getPeriodeById_(periodeId) : getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode untuk ditampilkan.' };
+    var pid = periode.id;
+    // Nama jamaah.
+    var angMap = {};
+    var shA = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (shA && shA.getLastRow() > 1) { var ar = shA.getDataRange().getValues(); for (var a = 1; a < ar.length; a++) if (ar[a][0]) angMap[String(ar[a][0])] = String(ar[a][1] || ''); }
+    var setBatal = trxPenerimaanDibatalkan_();
+    var rows = [], tot = { ir: 0, ir10: 0, cicilan: 0, infakdaerah: 0, index: 0, total: 0 };
+    var shIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+    if (shIR && shIR.getLastRow() > 1) {
+      var ir = shIR.getDataRange().getValues(); var ih = headerMap_(ir[0]);
+      for (var k = 1; k < ir.length; k++) {
+        if (!ir[k][0]) continue;
+        if (rincianYatim_(ir[k], ih, setBatal)) continue;
+        if (String(hGet_(ir[k], ih, 'periodeid', 2)) !== String(pid)) continue;
+        var c = {
+          ir: Number(hGet_(ir[k], ih, 'ir', 5)) || 0,
+          ir10: Number(hGet_(ir[k], ih, 'ir10', 6)) || 0,
+          cicilan: Number(hGet_(ir[k], ih, 'cicilan', 7)) || 0,
+          infakdaerah: Number(hGet_(ir[k], ih, 'infakdaerah', 8)) || 0,
+          index: Number(hGet_(ir[k], ih, 'index', 9)) || 0
+        };
+        var total = c.ir + c.ir10 + c.cicilan + c.infakdaerah + c.index;
+        if (total <= 0) continue;
+        var aid = String(hGet_(ir[k], ih, 'anggotaid', 3) || '');
+        rows.push({ tanggal: toDateStr_(hGet_(ir[k], ih, 'tanggal', 4)), anggota: angMap[aid] || aid || '-',
+          ir: c.ir, ir10: c.ir10, cicilan: c.cicilan, infakdaerah: c.infakdaerah, index: c.index, total: total });
+        tot.ir += c.ir; tot.ir10 += c.ir10; tot.cicilan += c.cicilan; tot.infakdaerah += c.infakdaerah; tot.index += c.index; tot.total += total;
+      }
+    }
+    rows.sort(function(x, y) { return String(x.tanggal).localeCompare(String(y.tanggal)); });
+    return { success: true, periode: { id: pid, nama: periode.nama, status: periode.status }, rows: rows, total: tot, jumlah: rows.length };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 // Kepemilikan saldo: dari Total Kas saat ini, berapa MILIK Kelompok vs masih
 // TITIPAN/kewajiban ke Desa & Daerah (hak yang belum disetor).
 //   Milik Desa   = hak Desa periode − yang sudah disetor ke desa
