@@ -532,6 +532,11 @@ function migrasiPengendalian() {
   // FASE 2: jenis khusus "Selisih Kas" di master (untuk baris penyesuaian tutup buku).
   var jm = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
   if (jm && !_adaKode_(jm, 'SELISIH_KAS')) { jm.appendRow(['SELISIH_KAS', 'Selisih Kas', 'Umum', 100, 0, 0, 'Umum', 'Aktif']); log.push('➕ Jenis Selisih Kas → Master Pemasukan'); }
+  // Jenis tambahan bagi hasil (idempoten). % [Kelompok, Desa, Daerah].
+  // Kesehatan = hak Desa; Sewa Kos & Lain-lain = hak Kelompok. Admin bisa tambah lagi via Master & Pos.
+  if (jm && !_adaKode_(jm, 'KESEHATAN')) { jm.appendRow(['KESEHATAN', 'Kesehatan', 'Umum', 0, 100, 0, 'Umum', 'Aktif']); log.push('➕ Jenis Kesehatan (Desa) → Master Pemasukan'); }
+  if (jm && !_adaKode_(jm, 'SEWA_KOS')) { jm.appendRow(['SEWA_KOS', 'Sewa Kos', 'Umum', 100, 0, 0, 'Umum', 'Aktif']); log.push('➕ Jenis Sewa Kos (Kelompok) → Master Pemasukan'); }
+  if (jm && !_adaKode_(jm, 'LAIN_LAIN')) { jm.appendRow(['LAIN_LAIN', 'Lain-lain', 'Umum', 100, 0, 0, 'Umum', 'Aktif']); log.push('➕ Jenis Lain-lain (Kelompok) → Master Pemasukan'); }
   var jk = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
   if (jk && !_adaKode_(jk, 'SELISIH_KAS')) { jk.appendRow(['SELISIH_KAS', 'Selisih Kas', 'Umum', 'Aktif']); log.push('➕ Jenis Selisih Kas → Master Pengeluaran'); }
 

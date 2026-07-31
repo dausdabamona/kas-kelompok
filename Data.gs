@@ -4058,8 +4058,8 @@ function getBagiHasil(periodeId) {
     if (!periode) return { success: false, message: 'Tidak ada periode untuk dihitung.' };
     var pid = periode.id;
 
-    // Master Pemasukan → jenis + persentase.
-    var jenis = {}; // kode → {nama, pctK, pctD, pctDr}
+    // Master Pemasukan → jenis + persentase + kategori.
+    var jenis = {}; // kode → {nama, kategori, pctK, pctD, pctDr}
     var shM = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
     if (shM && shM.getLastRow() > 1) {
       var mr = shM.getDataRange().getValues(); var mh = headerMap_(mr[0]);
@@ -4068,12 +4068,14 @@ function getBagiHasil(periodeId) {
         if (!kode) continue;
         jenis[kode] = {
           nama: String(hGet_(mr[i], mh, 'namapemasukan', 1) || hGet_(mr[i], mh, 'nama', 1) || kode),
+          kategori: String(hGet_(mr[i], mh, 'kategori', 2) || ''),
           pctK: Number(hGet_(mr[i], mh, '%kelompok', 3)) || 0,
           pctD: Number(hGet_(mr[i], mh, '%desa', 4)) || 0,
           pctDr: Number(hGet_(mr[i], mh, '%daerah', 5)) || 0
         };
       }
     }
+    function isBukuIR_(j) { return j && String(j.kategori).toLowerCase().indexOf('buku ir') !== -1; }
 
     // Total pemasukan per jenis untuk periode ini (skip dibatalkan).
     var masukPerJenis = {};
@@ -4089,18 +4091,60 @@ function getBagiHasil(periodeId) {
       }
     }
 
+    // Komponen Buku IR (dari Detail Buku IR) + pemilik tiap komponen.
+    // Aturan mengikuti Setoran Desa: IR, 1/10 IR, Cicilan, Infak Daerah = Desa; Index = Kelompok.
+    var IR_KOMP = [
+      { key: 'ir', kolom: 5, nama: 'IR', hak: 'desa' },
+      { key: 'ir10', kolom: 6, nama: '1/10 IR', hak: 'desa' },
+      { key: 'cicilan', kolom: 7, nama: 'Cicilan', hak: 'desa' },
+      { key: 'infakdaerah', kolom: 8, nama: 'Infak Daerah', hak: 'desa' },
+      { key: 'index', kolom: 9, nama: 'Index', hak: 'kelompok' }
+    ];
+    var irSum = { ir: 0, ir10: 0, cicilan: 0, infakdaerah: 0, index: 0 };
+    var adaBukuIR = false;
+    var shIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+    if (shIR && shIR.getLastRow() > 1) {
+      var setBatal = trxPenerimaanDibatalkan_();
+      var ir = shIR.getDataRange().getValues(); var ih = headerMap_(ir[0]);
+      for (var k = 1; k < ir.length; k++) {
+        if (!ir[k][0]) continue;
+        if (rincianYatim_(ir[k], ih, setBatal)) continue;
+        if (String(hGet_(ir[k], ih, 'periodeid', 2)) !== String(pid)) continue;
+        adaBukuIR = true;
+        IR_KOMP.forEach(function(c) { irSum[c.key] += Number(hGet_(ir[k], ih, c.key, c.kolom)) || 0; });
+      }
+    }
+
     var totKel = 0, totDesa = 0, totDaerah = 0, totMasuk = 0;
     var rincian = [];
+    // 1) Jenis non-Buku IR → pakai persentase master.
     Object.keys(masukPerJenis).forEach(function(jid) {
       var m = masukPerJenis[jid] || 0;
       if (m <= 0) return;
-      var j = jenis[jid] || { nama: jid, pctK: 100, pctD: 0, pctDr: 0 };
+      var j = jenis[jid] || { nama: jid, kategori: '', pctK: 100, pctD: 0, pctDr: 0 };
+      if (isBukuIR_(j)) return; // Buku IR ditangani per-komponen di bawah
       var kel = Math.round(m * j.pctK / 100);
       var desa = Math.round(m * j.pctD / 100);
       var daerah = Math.round(m * j.pctDr / 100);
       totMasuk += m; totKel += kel; totDesa += desa; totDaerah += daerah;
       rincian.push({ jenis: j.nama, masuk: m, pctK: j.pctK, pctD: j.pctD, pctDr: j.pctDr, kelompok: kel, desa: desa, daerah: daerah });
     });
+    // 2) Komponen Buku IR → satu baris per komponen sesuai pemiliknya.
+    if (adaBukuIR) {
+      IR_KOMP.forEach(function(c) {
+        var m = irSum[c.key] || 0;
+        if (m <= 0) return;
+        var kel = c.hak === 'kelompok' ? m : 0;
+        var desa = c.hak === 'desa' ? m : 0;
+        var daerah = c.hak === 'daerah' ? m : 0;
+        totMasuk += m; totKel += kel; totDesa += desa; totDaerah += daerah;
+        rincian.push({
+          jenis: 'Buku IR · ' + c.nama, masuk: m,
+          pctK: kel ? 100 : 0, pctD: desa ? 100 : 0, pctDr: daerah ? 100 : 0,
+          kelompok: kel, desa: desa, daerah: daerah
+        });
+      });
+    }
     rincian.sort(function(a, b) { return b.masuk - a.masuk; });
 
     return {
@@ -4131,13 +4175,16 @@ function getKepemilikanSaldo() {
 
     var hakDesa = 0, hakDaerah = 0, sudahSetorDesa = 0;
     if (periode) {
+      // Hak Desa/Daerah dari perhitungan bagi hasil yang sudah sadar-komponen
+      // (Buku IR dipecah: Index=Kelompok, sisanya=Desa) agar konsisten.
+      try {
+        var bh = getBagiHasil(pid);
+        if (bh && bh.success) { hakDesa = Number(bh.desa) || 0; hakDaerah = Number(bh.daerah) || 0; }
+      } catch(e) {}
+      // Yang sudah disetor ke desa dari realisasi Setoran Desa.
       try {
         var ls = getLaporanSetoran();
-        if (ls && ls.success && ls.summary) {
-          hakDesa = Number(ls.summary.totalJatahDesa) || 0;
-          hakDaerah = Number(ls.summary.totalJatahDaerah) || 0;
-          sudahSetorDesa = Number(ls.summary.totalSudahSetor) || 0;
-        }
+        if (ls && ls.success && ls.summary) sudahSetorDesa = Number(ls.summary.totalSudahSetor) || 0;
       } catch(e) {}
     }
     var milikDesa = Math.max(0, hakDesa - sudahSetorDesa);
