@@ -2840,11 +2840,31 @@ function getRekapitulasiData(periodeIdParam) {
 
     var saldo = saldoSaatIni_(periodeId, periode);   // K3: aman tanpa periode OPEN
 
+    // Mutasi Tunai↔Bank (pemindahbukuan). Ikut menentukan saldo per sumber kas,
+    // karena itu harus tampil di arus kas agar saldo akhir bisa direkonsiliasi.
+    var mutasiSetor = 0, mutasiTarik = 0;   // setor: Tunai→Bank, tarik: Bank→Tunai
+    var shMut = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
+    if (shMut && shMut.getLastRow() > 1) {
+      var mu = shMut.getDataRange().getValues();
+      var muH = headerMap_(mu[0]);
+      for (var mi = 1; mi < mu.length; mi++) {
+        if (!hGet_(mu[mi], muH, 'id', 0)) continue;
+        if (barisDibatalkan_(mu[mi], muH)) continue;
+        if (periodeId && String(hGet_(mu[mi], muH, 'periodeid', 1)) !== String(periodeId)) continue;
+        var muNom = Number(hGet_(mu[mi], muH, 'nominal', 3)) || 0;
+        var muArah = String(hGet_(mu[mi], muH, 'arah', 4) || '');
+        if (muArah === 'setor') mutasiSetor += muNom;
+        else if (muArah === 'tarik') mutasiTarik += muNom;
+      }
+    }
+
     return {
       success: true,
       periode: periode,
       pemasukan: pemasukan,
       pengeluaran: pengeluaran,
+      mutasiSetor: mutasiSetor,
+      mutasiTarik: mutasiTarik,
       totalPemasukanTunai: totalPTunai,
       totalPemasukanBank: totalPBank,
       totalPengeluaranTunai: totalPKTunai,
@@ -3651,11 +3671,22 @@ function buildPDFHTML(data) {
   html += '</table>';
 
   // ── C. Cash Flow ──
+  // Mutasi Tunai↔Bank WAJIB ikut: tanpa itu saldo per sumber kas tidak akan cocok
+  // dengan aplikasi (total tetap benar, tapi pembagian Tunai/Bank meleset).
   var saldoAwalTunai  = Number(p.saldoAwalTunai) || 0;
   var saldoAwalBank   = Number(p.saldoAwalBank)  || 0;
-  var saldoAkhirTunai = saldoAwalTunai + totalPTunai - totalPKTunai;
-  var saldoAkhirBank  = saldoAwalBank  + totalPBank  - totalPKBank;
+  var mutSetor = Number(data.mutasiSetor) || 0;   // Tunai → Bank
+  var mutTarik = Number(data.mutasiTarik) || 0;   // Bank → Tunai
+  var mutasiTunai = mutTarik - mutSetor;          // efek bersih ke Tunai
+  var mutasiBank  = mutSetor - mutTarik;          // efek bersih ke Bank
+  // Saldo akhir memakai angka dari calculateSaldo bila tersedia (satu sumber
+  // kebenaran dengan aplikasi); fallback ke perhitungan baris di atas.
+  var hitungTunai = saldoAwalTunai + totalPTunai - totalPKTunai + mutasiTunai;
+  var hitungBank  = saldoAwalBank  + totalPBank  - totalPKBank  + mutasiBank;
+  var saldoAkhirTunai = (data.saldoTunai !== undefined && data.saldoTunai !== null) ? Number(data.saldoTunai) : hitungTunai;
+  var saldoAkhirBank  = (data.saldoBank  !== undefined && data.saldoBank  !== null) ? Number(data.saldoBank)  : hitungBank;
   var grandTotal = saldoAkhirTunai + saldoAkhirBank;
+  function fmtMut(v) { return (v < 0 ? '(' + fmtRp(Math.abs(v)) + ')' : fmtRp(v)); }
 
   html += '<h2 style="' + S.h2 + '">C. Arus Kas (Cash Flow)</h2>';
   html += '<table style="' + S.tbl + '">' +
@@ -3669,6 +3700,13 @@ function buildPDFHTML(data) {
 
     '<tr><td colspan="3" style="' + S.cfSec + '">(-) Pengeluaran</td></tr>' +
     '<tr><td style="' + S.cfInd + '">Total Pengeluaran</td><td style="' + S.cfIndR + '">(' + fmtRp(totalPKTunai) + ')</td><td style="' + S.cfIndR + '">(' + fmtRp(totalPKBank) + ')</td></tr>' +
+
+    ((mutSetor > 0 || mutTarik > 0)
+      ? '<tr><td colspan="3" style="' + S.cfSec + '">(±) Mutasi Tunai &harr; Bank</td></tr>' +
+        (mutSetor > 0 ? '<tr><td style="' + S.cfInd + '">Setor ke Bank</td><td style="' + S.cfIndR + '">(' + fmtRp(mutSetor) + ')</td><td style="' + S.cfIndR + '">' + fmtRp(mutSetor) + '</td></tr>' : '') +
+        (mutTarik > 0 ? '<tr><td style="' + S.cfInd + '">Tarik ke Tunai</td><td style="' + S.cfIndR + '">' + fmtRp(mutTarik) + '</td><td style="' + S.cfIndR + '">(' + fmtRp(mutTarik) + ')</td></tr>' : '') +
+        '<tr><td style="' + S.cfInd + '">Mutasi Bersih</td><td style="' + S.cfIndR + '">' + fmtMut(mutasiTunai) + '</td><td style="' + S.cfIndR + '">' + fmtMut(mutasiBank) + '</td></tr>'
+      : '') +
 
     '<tr><td style="' + S.cfSaldo + '">Saldo Akhir Tunai / Bank</td><td style="' + S.cfSaldoR + '">' + fmtRp(saldoAkhirTunai) + '</td><td style="' + S.cfSaldoR + '">' + fmtRp(saldoAkhirBank) + '</td></tr>' +
     '<tr><td style="' + S.cfTotal + '">TOTAL KAS</td><td style="' + S.cfTotalR + '" colspan="2">' + fmtRp(grandTotal) + '</td></tr>' +

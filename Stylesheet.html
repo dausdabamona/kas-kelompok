@@ -1066,4 +1066,47 @@
   .np-tab .ti { font-size: 18px; line-height: 1; }
   .np-tab .tl { font-family: var(--np-serif); font-size: 9.5px; font-weight: 700; }
   .np-tab.active { color: var(--np-accent); }
+
+  /* ══════════ CATAT TRANSAKSI — keypad satu layar (1c) ══════════
+     Target sentuh besar (pengguna lanjut usia): tombol kas 60, keypad 54,
+     simpan 58, chip 46. Nominal yang diketik SELALU penuh (tidak disingkat). */
+  .kt-screen { height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #fff; }
+  .kt-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+  .kt-icobtn { width: 46px; height: 46px; flex: none; border: 1px solid var(--np-line); background: #fff; border-radius: 10px; font-size: 18px; cursor: pointer; }
+  .kt-title { flex: 1; font-size: 20px; font-weight: 700; font-family: var(--np-serif); }
+  .kt-rail { flex: none; border-top: 2px solid var(--np-accent); border-bottom: 1px solid var(--np-line); padding: 7px 16px; display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+  .kt-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 16px 6px; }
+
+  .kt-seg { display: grid; border: 1px solid var(--np-accent); border-radius: 10px; overflow: hidden; }
+  .kt-seg button { height: 50px; font-size: 16px; font-weight: 700; font-family: inherit; background: #fff; border: none; border-right: 1px solid var(--np-line); cursor: pointer; color: var(--np-accent); }
+  .kt-seg button:last-child { border-right: none; }
+  .kt-seg button.on { background: var(--np-accent); color: #fff; }
+
+  .kt-nomwrap { margin-top: 18px; border-bottom: 2px solid var(--np-accent); padding-bottom: 6px; display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; }
+  .kt-nomrp { font-size: 19px; font-weight: 600; color: var(--text-muted); }
+  .kt-nom { font-family: var(--np-serif); font-size: 46px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .kt-nom.kosong { color: #b9c4bf; }
+  .kt-verbal { text-align: right; font-size: 13px; color: var(--text-muted); margin-top: 6px; min-height: 18px; }
+
+  .kt-lbl { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin: 18px 0 8px; }
+  .kt-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .kt-chip { height: 46px; padding: 0 14px; font-size: 15.5px; font-weight: 600; font-family: inherit; white-space: nowrap; border: 1px solid var(--np-line); background: #fff; border-radius: 10px; cursor: pointer; color: var(--text); }
+  .kt-chip.on { background: var(--np-accent); color: #fff; border-color: var(--np-accent); }
+
+  .kt-kas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kt-kasbtn { height: 60px; border: 2px solid var(--np-line); background: #fff; border-radius: 12px; font-family: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--text); }
+  .kt-kasbtn .k1 { font-size: 17px; font-weight: 700; }
+  .kt-kasbtn .k2 { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .kt-kasbtn.on { border-color: var(--np-accent); background: var(--np-accent-100); }
+  .kt-kasbtn.on .k1, .kt-kasbtn.on .k2 { color: var(--np-accent-600); }
+
+  .kt-foot { flex: none; background: #F1F5F2; border-top: 1px solid var(--np-line); padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
+  .kt-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .kt-pad button { height: 54px; font-size: 25px; font-weight: 700; font-family: inherit; background: #fff; border: 1px solid var(--np-line); border-radius: 10px; cursor: pointer; color: var(--text); }
+  .kt-pad button:active { background: var(--np-accent-100); }
+  .kt-save { width: 100%; height: 58px; margin-top: 10px; border: none; border-radius: 12px; background: var(--np-accent); color: #fff; font-family: inherit; font-size: 18px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+  .kt-save[disabled] { background: #c3d3cc; color: #6b7c79; cursor: not-allowed; }
+  .kt-link { display: block; width: 100%; margin-top: 8px; background: none; border: none; color: var(--np-accent); font-family: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+  .kt-toast { position: fixed; left: 16px; right: 16px; bottom: 104px; max-width: 448px; margin: 0 auto; background: #183D33; color: #F5F8F4; padding: 14px 16px; border-radius: 10px; font-size: 15px; box-shadow: 0 12px 32px rgba(24,61,51,.3); z-index: 99; }
 </style>
