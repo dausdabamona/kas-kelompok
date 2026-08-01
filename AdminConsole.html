@@ -864,11 +864,15 @@
           '<div><div class="stat-name">' + nama + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>' +
           '<div class="stat-val">' + rp(val) + '</div></div>';
       }
+      // Rincikan asal angka titipan agar jelas: sisa kewajiban vs Buku IR belum dirinci.
+      var ketDesa = (r.belumDirinci > 0)
+        ? 'sisa kewajiban ' + rp(r.sisaKewajiban) + ' + belum dirinci ' + rp(r.belumDirinci)
+        : 'sisa kewajiban belum disetor';
       el.innerHTML = bar +
-        row('var(--g-mid)', 'Milik Kelompok', r.milikKelompok, r.kelompokNegatif ? '⚠ kas kurang dari kewajiban' : 'hak kelompok') +
-        row('var(--g-soft)', 'Titipan Desa', r.milikDesa, 'hak desa belum disetor') +
-        row('var(--g-gold)', 'Titipan Daerah', r.milikDaerah, 'hak daerah belum disetor') +
-        '<div class="stat-row" style="border-top:1px solid var(--border-soft);"><span class="sw" style="width:11px;flex:none;"></span><div><div class="stat-name">Total Kas</div></div><div class="stat-val">' + rp(tot) + '</div></div>';
+        row('var(--g-mid)', 'Milik Kelompok', r.milikKelompok, r.kelompokNegatif ? '⚠ kas kurang dari kewajiban' : 'bebas dipakai kelompok') +
+        row('var(--g-soft)', 'Titipan Desa', r.milikDesa, ketDesa) +
+        row('var(--g-gold)', 'Titipan Daerah', r.milikDaerah, 'sisa kewajiban ke daerah') +
+        '<div class="stat-row" style="border-top:1px solid var(--border-soft);"><span class="sw" style="width:11px;flex:none;"></span><div><div class="stat-name">Total Kas</div><div class="stat-sub">sudah disetor ' + rp(r.sudahSetor) + ' dari kewajiban ' + rp(r.kewajiban) + '</div></div><div class="stat-val">' + rp(tot) + '</div></div>';
     });
   }
 

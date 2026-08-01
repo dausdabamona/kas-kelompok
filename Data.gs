@@ -4257,22 +4257,61 @@ function getKepemilikanSaldo() {
     var saldo = saldoSaatIni_(pid, periode); // {tunai, bank}
     var totalKas = (Number(saldo.tunai) || 0) + (Number(saldo.bank) || 0);
 
-    var hakDesa = 0, hakDaerah = 0, sudahSetorDesa = 0;
+    // Kewajiban yang BELUM disetor, dihitung PER POS dari realisasi nyata
+    // (Pos Setoran). Dihitung per pos agar kelebihan setor di satu pos tidak
+    // menutupi kekurangan pos lain.
+    var sisaDesa = 0, sisaDaerah = 0, kewajiban = 0, sudahSetor = 0;
     if (periode) {
-      // Hak Desa/Daerah dari perhitungan bagi hasil yang sudah sadar-komponen
-      // (Buku IR dipecah: Index=Kelompok, sisanya=Desa) agar konsisten.
       try {
-        var bh = getBagiHasil(pid);
-        if (bh && bh.success) { hakDesa = Number(bh.desa) || 0; hakDaerah = Number(bh.daerah) || 0; }
-      } catch(e) {}
-      // Yang sudah disetor ke desa dari realisasi Setoran Desa.
-      try {
-        var ls = getLaporanSetoran();
-        if (ls && ls.success && ls.summary) sudahSetorDesa = Number(ls.summary.totalSudahSetor) || 0;
+        var rs = getRekapSetoran();
+        if (rs && rs.success) {
+          (rs.data || []).forEach(function(p) {
+            var t = Number(p.target) || 0, rl = Number(p.realisasi) || 0;
+            kewajiban += t; sudahSetor += rl;
+            var sisa = Math.max(0, t - rl);
+            var nm = String(p.nama || '').toLowerCase();
+            var rf = String(p.sumberRef || '').toLowerCase();
+            var keDaerah = (rf === 'infakdaerah' || nm.indexOf('daerah') !== -1);
+            if (keDaerah) sisaDaerah += sisa; else sisaDesa += sisa;
+          });
+        }
       } catch(e) {}
     }
-    var milikDesa = Math.max(0, hakDesa - sudahSetorDesa);
-    var milikDaerah = Math.max(0, hakDaerah); // setoran daerah belum dilacak terpisah
+
+    // Buku IR yang BELUM DIRINCI = kewajiban yang belum bisa dihitung per komponen.
+    // Selama belum dirinci, uangnya belum boleh dianggap milik kelompok.
+    var belumDirinci = 0;
+    if (periode) {
+      try {
+        var ssb = getSS_();
+        var kodeBukuIR = {};
+        var shMb = ssb.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+        if (shMb && shMb.getLastRow() > 1) {
+          var mrb = shMb.getDataRange().getValues(); var mhb = headerMap_(mrb[0]);
+          for (var m = 1; m < mrb.length; m++) {
+            var kd = String(hGet_(mrb[m], mhb, 'kode', 0) || '');
+            if (kd && String(hGet_(mrb[m], mhb, 'kategori', 2) || '').toLowerCase().indexOf('buku ir') !== -1) kodeBukuIR[kd] = true;
+          }
+        }
+        var masukBukuIR = 0;
+        var shPb = ssb.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+        if (shPb && shPb.getLastRow() > 1) {
+          var prb = shPb.getDataRange().getValues(); var phb = headerMap_(prb[0]);
+          for (var q = 1; q < prb.length; q++) {
+            if (!hGet_(prb[q], phb, 'id', 0)) continue;
+            if (barisDibatalkan_(prb[q], phb)) continue;
+            if (String(hGet_(prb[q], phb, 'periodeid', 1)) !== String(pid)) continue;
+            if (kodeBukuIR[String(hGet_(prb[q], phb, 'jenisid', 2) || '')]) masukBukuIR += Number(hGet_(prb[q], phb, 'nominal', 5)) || 0;
+          }
+        }
+        var dirinci = 0;
+        try { var ri = getRincianIR(pid); if (ri && ri.success && ri.total) dirinci = Number(ri.total.total) || 0; } catch(e) {}
+        belumDirinci = Math.max(0, masukBukuIR - dirinci);
+      } catch(e) {}
+    }
+
+    var milikDesa = sisaDesa + belumDirinci;
+    var milikDaerah = sisaDaerah;
     var milikKelompok = totalKas - milikDesa - milikDaerah;
 
     return {
@@ -4282,9 +4321,10 @@ function getKepemilikanSaldo() {
       milikKelompok: milikKelompok,
       milikDesa: milikDesa,
       milikDaerah: milikDaerah,
-      hakDesa: hakDesa,
-      hakDaerah: hakDaerah,
-      sudahSetorDesa: sudahSetorDesa,
+      kewajiban: kewajiban,
+      sudahSetor: sudahSetor,
+      sisaKewajiban: sisaDesa + sisaDaerah,
+      belumDirinci: belumDirinci,
       kelompokNegatif: milikKelompok < 0
     };
   } catch(e) {
