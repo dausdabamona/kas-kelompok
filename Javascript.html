@@ -493,6 +493,7 @@ var App = {
     if (App.can('terobosan.bayar') || App.can('view.terobosan')) actions.push(qa('🤝', 'Terobos', 'App.pagePatungan()'));
     if (App.can('serahterima.konfirmasi') || App.can('penerobos.input')) actions.push(qa('🤲', 'Serah', 'App.pageSerahTerima()'));
     if (App.can('jamaah.add')) actions.push(qa('👥', 'Jamaah', 'App.pageJamaah()'));
+    if (App.can('view.jamaah')) actions.push(qa('📅', 'Pantau IR', 'App.pagePantauIR()'));
     var aksiCepat = actions.length ? ('<div class="np-kickh"><span class="t">Aksi Cepat</span></div><div class="np-qa' + (actions.length <= 3 ? ' c3' : '') + '">' + actions.slice(0, 8).join('') + '</div>') : '';
 
     // ── Tombol lain + menu lengkap (restyle lama, agar semua fitur tetap terjangkau) ──
@@ -594,6 +595,8 @@ var App = {
       bukuIR: (!isPenerobos && App.can('view.bukuIR')) ? '<div class="menu-item' + (alertBuku ? ' menu-item-alert' : '') + '" onclick="App.pageBukuIR()"><span class="icon">📖</span><span>Buku IR' + (alertBuku ? ' <span class="menu-badge">' + data.belumDirincikanCount + '</span>' : '') + '</span></div>' : '',
       terobosan: App.can('view.terobosan') ? '<div class="menu-item" onclick="App.pagePatungan()"><span class="icon">🤝</span><span>Terobosan Kelompok</span></div>' : '',
       jamaah: App.can('view.jamaah') ? '<div class="menu-item" onclick="App.pageJamaah()"><span class="icon">👥</span><span>Jamaah</span></div>' : '',
+      // Pantauan IR 6 bulan: dipakai penerobos saat menagih di lapangan.
+      pantauIR: App.can('view.jamaah') ? '<div class="menu-item" onclick="App.pagePantauIR()"><span class="icon">📅</span><span>Pantau IR 6 Bulan</span></div>' : '',
       kelolaBuku: (!isPenerobos && App.can('view.kelolaBuku')) ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '',
       pemeriksaanSaldo: (!isPenerobos && App.can('view.pemeriksaanSaldo')) ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
       kasPenerobos: App.can('view.kasPenerobos') ? '<div class="menu-item" onclick="App.pageKasPenerobos()"><span class="icon">💼</span><span>Kas Penerobos</span></div>' : '',
@@ -607,7 +610,7 @@ var App = {
       kelolaPerangkat: App.can('user.manage') ? '<div class="menu-item" onclick="App.pageKelolaPerangkat()"><span class="icon">📱</span><span>Kelola Perangkat</span></div>' : ''
     };
     var groups = [
-      { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah] },
+      { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah, item.pantauIR] },
       { judul: '💰 Keuangan', items: [item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
       { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF, item.periode] },
       { judul: '⚙️ Admin', items: [item.setting, item.kelolaPerangkat, item.kelolaPenerobos] }
@@ -1153,6 +1156,59 @@ var App = {
       (activeTab === 'belum' ? listBelum : listSudah)
     );
     document.getElementById('app').innerHTML = html;
+  },
+
+  // Pantau setoran Buku IR tiap jamaah 6 bulan terakhir — versi mobile.
+  // Berguna terutama bagi Penerobos saat menagih di lapangan.
+  pagePantauIR: function() {
+    var self = this;
+    self.history.push('dashboard');
+    self.showLoading('Menghitung pantauan IR…');
+    App.srv()
+      .withSuccessHandler(function(r) { if (r && r.success) self.renderPantauIR(r); else self.showError((r && r.message) || 'Gagal memuat'); })
+      .withFailureHandler(function(e) { self.showError((e && e.message) || 'Gagal terhubung'); })
+      .getPantauIR(6);
+  },
+
+  renderPantauIR: function(res) {
+    var self = this;
+    var bulan = res.bulan || [], rows = res.rows || [];
+    self._pantauSemua = rows;
+
+    var ringkas =
+      '<div class="np-duo" style="margin:0 0 12px;">' +
+        '<div class="np-fig bank"><div class="np-fig-lbl">Belum setor bln ini</div><div class="np-fig-num">' + res.belumSetorBulanIni + ' org</div></div>' +
+        '<div class="np-fig tunai"><div class="np-fig-lbl">Total ' + bulan.length + ' bln</div><div class="np-fig-num">' + self.formatNumber(res.grandTotal) + '</div></div>' +
+      '</div>';
+
+    // Kartu per jamaah: nama, deret 6 bulan (blok terisi/kosong), total & rutin.
+    var kartu = rows.map(function(x) {
+      var blok = x.nilai.map(function(v, i) {
+        var isi = v > 0;
+        var akhir = (i === bulan.length - 1);
+        var warna = isi ? 'var(--np-mid)' : (akhir ? 'var(--np-gold)' : '#dfe5e2');
+        return '<div title="' + self.escapeHtml(bulan[i]) + ': ' + (isi ? self.formatNumber(v) : 'belum') + '" ' +
+          'style="flex:1;height:26px;border-radius:5px;background:' + warna + ';display:grid;place-items:center;' +
+          'font-size:9px;font-weight:700;color:' + (isi ? '#fff' : '#8d9a95') + ';">' + self.escapeHtml(bulan[i].split(' ')[0]) + '</div>';
+      }).join('');
+      var ket = x.aktifBulanIni ? '' :
+        '<div style="font-size:11px;color:var(--np-gold);margin-top:3px;">Belum setor bulan ini' +
+        (x.terakhirSetor ? ' · terakhir ' + self.escapeHtml(x.terakhirSetor) : ' · belum pernah') + '</div>';
+      return '<div class="card" style="margin-bottom:10px;' + (x.aktifBulanIni ? '' : 'border-left:3px solid var(--np-gold);') + '">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">' +
+            '<div style="font-weight:700;">' + self.escapeHtml(x.nama) + '</div>' +
+            '<div style="font-weight:700;color:var(--np-accent);white-space:nowrap;">' + self.formatNumber(x.total) + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:4px;margin-top:8px;">' + blok + '</div>' +
+          '<div style="display:flex;justify-content:space-between;margin-top:5px;font-size:11px;color:var(--text-muted);">' +
+            '<span>Rutin ' + x.bulanTerisi + '/' + bulan.length + '</span>' +
+            '<span>' + self.escapeHtml(bulan[0]) + ' – ' + self.escapeHtml(bulan[bulan.length - 1]) + '</span>' +
+          '</div>' + ket +
+        '</div>';
+    }).join('') || '<div class="info-box">Belum ada data rincian Buku IR.</div>';
+
+    var info = '<div class="info-box" style="margin-bottom:12px;">Blok hijau = sudah setor bulan itu. Jamaah yang <b>belum setor bulan ini</b> ditempatkan di atas. Setoran yang belum dirincikan belum muncul di sini.</div>';
+    document.getElementById('app').innerHTML = this.pageWrapper('Pantau IR ' + bulan.length + ' Bulan', ringkas + info + kartu);
   },
 
   pageRincianIR: function(itemOrId) {
