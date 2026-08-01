@@ -787,6 +787,7 @@ var App = {
       kelolaBuku: (!isPenerobos && App.can('view.kelolaBuku')) ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '',
       pemeriksaanSaldo: (!isPenerobos && App.can('view.pemeriksaanSaldo')) ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
       // Rincian hak kelompok/desa/daerah — keputusan belanja ada di tangan mereka.
+      rutin: App.can('view.rutin') ? '<div class="menu-item" onclick="App.pagePengeluaranRutin()"><span class="icon">🔁</span><span>Pengeluaran Rutin</span></div>' : '',
       kepemilikan: (App.currentUser && (App.currentUser.role === 'ADMIN' || App.currentUser.role === 'BENDAHARA_1')) ? '<div class="menu-item" onclick="App.pageKepemilikan()"><span class="icon">⚖️</span><span>Kepemilikan Saldo</span></div>' : '',
       kasPenerobos: App.can('view.kasPenerobos') ? '<div class="menu-item" onclick="App.pageKasPenerobos()"><span class="icon">💼</span><span>Kas Penerobos</span></div>' : '',
       kelolaPenerobos: App.can('penerobos.kelola') ? '<div class="menu-item" onclick="App.pageKelolaKasPenerobos()"><span class="icon">🔧</span><span>Kelola Kas Penerobos</span></div>' : '',
@@ -800,7 +801,7 @@ var App = {
     };
     var groups = [
       { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah, item.pantauIR] },
-      { judul: '💰 Keuangan', items: [item.kepemilikan, item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
+      { judul: '💰 Keuangan', items: [item.kepemilikan, item.rutin, item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
       { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF, item.periode] },
       { judul: '⚙️ Admin', items: [item.setting, item.kelolaPerangkat, item.kelolaPenerobos] }
     ];
@@ -1348,6 +1349,84 @@ var App = {
       (activeTab === 'belum' ? listBelum : listSudah)
     );
     document.getElementById('app').innerHTML = html;
+  },
+
+  // ── PENGELUARAN RUTIN — perkiraan bulan ini vs realisasi ──
+  // Melaporkan saja: tidak ada transaksi yang dibuat otomatis dari sini.
+  pagePengeluaranRutin: function() {
+    var self = this;
+    self.history.push('dashboard');
+    self.showLoading('Menghitung perkiraan…');
+    App.srv()
+      .withSuccessHandler(function(r) { if (r && r.success) self.renderPengeluaranRutin(r); else self.showError((r && r.message) || 'Gagal memuat'); })
+      .withFailureHandler(function(e) { self.showError((e && e.message) || 'Gagal terhubung'); })
+      .getPengeluaranRutin(null);
+  },
+
+  renderPengeluaranRutin: function(res) {
+    var self = this;
+    var fn = function(v) { return self.formatNumber(v); };
+    var list = res.data || [];
+
+    var ringkas =
+      '<div class="np-duo" style="margin:0 0 12px;">' +
+        '<div class="np-fig bank"><div class="np-fig-lbl">Perkiraan bulan ini</div><div class="np-fig-num">' + fn(res.totalPrediksi) + '</div></div>' +
+        '<div class="np-fig tunai"><div class="np-fig-lbl">Sudah dibayar</div><div class="np-fig-num">' + fn(res.totalRealisasi) + '</div></div>' +
+      '</div>' +
+      (res.sisaPerkiraan > 0
+        ? '<div class="info-box" style="margin-bottom:12px;">Perkiraan yang belum dibayar bulan ini: <b>' + fn(res.sisaPerkiraan) + '</b> dari ' + res.belumBayar + ' pos. Sediakan dananya sebelum dipakai keperluan lain.</div>'
+        : '<div class="info-box" style="margin-bottom:12px;">Semua pengeluaran rutin bulan ini sudah dibayar.</div>');
+
+    var kartu = list.map(function(x) {
+      var warna = x.sudahBayar ? 'var(--np-mid, #2F8F6F)' : 'var(--np-gold, #B7893F)';
+      var badge = x.sudahBayar
+        ? '<span class="status-badge lunas">\u2713 Dibayar</span>'
+        : '<span class="status-badge" style="background:#FEF3C7;color:#92400E;">Belum</span>';
+
+      // Baris khusus cicilan: sisa pokok + progres pelunasan.
+      var cic = '';
+      if (x.tipe === 'cicilan') {
+        var pct = x.persen || 0;
+        cic = '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(0,0,0,.14);">' +
+            '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;">' +
+              '<span style="color:var(--text-muted);">Terbayar ' + fn(x.sudahDibayar) + ' dari ' + fn(x.totalKewajiban) + '</span>' +
+              '<span style="font-weight:700;">' + pct + '%</span></div>' +
+            '<div style="height:6px;border-radius:3px;background:#e6ece9;overflow:hidden;">' +
+              '<div style="height:100%;width:' + pct + '%;background:var(--np-mid, #2F8F6F);"></div></div>' +
+            (x.lunas
+              ? '<div style="font-size:11px;color:var(--np-mid, #2F8F6F);font-weight:700;margin-top:5px;">\u2713 Lunas</div>'
+              : '<div style="font-size:11px;color:var(--np-gold, #B7893F);margin-top:5px;">Sisa pokok <b>' + fn(x.sisaPokok) + '</b>' +
+                (x.sisaBulan ? ' \u00b7 kira-kira ' + x.sisaBulan + ' bulan lagi' : '') + '</div>') +
+          '</div>';
+      }
+
+      return '<div class="card" style="margin-bottom:10px;border-left:3px solid ' + warna + ';">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">' +
+            '<div style="font-weight:700;">' + self.escapeHtml(x.nama) + '</div>' + badge +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + self.escapeHtml(x.jenisNama) + ' \u00b7 ' + self.escapeHtml(x.dasar) + '</div>' +
+          '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:13px;">' +
+            '<span style="color:var(--text-muted);">Perkiraan</span><span style="font-weight:700;">' + fn(x.prediksi) + '</span>' +
+          '</div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:13px;">' +
+            '<span style="color:var(--text-muted);">Dibayar bulan ini</span>' +
+            '<span style="font-weight:700;color:' + warna + ';">' + fn(x.realisasi) + '</span>' +
+          '</div>' +
+          (x.sudahBayar && x.selisih !== 0
+            ? '<div style="font-size:11px;color:' + (x.selisih > 0 ? '#B45309' : 'var(--np-mid, #2F8F6F)') + ';margin-top:3px;">' +
+              (x.selisih > 0 ? 'Lebih ' : 'Hemat ') + fn(Math.abs(x.selisih)) + ' dari perkiraan</div>'
+            : '') +
+          cic +
+        '</div>';
+    }).join('') || '<div class="info-box">Belum ada pengeluaran rutin yang didaftarkan. Admin dapat menambahkannya lewat Admin Console.</div>';
+
+    var basis = (res.basisTren && res.basisTren.length)
+      ? '<div class="text-small text-muted" style="margin-top:10px;">Perkiraan bertipe tren dihitung dari: ' + self.escapeHtml(res.basisTren.join(', ')) + '.</div>'
+      : '';
+
+    document.getElementById('app').innerHTML = this.pageWrapper(
+      'Pengeluaran Rutin' + (res.periode ? ' \u00b7 ' + res.periode.nama : ''),
+      ringkas + kartu + basis);
   },
 
   // Pantau setoran Buku IR tiap jamaah 6 bulan terakhir — versi mobile.

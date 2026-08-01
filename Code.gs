@@ -18,6 +18,7 @@ const CONFIG = {
     BANK_PENDING: 'Bank Pending',
     SALDO_TUTUP_BUKU: 'Saldo Tutup Buku',
     PEMBELAAN: 'Pembelaan',
+    RUTIN: 'Pengeluaran Rutin',
     PATUNGAN: 'Terobosan Kelompok',
     TAGIHAN_PATUNGAN: 'Penerobosan',
     HAK_AKSES: 'Hak Akses',
@@ -52,6 +53,7 @@ function getCapabilities_() {
     { code: 'view.setoranDesa', label: 'Lihat: Setoran Desa', grup: 'lihat' },
     { code: 'view.jamaah', label: 'Lihat: Jamaah', grup: 'lihat' },
     { code: 'view.laporanSetoran', label: 'Lihat: Laporan Setoran', grup: 'lihat' },
+    { code: 'view.rutin', label: 'Lihat: Pengeluaran Rutin', grup: 'lihat' },
     { code: 'view.pemeriksaanSaldo', label: 'Lihat: Pemeriksaan Saldo', grup: 'lihat' },
     { code: 'view.laporanPDF', label: 'Lihat: Laporan PDF', grup: 'lihat' },
     { code: 'view.terobosan', label: 'Lihat: Terobosan Kelompok', grup: 'lihat' },
@@ -75,6 +77,7 @@ function getCapabilities_() {
     { code: 'setoran.realisasi', label: 'Realisasi Setoran Desa', grup: 'edit' },
     { code: 'pembelaan.manage', label: 'Kelola Pembelaan', grup: 'edit' },
     { code: 'master.manage', label: 'Kelola Master (Pos/Musyawaroh)', grup: 'edit' },
+    { code: 'rutin.kelola', label: 'Kelola Pengeluaran Rutin', grup: 'edit' },
     { code: 'user.manage', label: 'Kelola User', grup: 'edit' },
     { code: 'trx.edit.tunai', label: 'Edit/Hapus Transaksi Tunai', grup: 'edit' },
     { code: 'trx.edit.bank', label: 'Edit/Hapus Transaksi Bank', grup: 'edit' },
@@ -99,6 +102,7 @@ function getDefaultPermMatrix_() {
     'view.setoranDesa': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'view.jamaah': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
     'view.laporanSetoran': nonPenerobos,
+    'view.rutin': nonPenerobos,
     'view.pemeriksaanSaldo': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'view.laporanPDF': nonPenerobos,
     'view.terobosan': allRoles,
@@ -121,6 +125,7 @@ function getDefaultPermMatrix_() {
     'setoran.realisasi': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'pembelaan.manage': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'master.manage': [R.ADMIN],
+    'rutin.kelola': [R.ADMIN, R.BENDAHARA_1],
     'user.manage': [R.ADMIN],
     // Penulis boleh membatalkan transaksi (soft delete, alasan wajib) selama
     // periode masih terbuka. Persetujuan tetap bukan haknya — lihat trx.approve.
@@ -279,6 +284,11 @@ function getSheetSchema_() {
       name: CONFIG.SHEETS.PENGELUARAN,
       headers: ['Kode', 'Nama Pengeluaran', 'Kategori', 'Status'],
       note: 'Status: Aktif / Nonaktif'
+    },
+    {
+      name: CONFIG.SHEETS.RUTIN,
+      headers: ['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Status', 'Catatan', 'Created By', 'Created At'],
+      note: 'Tipe: tetap (nominal pasti) / tren (rata-rata realisasi) / cicilan (angsuran + sisa pokok) | Nilai = perkiraan per bulan | Total Kewajiban hanya untuk cicilan | Status: Aktif / Nonaktif'
     },
     {
       name: CONFIG.SHEETS.MUSYAWARAH,

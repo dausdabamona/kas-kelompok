@@ -284,7 +284,7 @@
   function menuDef() {
     return [
       { grp:'Ringkasan', items:[ ['dashboard','📊','Dashboard'], ['saldo','🧮','Pemeriksaan Saldo'], ['pdf','📄','Laporan PDF'] ] },
-      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['rincianir','🧾','Rincian IR'], ['pantauir','📅','Pantau IR 6 Bulan'], ['kepemilikan','🧭','Kepemilikan Saldo'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'] ] },
+      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['rincianir','🧾','Rincian IR'], ['pantauir','📅','Pantau IR 6 Bulan'], ['kepemilikan','🧭','Kepemilikan Saldo'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'], ['rutin','🔁','Pengeluaran Rutin'] ] },
       { grp:'Jamaah', items:[ ['anggota','👥','Anggota'], ['terobosan','🤝','Terobosan Kelompok'], ['serah','🤲','Serah Terima'] ] },
       { grp:'Tata Kelola', items:[ ['users','🔑','Kelola User'], ['hakakses','🛡️','Hak Akses'], ['devices','📱','Perangkat &amp; Sesi'], ['master','🗂️','Master &amp; Pos'], ['periode','🗓️','Periode'], ['log','📜','Activity Log'] ] }
     ];
@@ -301,6 +301,7 @@
     setorandesa:    { title:'Setoran Desa', ep:'getRekapSetoran', run: renderSetoranDesa },
     bank:           { title:'Bank & Rekonsiliasi', ep:'getRekonsiliasiData', run: renderBank },
     laporansetoran: { title:'Laporan Setoran', ep:'getRekapSetoran', run: renderLaporanSetoran },
+    rutin:          { title:'Pengeluaran Rutin', ep:'getPengeluaranRutin', run: renderRutin },
     anggota:        { title:'Anggota', ep:'getAnggota', run: renderAnggota },
     terobosan:      { title:'Terobosan Kelompok', ep:'getPatunganList', run: renderTerobosan },
     serah:          { title:'Serah Terima', ep:'getSerahTerimaList', run: renderSerah },
@@ -648,6 +649,137 @@
 
   // ── VIEW: Anggota ──
   var ANGGOTA = {};   // id → data, untuk form edit
+  // ── VIEW: Pengeluaran Rutin — perkiraan vs realisasi + sisa cicilan ──
+  var RUTIN = {}, RUTIN_JENIS = [];
+  function renderRutin(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    RUTIN = {};
+    (res.data || []).forEach(function(x) { RUTIN[x.id] = x; });
+
+    var cols = [{t:'Nama'},{t:'Jenis'},{t:'Dasar Perkiraan'},{t:'Perkiraan',r:true},{t:'Dibayar',r:true},{t:'Selisih',r:true},{t:'Sisa Cicilan',r:true},{t:'Aksi'}];
+    var rows = (res.data || []).map(function(x) {
+      var idJs = esc(String(x.id)).replace(/'/g, "\\'");
+      var selWarna = x.selisih > 0 ? 'color:#B45309;' : (x.selisih < 0 ? 'color:var(--g-mid);' : 'color:var(--text-muted);');
+      var sisa = '—';
+      if (x.tipe === 'cicilan') {
+        sisa = x.lunas
+          ? '<span style="color:var(--g-mid);font-weight:700;">Lunas</span>'
+          : num(x.sisaPokok) + '<div style="font-size:10px;color:var(--text-muted);">' + x.persen + '% terbayar' +
+            (x.sisaBulan ? ' · ±' + x.sisaBulan + ' bln' : '') + '</div>';
+      }
+      return '<tr><td class="t-jenis">' + esc(x.nama) + (x.sudahBayar ? '' : ' <span style="font-size:10px;color:#B45309;">belum bayar</span>') + '</td>' +
+        '<td class="t-name">' + esc(x.jenisNama) + '</td>' +
+        '<td class="t-name">' + esc(x.dasar) + '</td>' +
+        '<td class="r amt">' + num(x.prediksi) + '</td>' +
+        '<td class="r amt" style="font-weight:700;">' + num(x.realisasi) + '</td>' +
+        '<td class="r amt" style="' + selWarna + '">' + (x.sudahBayar ? num(x.selisih) : '—') + '</td>' +
+        '<td class="r amt">' + sisa + '</td>' +
+        '<td><button class="abtn" onclick="editRutin(\'' + idJs + '\')">✏️ Ubah</button></td></tr>';
+    }).join('');
+    var foot = '<tr style="font-weight:800;border-top:2px solid var(--admin-soft);"><td colspan="3">TOTAL</td>' +
+      '<td class="r amt">' + num(res.totalPrediksi) + '</td><td class="r amt">' + num(res.totalRealisasi) + '</td>' +
+      '<td class="r amt" colspan="3"></td></tr>';
+
+    var catatan = (res.basisTren && res.basisTren.length)
+      ? 'Perkiraan bertipe <b>tren</b> dihitung dari rata-rata: ' + esc(res.basisTren.join(', ')) + '.'
+      : 'Belum ada periode sebelumnya untuk menghitung tren.';
+
+    host.innerHTML =
+      '<div style="margin-bottom:12px;"><button class="qbtn primary" onclick="editRutin(\'\')">➕ Tambah Pengeluaran Rutin</button></div>' +
+      panelBox('Pengeluaran Rutin', (res.periode && res.periode.nama) || '', tableHtml(cols, rows + foot)) +
+      '<p style="color:var(--text-muted);font-size:12px;margin-top:-6px;">' + catatan +
+      ' Perkiraan yang belum dibayar bulan ini: <b>' + num(res.sisaPerkiraan) + '</b> dari ' + res.belumBayar + ' pos.' +
+      ' Aplikasi hanya melaporkan — pembayaran tetap dicatat manual lewat form pengeluaran.</p>' +
+      '<div id="rutinModal"></div>';
+  }
+
+  function editRutin(id) {
+    var x = RUTIN[id] || { id:'', nama:'', jenisId:'', tipe:'tetap', nilai:0, totalKewajiban:0, catatan:'', };
+    var baru = !id;
+    // Daftar jenis pengeluaran diambil sekali, dipakai ulang.
+    if (!RUTIN_JENIS.length) {
+      call('getMasterPengeluaran', [], function(r) {
+        if (r && r.success) RUTIN_JENIS = (r.data || []).filter(function(j) {
+          return String(j.status || 'Aktif').toLowerCase() !== 'nonaktif';
+        });
+        gambarFormRutin(x, baru, id);
+      });
+      return;
+    }
+    gambarFormRutin(x, baru, id);
+  }
+
+  function gambarFormRutin(x, baru, id) {
+    function fld(lbl, key, tipe, ket) {
+      return '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">' + lbl + '</label>' +
+        '<input id="rtn_' + key + '" type="' + (tipe || 'text') + '" value="' + esc(String(x[key] == null ? '' : x[key])) + '" ' +
+        'style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' +
+        (ket ? '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">' + ket + '</div>' : '') + '</div>';
+    }
+    var opsiJenis = RUTIN_JENIS.map(function(j) {
+      var kode = String(j.kode || j.id || '');
+      return '<option value="' + esc(kode) + '"' + (kode === String(x.jenisId) ? ' selected' : '') + '>' + esc(j.nama || kode) + '</option>';
+    }).join('');
+    function opsiTipe(v, lbl) { return '<option value="' + v + '"' + (x.tipe === v ? ' selected' : '') + '>' + lbl + '</option>'; }
+
+    var html = '<div style="position:fixed;inset:0;background:rgba(24,61,51,.45);display:grid;place-items:center;z-index:80;padding:20px;" onclick="if(event.target===this)tutupRutin()">' +
+      '<div style="background:#fff;border-radius:16px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:22px;box-shadow:var(--shadow-lg);">' +
+        '<h3 style="margin:0 0 14px;font-size:18px;font-weight:600;">' + (baru ? 'Tambah Pengeluaran Rutin' : 'Ubah Pengeluaran Rutin') + '</h3>' +
+        fld('Nama *', 'nama', 'text', 'Mis. Listrik masjid, Mubalek, Cicilan pusat') +
+        '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">Jenis Pengeluaran *</label>' +
+          '<select id="rtn_jenisId" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;"><option value="">— pilih —</option>' + opsiJenis + '</select>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Realisasi dihitung dari transaksi pengeluaran berjenis ini. Sebaiknya satu jenis dipakai satu pos rutin saja agar tidak terhitung ganda.</div></div>' +
+        '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">Cara Memperkirakan *</label>' +
+          '<select id="rtn_tipe" onchange="rutinToggle()" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' +
+          opsiTipe('tetap', 'Tetap — nominal pasti tiap bulan') +
+          opsiTipe('tren', 'Tren — rata-rata beberapa bulan terakhir') +
+          opsiTipe('cicilan', 'Cicilan — angsuran tetap sampai lunas') + '</select></div>' +
+        fld('Nilai per Bulan (Rp)', 'nilai', 'number', 'Untuk tipe tren, ini dipakai hanya bila belum ada riwayat.') +
+        '<div id="rtn_boxPokok">' + fld('Total Kewajiban / Pokok (Rp)', 'totalKewajiban', 'number', 'Hanya untuk cicilan. Sisa pokok = total ini dikurangi seluruh pembayaran yang pernah tercatat pada jenis tersebut.') + '</div>' +
+        fld('Catatan', 'catatan') +
+        '<div id="rtnErr" style="color:var(--g-gold);font-size:13px;margin-bottom:10px;"></div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+          '<button class="abtn" onclick="tutupRutin()">Batal</button>' +
+          (baru ? '' : '<button class="abtn danger" onclick="nonaktifRutin(\'' + esc(String(id)).replace(/'/g, "\\'") + '\')">Nonaktifkan</button>') +
+          '<button class="qbtn primary" onclick="simpanRutin(\'' + esc(String(id)).replace(/'/g, "\\'") + '\')">Simpan</button>' +
+        '</div>' +
+      '</div></div>';
+    document.getElementById('rutinModal').innerHTML = html;
+    rutinToggle();
+  }
+  function rutinToggle() {
+    var t = document.getElementById('rtn_tipe'), b = document.getElementById('rtn_boxPokok');
+    if (t && b) b.style.display = (t.value === 'cicilan') ? '' : 'none';
+  }
+  function tutupRutin() { var m = document.getElementById('rutinModal'); if (m) m.innerHTML = ''; }
+  function valRutin(k) { var el = document.getElementById('rtn_' + k); return el ? el.value : ''; }
+
+  function simpanRutin(id) {
+    var data = {
+      id: id || '', nama: valRutin('nama'), jenisId: valRutin('jenisId'), tipe: valRutin('tipe'),
+      nilai: Number(valRutin('nilai')) || 0, totalKewajiban: Number(valRutin('totalKewajiban')) || 0,
+      catatan: valRutin('catatan')
+    };
+    var err = document.getElementById('rtnErr');
+    if (!data.nama) { err.textContent = 'Nama wajib diisi.'; return; }
+    if (!data.jenisId) { err.textContent = 'Jenis pengeluaran wajib dipilih.'; return; }
+    err.textContent = 'Menyimpan…';
+    call('simpanPengeluaranRutin', [data], function(r) {
+      if (r && r.success) { tutupRutin(); go('rutin'); }
+      else err.textContent = (r && r.message) || 'Gagal menyimpan.';
+    });
+  }
+
+  function nonaktifRutin(id) {
+    var alasan = prompt('Alasan menonaktifkan pos rutin ini? (wajib)');
+    if (alasan === null) return;
+    if (!String(alasan).trim()) { alert('Alasan wajib diisi.'); return; }
+    call('nonaktifkanPengeluaranRutin', [id, alasan], function(r) {
+      if (r && r.success) { tutupRutin(); go('rutin'); }
+      else alert((r && r.message) || 'Gagal.');
+    });
+  }
+
   function renderAnggota(host, res) {
     if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
     ANGGOTA = {};

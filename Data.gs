@@ -3634,6 +3634,11 @@ function generatePDF(periodeId) {
         }
       } catch(e) {}
       try { var pb = getPembelaanData(); if (pb && pb.success) rekap.pembelaan = pb; } catch(e) {}
+      // Pengeluaran rutin: perkiraan vs realisasi + sisa cicilan.
+      try {
+        var rt = getPengeluaranRutin(periodeId || null);
+        if (rt && rt.success && (rt.data || []).length) rekap.rutin = rt;
+      } catch(e) {}
       try {
         var pl = getPatunganList();
         if (pl && pl.success) {
@@ -3846,6 +3851,42 @@ function buildPDFHTML(data) {
       '<td style="' + S.totR + '">' + fmtRp(sm.totalSisa) + '</td>' +
       '<td style="' + S.tot + '"></td></tr>';
     html += '</table>';
+  }
+
+  // ── E2. Pengeluaran Rutin ──
+  // Perkiraan vs realisasi bulan ini, plus sisa pokok cicilan. Hanya laporan —
+  // tidak ada nominal yang dibuat sistem.
+  if (data.rutin && (data.rutin.data || []).length) {
+    var rt = data.rutin;
+    html += '<h2 style="' + S.h2 + '">E1. Pengeluaran Rutin &amp; Perkiraan</h2>';
+    html += '<table style="' + S.tbl + '"><tr>' +
+      '<th style="' + S.th + '">#</th>' +
+      '<th style="' + S.th + '">Pos</th>' +
+      '<th style="' + S.th + '">Dasar Perkiraan</th>' +
+      '<th style="' + S.thR + '">Perkiraan</th>' +
+      '<th style="' + S.thR + '">Dibayar</th>' +
+      '<th style="' + S.thR + '">Selisih</th>' +
+      '<th style="' + S.thR + '">Sisa Cicilan</th></tr>';
+    (rt.data || []).forEach(function(x, i) {
+      var sisa = '-';
+      if (x.tipe === 'cicilan') sisa = x.lunas ? 'Lunas' : fmtRp(x.sisaPokok) + (x.sisaBulan ? ' (\u00b1' + x.sisaBulan + ' bln)' : '');
+      html += '<tr>' +
+        '<td style="' + S.td + '">' + (i + 1) + '</td>' +
+        '<td style="' + S.td + '">' + x.nama + (x.sudahBayar ? '' : ' <i>(belum dibayar)</i>') + '</td>' +
+        '<td style="' + S.td + '">' + x.dasar + '</td>' +
+        '<td style="' + S.tdR + '">' + fmtRp(x.prediksi) + '</td>' +
+        '<td style="' + S.tdR + '">' + fmtRp(x.realisasi) + '</td>' +
+        '<td style="' + S.tdR + '">' + (x.sudahBayar ? fmtRp(x.selisih) : '-') + '</td>' +
+        '<td style="' + S.tdR + '">' + sisa + '</td></tr>';
+    });
+    html += '<tr><td style="' + S.td + '" colspan="3"><b>TOTAL</b></td>' +
+      '<td style="' + S.tdR + '"><b>' + fmtRp(rt.totalPrediksi) + '</b></td>' +
+      '<td style="' + S.tdR + '"><b>' + fmtRp(rt.totalRealisasi) + '</b></td>' +
+      '<td style="' + S.tdR + '" colspan="2"></td></tr>';
+    html += '</table>';
+    html += '<p style="font-size:10px;color:#555;margin-top:4px;">Perkiraan bertipe tren dihitung dari rata-rata realisasi periode sebelumnya' +
+      ((rt.basisTren && rt.basisTren.length) ? ' (' + rt.basisTren.join(', ') + ')' : '') +
+      '. Perkiraan yang belum dibayar bulan ini: ' + fmtRp(rt.sisaPerkiraan) + '.</p>';
   }
 
   // ── E. Target Pembelaan ──
@@ -6050,6 +6091,283 @@ function migrasiTransaksiPenerobos() {
     try { CacheService.getScriptCache().remove('dashboard_saldo'); CacheService.getScriptCache().remove('master_trx_data'); } catch(e) {}
     logActivity(auth.user.email, 'MIGRASI_KAS_PENEROBOS', 'Count: ' + count);
     return { success: true, count: count };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// PENGELUARAN RUTIN — perkiraan & pemantauan kewajiban berulang
+//
+// Tiga cara memperkirakan (kolom Tipe pada sheet 'Pengeluaran Rutin'):
+//   tetap   → nominal pasti tiap bulan (mis. listrik langganan, mubalek)
+//   tren    → rata-rata realisasi jenis ini pada beberapa periode tertutup
+//             terakhir (mis. oli motor — nilainya berubah-ubah)
+//   cicilan → angsuran tetap + pokok yang harus lunas (mis. cicilan pusat);
+//             sisa pokok dihitung dari akumulasi pembayaran sepanjang sejarah
+//
+// PENTING: fungsi ini hanya MELAPORKAN. Tidak ada transaksi yang dibuat,
+// diubah, atau dihapus secara otomatis — pembayaran tetap dicatat manusia
+// lewat form pengeluaran biasa.
+// ══════════════════════════════════════════════════════
+
+// Berapa periode tertutup yang dipakai menghitung tren.
+var RUTIN_PERIODE_TREN_ = 3;
+
+// Realisasi pengeluaran per Jenis ID, dikelompokkan per periode.
+// Mengabaikan baris dibatalkan (T3) dan draft yang belum disetujui (T12).
+function _realisasiPengeluaranPerJenis_() {
+  var out = {};   // jenisId → { periodeId → total }
+  var rows = sheetValues_(CONFIG.SHEETS.INPUT_PENGELUARAN);
+  if (rows.length < 2) return out;
+  var h = headerMap_(rows[0]);
+  for (var i = 1; i < rows.length; i++) {
+    if (!hGet_(rows[i], h, 'id', 0)) continue;
+    if (barisDibatalkan_(rows[i], h)) continue;
+    if (barisDraft_(rows[i], h)) continue;
+    var jid = String(hGet_(rows[i], h, 'jenisid', 2) || '');
+    if (!jid) continue;
+    var pid = String(hGet_(rows[i], h, 'periodeid', 1) || '');
+    if (!out[jid]) out[jid] = {};
+    out[jid][pid] = (out[jid][pid] || 0) + (Number(hGet_(rows[i], h, 'nominal', 4)) || 0);
+  }
+  return out;
+}
+
+// Daftar periode urut kronologis (terlama → terbaru), dari sheet Master Period.
+function _periodeUrut_() {
+  var rows = sheetValues_(CONFIG.SHEETS.PERIOD);
+  if (rows.length < 2) return [];
+  var h = headerMap_(rows[0]);
+  var out = [];
+  for (var i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    out.push({
+      id: String(rows[i][0]),
+      nama: String(hGet_(rows[i], h, 'nama', 1) || ''),
+      status: String(hGet_(rows[i], h, 'status', 4) || ''),
+      mulai: toDateStr_(hGet_(rows[i], h, 'tanggalmulai', 2))
+    });
+  }
+  out.sort(function(a, b) { return String(a.mulai).localeCompare(String(b.mulai)); });
+  return out;
+}
+
+function getPengeluaranRutin(periodeId) {
+  return withSheetCache_(function() { return _getPengeluaranRutin_(periodeId); });
+}
+
+function _getPengeluaranRutin_(periodeId) {
+  try {
+    var auth = requirePerm('view.rutin');
+    if (!auth.success) return { success: false, message: auth.message };
+
+    var periode = periodeId ? getPeriodeById_(periodeId) : getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode untuk ditampilkan.' };
+    var pid = String(periode.id);
+
+    // Nama jenis pengeluaran.
+    var namaJenis = {};
+    var mk = sheetValues_(CONFIG.SHEETS.PENGELUARAN);
+    for (var m = 1; m < mk.length; m++) if (mk[m][0]) namaJenis[String(mk[m][0])] = String(mk[m][1] || '');
+
+    var realisasi = _realisasiPengeluaranPerJenis_();
+    var periodeUrut = _periodeUrut_();
+    // Periode SEBELUM periode yang dilihat — dasar perhitungan tren.
+    var idxSekarang = -1;
+    for (var q = 0; q < periodeUrut.length; q++) if (periodeUrut[q].id === pid) { idxSekarang = q; break; }
+    var periodeTren = (idxSekarang > 0)
+      ? periodeUrut.slice(Math.max(0, idxSekarang - RUTIN_PERIODE_TREN_), idxSekarang)
+      : [];
+
+    var rows = sheetValues_(CONFIG.SHEETS.RUTIN);
+    var data = [], totPrediksi = 0, totRealisasi = 0;
+    if (rows.length > 1) {
+      var h = headerMap_(rows[0]);
+      for (var i = 1; i < rows.length; i++) {
+        if (!rows[i][0]) continue;
+        if (String(hGet_(rows[i], h, 'status', 7) || 'Aktif').toLowerCase() === 'nonaktif') continue;
+
+        var jid = String(hGet_(rows[i], h, 'jenisid', 2) || '');
+        var tipe = String(hGet_(rows[i], h, 'tipe', 3) || 'tetap').toLowerCase();
+        var nilai = Number(hGet_(rows[i], h, 'nilai', 4)) || 0;
+        var totalKewajiban = Number(hGet_(rows[i], h, 'totalkewajiban', 5)) || 0;
+        var perJenis = realisasi[jid] || {};
+        var real = Number(perJenis[pid]) || 0;
+
+        // ── Perkiraan bulan ini ──
+        var prediksi = nilai, dasar = '';
+        if (tipe === 'tren') {
+          var jml = 0, nAda = 0;
+          periodeTren.forEach(function(p) {
+            var v = Number(perJenis[p.id]) || 0;
+            if (v > 0) { jml += v; nAda++; }
+          });
+          prediksi = nAda ? Math.round(jml / nAda) : nilai;
+          dasar = nAda
+            ? 'Rata-rata ' + nAda + ' bulan terakhir'
+            : (nilai ? 'Belum ada riwayat — pakai nilai perkiraan' : 'Belum ada riwayat');
+        } else if (tipe === 'cicilan') {
+          dasar = 'Angsuran tetap';
+        } else {
+          dasar = 'Nominal tetap';
+        }
+
+        // ── Khusus cicilan: berapa sisa pokoknya ──
+        var sudahDibayar = 0, sisaPokok = 0, sisaBulan = 0, lunas = false;
+        if (tipe === 'cicilan') {
+          Object.keys(perJenis).forEach(function(k) { sudahDibayar += Number(perJenis[k]) || 0; });
+          sisaPokok = Math.max(0, totalKewajiban - sudahDibayar);
+          lunas = (totalKewajiban > 0 && sisaPokok <= 0);
+          if (lunas) prediksi = 0;
+          else if (nilai > 0) sisaBulan = Math.ceil(sisaPokok / nilai);
+          // Angsuran terakhir bisa lebih kecil dari angsuran normal.
+          if (!lunas && nilai > sisaPokok) prediksi = sisaPokok;
+        }
+
+        var item = {
+          id: String(rows[i][0]),
+          nama: String(hGet_(rows[i], h, 'nama', 1) || ''),
+          jenisId: jid,
+          jenisNama: namaJenis[jid] || jid || '—',
+          tipe: tipe,
+          nilai: nilai,
+          dasar: dasar,
+          prediksi: prediksi,
+          realisasi: real,
+          selisih: real - prediksi,
+          sudahBayar: real > 0,
+          catatan: String(hGet_(rows[i], h, 'catatan', 8) || '')
+        };
+        if (tipe === 'cicilan') {
+          item.totalKewajiban = totalKewajiban;
+          item.sudahDibayar = sudahDibayar;
+          item.sisaPokok = sisaPokok;
+          item.sisaBulan = sisaBulan;
+          item.lunas = lunas;
+          item.persen = totalKewajiban > 0 ? Math.min(100, Math.round(sudahDibayar / totalKewajiban * 100)) : 0;
+        }
+        data.push(item);
+        totPrediksi += prediksi;
+        totRealisasi += real;
+      }
+    }
+
+    // Urut: yang belum dibayar dulu (itu yang perlu ditindaklanjuti).
+    data.sort(function(a, b) {
+      if (a.sudahBayar !== b.sudahBayar) return a.sudahBayar ? 1 : -1;
+      return b.prediksi - a.prediksi;
+    });
+
+    return {
+      success: true,
+      periode: { id: pid, nama: periode.nama, status: periode.status },
+      data: data,
+      totalPrediksi: totPrediksi,
+      totalRealisasi: totRealisasi,
+      sisaPerkiraan: Math.max(0, totPrediksi - totRealisasi),
+      belumBayar: data.filter(function(x) { return !x.sudahBayar; }).length,
+      basisTren: periodeTren.map(function(p) { return p.nama; })
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// Tambah/ubah satu baris pengeluaran rutin. Tidak menyentuh transaksi apa pun.
+function simpanPengeluaranRutin(data) {
+  try {
+    var auth = requirePerm('rutin.kelola');
+    if (!auth.success) return { success: false, message: auth.message };
+    data = data || {};
+    var nama = String(data.nama || '').trim();
+    if (!nama) return { success: false, message: 'Nama wajib diisi.' };
+    var jenisId = String(data.jenisId || '').trim();
+    if (!jenisId) return { success: false, message: 'Jenis pengeluaran wajib dipilih.' };
+    var tipe = String(data.tipe || 'tetap').toLowerCase();
+    if (['tetap', 'tren', 'cicilan'].indexOf(tipe) === -1) {
+      return { success: false, message: 'Tipe harus tetap, tren, atau cicilan.' };
+    }
+    var nilai = Number(data.nilai) || 0;
+    if (nilai < 0) return { success: false, message: 'Nilai tidak boleh negatif.' };
+    var totalKewajiban = Number(data.totalKewajiban) || 0;
+    if (tipe === 'cicilan') {
+      if (nilai <= 0) return { success: false, message: 'Cicilan wajib punya nilai angsuran per bulan.' };
+      if (totalKewajiban <= 0) return { success: false, message: 'Cicilan wajib punya total kewajiban (pokok).' };
+    }
+
+    return withLock_(function() {
+      var ss = getSS_();
+      var sheet = ss.getSheetByName(CONFIG.SHEETS.RUTIN);
+      if (!sheet) return { success: false, message: 'Sheet Pengeluaran Rutin belum ada. Jalankan migrasiPengendalian.' };
+      var rows = sheet.getDataRange().getValues();
+      var h = headerMap_(rows[0]);
+      var id = String(data.id || '').trim();
+      var baris = -1;
+      if (id) {
+        for (var i = 1; i < rows.length; i++) if (String(rows[i][0]) === id) { baris = i + 1; break; }
+        if (baris < 0) return { success: false, message: 'Data tidak ditemukan.' };
+      }
+      function tulis(r, kunci, nilaiSel) { if (h[kunci] !== undefined) sheet.getRange(r, h[kunci] + 1).setValue(nilaiSel); }
+
+      if (baris > 0) {
+        var lama = rows[baris - 1];
+        tulis(baris, 'nama', nama);
+        tulis(baris, 'jenisid', jenisId);
+        tulis(baris, 'tipe', tipe);
+        tulis(baris, 'nilai', nilai);
+        tulis(baris, 'totalkewajiban', totalKewajiban);
+        tulis(baris, 'catatan', String(data.catatan || ''));
+        tulis(baris, 'status', String(data.status || 'Aktif'));
+        logActivityWajib_(auth.user.email, 'RUTIN_UBAH',
+          'ID: ' + id + ' | sebelum: ' + JSON.stringify(lama) + ' | sesudah: ' + nama + '/' + tipe + '/' + nilai + '/' + totalKewajiban);
+        return { success: true, id: id, message: 'Perubahan disimpan.' };
+      }
+
+      id = generateID('RTN');
+      var baru = [];
+      for (var b = 0; b < rows[0].length; b++) baru.push('');
+      function set_(kunci, v) { if (h[kunci] !== undefined) baru[h[kunci]] = v; }
+      set_('id', id);
+      set_('nama', nama);
+      set_('jenisid', jenisId);
+      set_('tipe', tipe);
+      set_('nilai', nilai);
+      set_('totalkewajiban', totalKewajiban);
+      set_('mulai', toDateStr_(new Date()));
+      set_('status', 'Aktif');
+      set_('catatan', String(data.catatan || ''));
+      set_('createdby', auth.user.email);
+      set_('createdat', toDateStr_(new Date()));
+      sheet.appendRow(baru);
+      logActivityWajib_(auth.user.email, 'RUTIN_TAMBAH', nama + ' | ' + tipe + ' | ' + nilai + (totalKewajiban ? ' | pokok ' + totalKewajiban : ''));
+      return { success: true, id: id, message: 'Pengeluaran rutin ditambahkan.' };
+    });
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// Nonaktifkan (bukan hapus permanen) — sesuai aturan tidak ada hard delete.
+function nonaktifkanPengeluaranRutin(id, alasan) {
+  try {
+    var auth = requirePerm('rutin.kelola');
+    if (!auth.success) return { success: false, message: auth.message };
+    if (!String(alasan || '').trim()) return { success: false, message: 'Alasan wajib diisi.' };
+    return withLock_(function() {
+      var sheet = getSS_().getSheetByName(CONFIG.SHEETS.RUTIN);
+      if (!sheet) return { success: false, message: 'Sheet Pengeluaran Rutin belum ada.' };
+      var rows = sheet.getDataRange().getValues();
+      var h = headerMap_(rows[0]);
+      for (var i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]) !== String(id)) continue;
+        if (h['status'] !== undefined) sheet.getRange(i + 1, h['status'] + 1).setValue('Nonaktif');
+        logActivityWajib_(auth.user.email, 'RUTIN_NONAKTIF',
+          'ID: ' + id + ' | ' + String(hGet_(rows[i], h, 'nama', 1) || '') + ' | alasan: ' + alasan);
+        return { success: true, message: 'Dinonaktifkan.' };
+      }
+      return { success: false, message: 'Data tidak ditemukan.' };
+    });
   } catch(e) {
     return { success: false, message: e.message };
   }
