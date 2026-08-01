@@ -1438,13 +1438,13 @@ function submitTransaksi(data) {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
       if (!sheet) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
       sheet.appendRow([id, periode.id, data.jenisId, data.anggotaId || '', tgl, nominal, data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now), 'Aktif']);
-      _isiNoBukti_(sheet, 'BKM', periode.id);
+      var noBuktiMasuk = _isiNoBukti_(sheet, 'BKM', periode.id);
       logActivity(auth.user.email, 'PEMASUKAN', 'Nominal: ' + nominal);
     } else if (data.tipe === 'keluar') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
       if (!sheet) return { success: false, message: 'Sheet pengeluaran tidak ditemukan' };
       sheet.appendRow([id, periode.id, data.jenisId, tgl, nominal, data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now), 'Aktif']);
-      _isiNoBukti_(sheet, 'BKK', periode.id);
+      var noBuktiKeluar = _isiNoBukti_(sheet, 'BKK', periode.id);
       if (data.buktiList && data.buktiList.length) { try { _simpanBuktiList_(id, 'keluar', data.buktiList, auth.user.email); } catch(e) {} }
       // T12 maker-checker: pengeluaran di atas ambang jadi Draft (belum masuk saldo).
       var ambangApp = 1000000;
@@ -1453,7 +1453,7 @@ function submitTransaksi(data) {
       _isiApproval_(sheet, perluApproval ? 'Draft' : 'Disetujui', perluApproval ? '' : auth.user.email, perluApproval ? '' : toDateStr_(now));
       logActivity(auth.user.email, 'PENGELUARAN', 'Nominal: ' + nominal + (perluApproval ? ' [DRAFT menunggu persetujuan]' : ''));
       try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
-      return { success: true, id: id, perluApproval: perluApproval };
+      return { success: true, id: id, perluApproval: perluApproval, noBukti: noBuktiKeluar || '' };
     } else if (data.tipe === 'mutasi') {
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
       if (!sheet) {
@@ -1466,7 +1466,8 @@ function submitTransaksi(data) {
 
     // Invalidate saldo cache setiap ada transaksi baru
     try { CacheService.getScriptCache().remove('dashboard_saldo'); } catch(e) {}
-    return { success: true, id: id };
+    // noBuktiMasuk hanya terisi pada jalur pemasukan (mutasi tidak bernomor bukti).
+    return { success: true, id: id, noBukti: (typeof noBuktiMasuk !== 'undefined' ? (noBuktiMasuk || '') : '') };
     });
   } catch(e) {
     return { success: false, message: e.message };
