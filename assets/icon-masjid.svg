@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Masjid Minhajur Rosiddin">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2F8F6F"/>
+      <stop offset="1" stop-color="#1F5D4C"/>
+    </linearGradient>
+    <linearGradient id="kubah" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7FD8D0"/>
+      <stop offset="1" stop-color="#2AA0A6"/>
+    </linearGradient>
+    <linearGradient id="dinding" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F5F8F4"/>
+      <stop offset="1" stop-color="#DCEBE1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- latar: kotak membulat khas ikon aplikasi -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="236" r="176" fill="#ffffff" opacity="0.07"/>
+
+  <!-- tiga kubah bawang sejajar, mengikuti bentuk pada foto -->
+  <g fill="url(#kubah)">
+    <path d="M106 214 C106 188 100 170 136 138 C172 170 166 188 166 214 Z"/>
+    <path d="M346 214 C346 188 340 170 376 138 C412 170 406 188 406 214 Z"/>
+    <path d="M198 208 C198 164 188 138 256 80 C324 138 314 164 314 208 Z"/>
+  </g>
+  <rect x="100" y="210" width="72" height="11" rx="5.5" fill="#1B7F86"/>
+  <rect x="340" y="210" width="72" height="11" rx="5.5" fill="#1B7F86"/>
+  <rect x="190" y="204" width="132" height="15" rx="7.5" fill="#1B7F86"/>
+  <!-- pucuk kubah -->
+  <path d="M256 34l7 20 20 7-20 7-7 20-7-20-20-7 20-7z" fill="#B7893F"/>
+
+  <!-- badan bangunan -->
+  <rect x="128" y="222" width="256" height="196" rx="14" fill="url(#dinding)"/>
+  <rect x="128" y="222" width="256" height="22" fill="#B7893F" opacity="0.85"/>
+
+  <!-- pintu lengkung tengah -->
+  <path d="M212 418V310a44 44 0 0 1 88 0v108z" fill="#1F5D4C"/>
+  <path d="M232 418v-96a24 24 0 0 1 48 0v96z" fill="#8FC9AD" opacity="0.35"/>
+
+  <!-- jendela lengkung kiri & kanan -->
+  <path d="M156 400v-64a26 26 0 0 1 52 0v64z" fill="#2F8F6F" opacity="0.85"/>
+  <path d="M304 400v-64a26 26 0 0 1 52 0v64z" fill="#2F8F6F" opacity="0.85"/>
+
+  <!-- pagar hijau di depan, seperti pada foto -->
+  <rect x="112" y="418" width="288" height="14" rx="7" fill="#1F5D4C"/>
+</svg>
