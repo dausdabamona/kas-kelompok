@@ -3168,6 +3168,7 @@ function getRekapSetoran() {
       // Hitung target sesuai sumber data (FK eksplisit — tidak ada tebak nama)
       var target = 0;
       var sumberKet = '';
+      var danaTersedia = null, danaRef = '';   // dana penutup kewajiban (earmark), utk tipe 'tetap'
       if (sumberTipe === 'bukuir') {
         // Per kolom — sesuai pilihan dropdown di tabel Pos Setoran (Sumber Ref)
         var colIdx = mapPosNamaToBukuIRCol(sumberRef, sumberRef, irColMap);
@@ -3175,6 +3176,24 @@ function getRekapSetoran() {
           for (var r = 0; r < irData.length; r++) target += Number(irData[r][colIdx]) || 0;
         }
         sumberKet = 'Buku IR: ' + sumberRef;
+      } else if (sumberTipe === 'tetap') {
+        // Kewajiban TETAP per bulan (keputusan musyawaroh) — besarnya tidak bergantung
+        // pemasukan. Target = nilai kolom Target x jumlah bulan dalam periode.
+        var perBulan = Number(posRows[i][posH['target'] !== undefined ? posH['target'] : 5]) || 0;
+        var nBulan = 1;
+        try { if (periode && periode.tanggalMulai) nBulan = Math.max(1, hitungJumlahBulan(periode.tanggalMulai)); } catch(e) {}
+        target = perBulan * nBulan;
+        sumberKet = 'Tetap ' + perBulan.toLocaleString('id-ID') + '/bulan' + (nBulan > 1 ? ' × ' + nBulan + ' bulan' : '');
+        // Sumber Ref (opsional) = kolom Buku IR yang jadi dana utama penutup kewajiban ini
+        // (mis. Index untuk Jatah Desa). Hanya informasi — tidak mengubah besar kewajiban.
+        if (sumberRef) {
+          var cIdx = mapPosNamaToBukuIRCol(sumberRef, sumberRef, irColMap);
+          if (cIdx >= 0) {
+            danaTersedia = 0;
+            for (var d = 0; d < irData.length; d++) danaTersedia += Number(irData[d][cIdx]) || 0;
+            danaRef = sumberRef;
+          }
+        }
       } else if (sumberTipe === 'pemasukan') {
         var totalMasuk = masukPerJenis[sumberRef] || 0;
         var pct = pctDesaMap[sumberRef];
@@ -3197,7 +3216,12 @@ function getRekapSetoran() {
         status: pctReal >= 100 ? 'Lunas' : 'Belum Lunas',
         catatan: setoranMap[posId] ? setoranMap[posId].catatan : '',
         sumberKas: setoranMap[posId] ? (setoranMap[posId].sumberKas || 'Tunai') : 'Tunai',
-        isAuto: sumberTipe !== 'manual'
+        isAuto: sumberTipe !== 'manual',
+        // Earmark: dana yang tersedia untuk menutup kewajiban ini + kurang/lebihnya.
+        danaRef: danaRef,
+        danaTersedia: danaTersedia,
+        danaKurang: (danaTersedia === null) ? null : Math.max(0, target - danaTersedia),
+        danaLebih: (danaTersedia === null) ? null : Math.max(0, danaTersedia - target)
       });
     }
     return { success: true, data: result };

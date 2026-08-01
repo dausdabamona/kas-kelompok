@@ -3218,10 +3218,12 @@ var App = {
           '<option value="manual"' + (st === 'manual' ? ' selected' : '') + '>Manual (isi target sendiri)</option>' +
           '<option value="bukuir"' + (st === 'bukuir' ? ' selected' : '') + '>Dari kolom Buku IR</option>' +
           '<option value="pemasukan"' + (st === 'pemasukan' ? ' selected' : '') + '>Dari jenis Pemasukan (% Desa)</option>' +
+          '<option value="tetap"' + (st === 'tetap' ? ' selected' : '') + '>Tetap per bulan (hasil musyawaroh)</option>' +
         '</select></div>' +
-        '<div class="form-group" id="grpRefBukuIR" style="display:' + (st === 'bukuir' ? 'block' : 'none') + ';"><label>Kolom Buku IR</label><select id="sRefBukuIR">' + irOpts + '</select></div>' +
+        '<div class="form-group" id="grpRefBukuIR" style="display:' + ((st === 'bukuir' || st === 'tetap') ? 'block' : 'none') + ';"><label id="lblRefBukuIR">' + (st === 'tetap' ? 'Dana penutup dari kolom Buku IR (opsional)' : 'Kolom Buku IR') + '</label><select id="sRefBukuIR">' + irOpts + '</select>' +
+          '<div class="text-small text-muted" id="hintRefBukuIR" style="margin-top:4px;display:' + (st === 'tetap' ? 'block' : 'none') + ';">Kolom yang diutamakan untuk menutup kewajiban ini (mis. Index untuk Jatah Desa). Tidak mengubah besar kewajiban — hanya menampilkan dana tersedia & kurang/lebihnya.</div></div>' +
         '<div class="form-group" id="grpRefPemasukan" style="display:' + (st === 'pemasukan' ? 'block' : 'none') + ';"><label>Jenis Pemasukan</label><select id="sRefPemasukan"><option value="">-- Pilih --</option>' + pmOpts + '</select></div>' +
-        '<div class="form-group" id="grpTarget" style="display:' + (st === 'manual' ? 'block' : 'none') + ';"><label>Target (Rp)</label><input type="text" inputmode="numeric" data-tsep="1" id="sTarget" value="' + (v.target || 0) + '"/></div>' +
+        '<div class="form-group" id="grpTarget" style="display:' + ((st === 'manual' || st === 'tetap') ? 'block' : 'none') + ';"><label id="lblTarget">' + (st === 'tetap' ? 'Kewajiban per BULAN (Rp)' : 'Target (Rp)') + '</label><input type="text" inputmode="numeric" data-tsep="1" id="sTarget" value="' + (v.target || 0) + '"/></div>' +
         '<div class="form-group"><label>Catat Realisasi sebagai Pengeluaran</label><select id="sPengeluaranRef">' + pkOpts + '</select>' +
           '<div class="text-small text-muted" style="margin-top:4px;">Saat realisasi setoran diinput, uang keluar dicatat otomatis ke pos pengeluaran ini agar saldo kas berkurang.</div></div>' +
         '<div class="form-group"><label>Status</label><select id="sStatus"><option value="Aktif"' + (v.status !== 'Nonaktif' ? ' selected' : '') + '>Aktif</option><option value="Nonaktif"' + (v.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>';
@@ -3248,9 +3250,16 @@ var App = {
     var grpIR = document.getElementById('grpRefBukuIR');
     var grpPm = document.getElementById('grpRefPemasukan');
     var grpTg = document.getElementById('grpTarget');
-    if (grpIR) grpIR.style.display = (st === 'bukuir') ? 'block' : 'none';
+    // 'tetap' butuh Target (per bulan) + boleh menautkan kolom Buku IR sbg dana penutup.
+    if (grpIR) grpIR.style.display = (st === 'bukuir' || st === 'tetap') ? 'block' : 'none';
     if (grpPm) grpPm.style.display = (st === 'pemasukan') ? 'block' : 'none';
-    if (grpTg) grpTg.style.display = (st === 'manual') ? 'block' : 'none';
+    if (grpTg) grpTg.style.display = (st === 'manual' || st === 'tetap') ? 'block' : 'none';
+    var lblIR = document.getElementById('lblRefBukuIR');
+    var hintIR = document.getElementById('hintRefBukuIR');
+    var lblTg = document.getElementById('lblTarget');
+    if (lblIR) lblIR.textContent = (st === 'tetap') ? 'Dana penutup dari kolom Buku IR (opsional)' : 'Kolom Buku IR';
+    if (hintIR) hintIR.style.display = (st === 'tetap') ? 'block' : 'none';
+    if (lblTg) lblTg.textContent = (st === 'tetap') ? 'Kewajiban per BULAN (Rp)' : 'Target (Rp)';
   },
 
   closeModalSetting: function(e) {
@@ -3279,10 +3288,12 @@ var App = {
     } else if (mode === 'posSetoran') {
       var st = document.getElementById('sSumberTipe').value;
       data.sumberTipe = st;
-      if (st === 'bukuir') data.sumberRef = document.getElementById('sRefBukuIR').value;
+      // 'tetap' juga memakai kolom Buku IR sebagai penanda dana penutup (opsional).
+      if (st === 'bukuir' || st === 'tetap') data.sumberRef = document.getElementById('sRefBukuIR').value;
       else if (st === 'pemasukan') data.sumberRef = document.getElementById('sRefPemasukan').value;
       else data.sumberRef = '';
-      data.target = st === 'manual' ? (App.num('sTarget')) : 0;
+      // 'tetap' menyimpan kewajiban PER BULAN di kolom Target.
+      data.target = (st === 'manual' || st === 'tetap') ? (App.num('sTarget')) : 0;
       data.pengeluaranRef = document.getElementById('sPengeluaranRef').value;
       data.status = document.getElementById('sStatus').value;
       if (st === 'pemasukan' && !data.sumberRef) {
