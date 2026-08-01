@@ -15,14 +15,17 @@ function getGoogleEmail() {
 
 // ── HAK AKSES (PERMISSION) ──────────────────────────────
 // Matriks { role: { cap: bool } }, gabungan default + override sheet "Hak Akses".
+var _permMatrixMemo = null;   // memo per eksekusi; userCan_ dipanggil berkali-kali
+
 function getPermMatrix_() {
+  if (_permMatrixMemo) return _permMatrixMemo;
   var cache = CacheService.getScriptCache();
   var cached = cache.get('perm_matrix');
-  if (cached) { try { return JSON.parse(cached); } catch(e) {} }
+  if (cached) { try { _permMatrixMemo = JSON.parse(cached); return _permMatrixMemo; } catch(e) {} }
 
   var matrix = getDefaultPermMatrix_(); // { role: { cap: bool } }
   try {
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();   // memoized per eksekusi
     var sheet = ss.getSheetByName(CONFIG.SHEETS.HAK_AKSES);
     if (sheet && sheet.getLastRow() > 1) {
       var rows = sheet.getDataRange().getValues();
@@ -50,6 +53,7 @@ function getPermMatrix_() {
     getCapabilities_().forEach(function(c) { matrix[CONFIG.ROLES.ADMIN][c.code] = true; });
   }
   try { cache.put('perm_matrix', JSON.stringify(matrix), 300); } catch(e) {}
+  _permMatrixMemo = matrix;
   return matrix;
 }
 
@@ -99,7 +103,7 @@ function getUserList_() {
   if (cached) {
     try { return JSON.parse(cached); } catch(e) {}
   }
-  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var ss = getSS_();   // memoized per eksekusi
   var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
   if (!sheet) return [];
   var rows = sheet.getDataRange().getValues();
@@ -194,7 +198,7 @@ function savePermMatrix(matrix) {
   try {
     // T12: rekam DIFF matriks (sebelum → sesudah) sebagai aktivitas istimewa.
     var lama = getPermMatrix_();
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();   // memoized per eksekusi
     var sheet = ss.getSheetByName(CONFIG.SHEETS.HAK_AKSES);
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.SHEETS.HAK_AKSES);
@@ -219,6 +223,7 @@ function savePermMatrix(matrix) {
     sheet.setFrozenRows(1);
 
     try { CacheService.getScriptCache().remove('perm_matrix'); } catch(e) {}
+    _permMatrixMemo = null;   // memo per eksekusi ikut dibuang
     // Susun diff perubahan izin.
     var diffs = [];
     caps.forEach(function(c) {
@@ -277,7 +282,7 @@ function addUser(data) {
         return { success: false, message: 'Email sudah terdaftar' };
       }
     }
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();   // memoized per eksekusi
     var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
     if (!sheet) return { success: false, message: 'Sheet Master User tidak ditemukan' };
     var status = (String((data && data.status) || 'Aktif').toLowerCase() === 'nonaktif') ? 'Nonaktif' : 'Aktif';
@@ -300,7 +305,7 @@ function updateUser(data) {
     if (getAllRoles_().indexOf(role) < 0) return { success: false, message: 'Role tidak valid' };
     var status = (String((data && data.status) || 'Aktif').toLowerCase() === 'nonaktif') ? 'Nonaktif' : 'Aktif';
 
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();   // memoized per eksekusi
     var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
     if (!sheet) return { success: false, message: 'Sheet Master User tidak ditemukan' };
     var found = findUserRow_(sheet, email);
@@ -330,7 +335,7 @@ function setUserStatus(email, status) {
   try {
     email = String(email || '').trim();
     var st = (String(status).toLowerCase() === 'nonaktif') ? 'Nonaktif' : 'Aktif';
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();   // memoized per eksekusi
     var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
     if (!sheet) return { success: false, message: 'Sheet Master User tidak ditemukan' };
     var found = findUserRow_(sheet, email);
@@ -356,7 +361,7 @@ function deleteUser(email) {
     if (email.toLowerCase() === String(auth.user.email).toLowerCase()) {
       return { success: false, message: 'Tidak bisa menghapus akun sendiri' };
     }
-    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var ss = getSS_();   // memoized per eksekusi
     var sheet = ss.getSheetByName(CONFIG.SHEETS.USER);
     if (!sheet) return { success: false, message: 'Sheet Master User tidak ditemukan' };
     var found = findUserRow_(sheet, email);

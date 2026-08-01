@@ -7,6 +7,35 @@ function getSS_() {
   return _ss;
 }
 
+// ──────────────────────────────────────────────────────
+// CACHE BACA-SHEET PER EKSEKUSI
+// Satu request sering membaca sheet yang sama berkali-kali (beranda menyentuh
+// Periode 3x, Kas Penerobos 2x, Input Penerimaan 2x). getDataRange().getValues()
+// adalah panggilan jaringan ke Sheets — bagian paling mahal di aplikasi ini.
+//
+// PENTING: cache HANYA hidup di dalam withSheetCache_(), yang dipakai endpoint
+// BACA-SAJA. Fungsi yang menulis tidak pernah dibungkus, sehingga tidak mungkin
+// ada pembacaan basi setelah penulisan.
+// ──────────────────────────────────────────────────────
+var _shCache = null;
+
+function withSheetCache_(fn) {
+  var pemilik = (_shCache === null);   // hanya pembungkus terluar yang bersih-bersih
+  if (pemilik) _shCache = {};
+  try { return fn(); }
+  finally { if (pemilik) _shCache = null; }
+}
+
+// Baca seluruh isi sheet sebagai array 2 dimensi. Mengembalikan [] bila sheet
+// tidak ada atau kosong, sehingga pemanggil cukup memeriksa panjangnya.
+function sheetValues_(nama) {
+  if (_shCache && Object.prototype.hasOwnProperty.call(_shCache, nama)) return _shCache[nama];
+  var sh = getSS_().getSheetByName(nama);
+  var v = (sh && sh.getLastRow() > 0) ? sh.getDataRange().getValues() : [];
+  if (_shCache) _shCache[nama] = v;
+  return v;
+}
+
 // Konversi nilai tanggal ke string YYYY-MM-DD secara konsisten.
 // Diperlukan karena Date object dari spreadsheet tidak bisa di-JSON.stringify.
 function toDateStr_(val) {
@@ -64,9 +93,8 @@ function barisDibatalkan_(row, h) {
 // sudah batal. Berlaku surut — tidak butuh kolom baru di Detail Buku IR.
 function trxPenerimaanDibatalkan_() {
   var set = {};
-  var sh = getSS_().getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-  if (!sh || sh.getLastRow() < 2) return set;
-  var rows = sh.getDataRange().getValues();
+  var rows = sheetValues_(CONFIG.SHEETS.INPUT_PENERIMAAN);
+  if (rows.length < 2) return set;
   var h = headerMap_(rows[0]);
   for (var i = 1; i < rows.length; i++) {
     if (barisDibatalkan_(rows[i], h)) set[String(hGet_(rows[i], h, 'id', 0))] = true;
@@ -305,10 +333,7 @@ function cekSaldoCukup_(periode, sumberKas, nominal) {
 // ──────────────────────────────────────────────────────
 function getPeriodeAktif() {
   try {
-    var ss = getSS_();
-    var sheet = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
-    if (!sheet) return null;
-    var data = sheet.getDataRange().getValues();
+    var data = sheetValues_(CONFIG.SHEETS.PERIOD);
     if (data.length < 2) return null;
 
     // Temukan posisi kolom dari header row
@@ -414,13 +439,11 @@ function getAllPeriode() {
 // ──────────────────────────────────────────────────────
 // T7: kas yang masih di tangan penerobos (status Aktif) + aging per penerobos.
 function kasPenerobosAktif_(periodeId) {
-  var ss = getSS_();
   var out = { total: 0, perPenerobos: [] };
-  var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
-  if (!sheet || sheet.getLastRow() < 2) return out;
+  var rows = sheetValues_(CONFIG.SHEETS.KAS_PENEROBOS);
+  if (rows.length < 2) return out;
   var namaUser = {};
   try { getUserList_().forEach(function(u) { namaUser[u.email.toLowerCase()] = u.nama || u.email; }); } catch(e) {}
-  var rows = sheet.getDataRange().getValues();
   var h = headerMap_(rows[0]);
   var today = new Date();
   var map = {};
@@ -584,20 +607,17 @@ function deteksiDuplikatPenerobos_() {
 // Uang masih di tangan penerobos padahal bukunya sudah ditutup — perlu diperingatkan.
 function penerobosAktifPeriodeTertutup_() {
   var out = { total: 0, count: 0 };
-  var ss = getSS_();
-  var sheet = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
-  if (!sheet || sheet.getLastRow() < 2) return out;
+  var rows = sheetValues_(CONFIG.SHEETS.KAS_PENEROBOS);
+  if (rows.length < 2) return out;
   // Kumpulan periode yang berstatus OPEN.
   var openSet = {};
-  var shP = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
-  if (shP && shP.getLastRow() > 1) {
-    var pr = shP.getDataRange().getValues();
+  var pr = sheetValues_(CONFIG.SHEETS.PERIOD);
+  if (pr.length > 1) {
     var ph = headerMap_(pr[0]);
     for (var p = 1; p < pr.length; p++) {
       if (String(hGet_(pr[p], ph, 'status', 4)).toUpperCase() === CONFIG.STATUS.OPEN) openSet[String(pr[p][0])] = true;
     }
   }
-  var rows = sheet.getDataRange().getValues();
   var h = headerMap_(rows[0]);
   for (var i = 1; i < rows.length; i++) {
     if (String(hGet_(rows[i], h, 'status', 9)) !== 'Aktif') continue;
@@ -610,6 +630,12 @@ function penerobosAktifPeriodeTertutup_() {
 }
 
 function getDashboardData() {
+  // Beranda menyentuh sheet yang sama berkali-kali → bungkus dengan cache
+  // baca-sheet per eksekusi. Endpoint ini murni membaca, jadi aman.
+  return withSheetCache_(_getDashboardData_);
+}
+
+function _getDashboardData_() {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
@@ -680,10 +706,13 @@ function getDashboardData() {
     // L2b: baris Kas Penerobos di periode CLOSED yang masih Aktif (uang di luar buku).
     var penerobosTutup = { total: 0, count: 0 };
     try { penerobosTutup = penerobosAktifPeriodeTertutup_(); } catch(e) {}
-    var agingHari = 7;
-    try { var av = PropertiesService.getScriptProperties().getProperty('AGING_HARI'); if (av) agingHari = Number(av) || 7; } catch(e) {}
-    var buildDate = '';
-    try { buildDate = PropertiesService.getScriptProperties().getProperty('BUILD_DATE') || ''; } catch(e) {}
+    // Satu panggilan Script Properties untuk semua nilai yang dibutuhkan.
+    var agingHari = 7, buildDate = '';
+    try {
+      var props = PropertiesService.getScriptProperties().getProperties();
+      if (props['AGING_HARI']) agingHari = Number(props['AGING_HARI']) || 7;
+      buildDate = props['BUILD_DATE'] || '';
+    } catch(e) {}
 
     return {
       success: true,
@@ -717,13 +746,11 @@ function calculateSaldo(periodeId, periode) {
   if (!periodeId || !periode) {
     throw new Error('calculateSaldo: periode wajib. Gunakan getSaldoTutupBukuTerakhir_() bila tidak ada periode OPEN.');
   }
-  var ss = getSS_();
   var tunai = Number(periode.saldoAwalTunai) || 0;
   var bank  = Number(periode.saldoAwalBank)  || 0;
 
-  var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-  if (sheetP && sheetP.getLastRow() > 1) {
-    var dp = sheetP.getDataRange().getValues();
+  var dp = sheetValues_(CONFIG.SHEETS.INPUT_PENERIMAAN);
+  if (dp.length > 1) {
     var dpH = headerMap_(dp[0]);
     for (var i = 1; i < dp.length; i++) {
       if (barisDibatalkan_(dp[i], dpH)) continue; // T3: abaikan yang dibatalkan
@@ -735,9 +762,8 @@ function calculateSaldo(periodeId, periode) {
     }
   }
 
-  var sheetPK = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
-  if (sheetPK && sheetPK.getLastRow() > 1) {
-    var dpk = sheetPK.getDataRange().getValues();
+  var dpk = sheetValues_(CONFIG.SHEETS.INPUT_PENGELUARAN);
+  if (dpk.length > 1) {
     var dpkH = headerMap_(dpk[0]);
     for (var j = 1; j < dpk.length; j++) {
       if (barisDibatalkan_(dpk[j], dpkH)) continue; // T3
@@ -750,9 +776,8 @@ function calculateSaldo(periodeId, periode) {
     }
   }
 
-  var sheetS = ss.getSheetByName(CONFIG.SHEETS.INPUT_SETORAN);
-  if (sheetS && sheetS.getLastRow() > 1) {
-    var ds = sheetS.getDataRange().getValues();
+  var ds = sheetValues_(CONFIG.SHEETS.INPUT_SETORAN);
+  if (ds.length > 1) {
     var dsH = headerMap_(ds[0]);
     for (var k = 1; k < ds.length; k++) {
       if (barisDibatalkan_(ds[k], dsH)) continue; // T3
@@ -779,9 +804,8 @@ function saldoSaatIni_(periodeId, periode) {
 // K3: Saldo akhir dari baris 'Tutup' TERAKHIR (periode CLOSED terbaru).
 // Dipakai bila tidak ada periode OPEN. null bila belum pernah tutup buku.
 function getSaldoTutupBukuTerakhir_() {
-  var sheet = getSS_().getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
-  if (!sheet || sheet.getLastRow() < 2) return null;
-  var rows = sheet.getDataRange().getValues();
+  var rows = sheetValues_(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+  if (rows.length < 2) return null;
   var h = headerMap_(rows[0]);
   for (var i = rows.length - 1; i >= 1; i--) {
     if (String(hGet_(rows[i], h, 'status', 6) || '').trim() !== 'Tutup') continue;
@@ -1606,13 +1630,13 @@ function setujuiPengeluaran(id) {
 function getDraftPengeluaran() {
   try {
     var auth = checkAuth(); if (!auth.success) return auth;
-    var ss = getSS_(); var periode = getPeriodeAktif();
-    var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
-    if (!sheet || sheet.getLastRow() < 2) return { success: true, data: [], total: 0 };
+    var periode = getPeriodeAktif();
+    var rows = sheetValues_(CONFIG.SHEETS.INPUT_PENGELUARAN);
+    if (rows.length < 2) return { success: true, data: [], total: 0 };
     var namaKeluar = {};
-    var mk = ss.getSheetByName(CONFIG.SHEETS.PENGELUARAN);
-    if (mk) { var mr = mk.getDataRange().getValues(); for (var j = 1; j < mr.length; j++) { if (mr[j][0]) namaKeluar[String(mr[j][0])] = String(mr[j][1] || ''); } }
-    var rows = sheet.getDataRange().getValues(); var h = headerMap_(rows[0]);
+    var mr = sheetValues_(CONFIG.SHEETS.PENGELUARAN);
+    for (var j = 1; j < mr.length; j++) { if (mr[j][0]) namaKeluar[String(mr[j][0])] = String(mr[j][1] || ''); }
+    var h = headerMap_(rows[0]);
     var out = [], total = 0;
     for (var i = 1; i < rows.length; i++) {
       if (barisDibatalkan_(rows[i], h) || !barisDraft_(rows[i], h)) continue;
@@ -2544,28 +2568,25 @@ function getBukuIRData() {
       try { return JSON.parse(cached); } catch(e) {}
     }
 
-    var ss = getSS_();
     var periode = getPeriodeAktif();
     var periodeId = periode ? periode.id : null;
 
-    var sheetP = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-    var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
-    var sheetMaster = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
-    var sheetAnggota = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    var pRows = sheetValues_(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    var irRows = sheetValues_(CONFIG.SHEETS.BUKU_IR);
+    var masterRows = sheetValues_(CONFIG.SHEETS.PEMASUKAN);
+    var angRows = sheetValues_(CONFIG.SHEETS.ANGGOTA);
 
-    if (!sheetP) return { success: true, data: { belumDirincikan: [], sudahDirincikan: [] } };
+    if (!pRows.length) return { success: true, data: { belumDirincikan: [], sudahDirincikan: [] } };
 
     var bukuIRIds = [];
-    if (sheetMaster) {
-      var masterRows = sheetMaster.getDataRange().getValues();
+    {
       for (var i = 1; i < masterRows.length; i++) {
         if (masterRows[i][2] === 'Buku IR') bukuIRIds.push(masterRows[i][0]);
       }
     }
 
     var anggotaMap = {};
-    if (sheetAnggota) {
-      var angRows = sheetAnggota.getDataRange().getValues();
+    {
       for (var i = 1; i < angRows.length; i++) {
         if (angRows[i][0]) anggotaMap[angRows[i][0]] = {
           nama: angRows[i][1], ir: Number(angRows[i][5]) || 0,
@@ -2577,9 +2598,8 @@ function getBukuIRData() {
 
     // Kumpulkan rincian yang sudah ada per transaksiId (untuk edit)
     var rincianMap = {};
-    if (sheetIR && sheetIR.getLastRow() > 1) {
+    if (irRows.length > 1) {
       var setBatalBIR = trxPenerimaanDibatalkan_();      // ← K1: jangan muat rincian yatim
-      var irRows = sheetIR.getDataRange().getValues();
       var irH = headerMap_(irRows[0]);
       for (var i = 1; i < irRows.length; i++) {
         var trxId = String(hGet_(irRows[i], irH, 'transaksiid', 1) || '');
@@ -2597,8 +2617,7 @@ function getBukuIRData() {
     }
 
     var belum = [], sudah = [];
-    if (sheetP.getLastRow() > 1) {
-      var pRows = sheetP.getDataRange().getValues();
+    if (pRows.length > 1) {
       var pHdr = headerMap_(pRows[0]);
       var c_id = pHdr['id'] !== undefined ? pHdr['id'] : 0;
       var c_pid = pHdr['periodeid'] !== undefined ? pHdr['periodeid'] : 1;
@@ -3214,16 +3233,14 @@ function getRekapSetoran() {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
     var ss = getSS_();
-    var sheetPos = ss.getSheetByName(CONFIG.SHEETS.POS_SETORAN);
-    var sheetSetoran = ss.getSheetByName(CONFIG.SHEETS.SETORAN_DESA);
-    if (!sheetPos) return { success: true, data: [] };
+    var posRows = sheetValues_(CONFIG.SHEETS.POS_SETORAN);
+    if (posRows.length < 2) return { success: true, data: [] };
 
-    var posRows = sheetPos.getDataRange().getValues();
     var periode = getPeriodeAktif();
     var periodeId = periode ? periode.id : null;
     var setoranMap = {};
-    if (sheetSetoran && sheetSetoran.getLastRow() > 1) {
-      var sRows = sheetSetoran.getDataRange().getValues();
+    var sRows = sheetValues_(CONFIG.SHEETS.SETORAN_DESA);
+    if (sRows.length > 1) {
       var sHdr = headerMap_(sRows[0]);
       var s_posid = sHdr['posid'] !== undefined ? sHdr['posid'] : 1;
       var s_perid = sHdr['periodeid'] !== undefined ? sHdr['periodeid'] : 2;
@@ -3243,10 +3260,9 @@ function getRekapSetoran() {
 
     // Baca BUKU_IR untuk pos setoran sumber 'bukuir' (jumlah per kolom)
     var irData = [], irColMap = {};
-    var sheetIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
-    if (sheetIR && sheetIR.getLastRow() > 1) {
+    var irRows = sheetValues_(CONFIG.SHEETS.BUKU_IR);
+    if (irRows.length > 1) {
       var setBatal = trxPenerimaanDibatalkan_();          // ← K1
-      var irRows = sheetIR.getDataRange().getValues();
       irColMap = headerMap_(irRows[0]);
       var ir_perid = irColMap['periodeid'] !== undefined ? irColMap['periodeid'] : 2;
       for (var j = 1; j < irRows.length; j++) {
@@ -3259,9 +3275,8 @@ function getRekapSetoran() {
 
     // Untuk sumber 'pemasukan': total penerimaan per jenisId + % Desa dari Master Pemasukan
     var masukPerJenis = {}; // jenisId → total nominal periode aktif
-    var sheetPmsk = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-    if (sheetPmsk && sheetPmsk.getLastRow() > 1) {
-      var pmRows = sheetPmsk.getDataRange().getValues();
+    var pmRows = sheetValues_(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (pmRows.length > 1) {
       var pmH = headerMap_(pmRows[0]);
       for (var k = 1; k < pmRows.length; k++) {
         if (!hGet_(pmRows[k], pmH, 'id', 0)) continue;
@@ -3273,9 +3288,8 @@ function getRekapSetoran() {
       }
     }
     var pctDesaMap = {}; // jenisKode → % Desa
-    var sheetMP = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
-    if (sheetMP && sheetMP.getLastRow() > 1) {
-      var mpRows = sheetMP.getDataRange().getValues();
+    var mpRows = sheetValues_(CONFIG.SHEETS.PEMASUKAN);
+    if (mpRows.length > 1) {
       var mpH = headerMap_(mpRows[0]);
       for (var m = 1; m < mpRows.length; m++) {
         var kode = String(hGet_(mpRows[m], mpH, 'kode', 0) || hGet_(mpRows[m], mpH, 'id', 0) || '');
@@ -4515,6 +4529,10 @@ function getRincianIR(periodeId) {
 //   Milik Daerah = hak Daerah periode − yang sudah disetor ke daerah (0 bila tak dilacak)
 //   Milik Kelompok = Total Kas − Milik Desa − Milik Daerah
 function getKepemilikanSaldo() {
+  return withSheetCache_(_getKepemilikanSaldo_);
+}
+
+function _getKepemilikanSaldo_() {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
@@ -4552,11 +4570,10 @@ function getKepemilikanSaldo() {
     var belumDirinci = 0;
     if (periode) {
       try {
-        var ssb = getSS_();
         var kodeBukuIR = {};
-        var shMb = ssb.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
-        if (shMb && shMb.getLastRow() > 1) {
-          var mrb = shMb.getDataRange().getValues(); var mhb = headerMap_(mrb[0]);
+        var mrb = sheetValues_(CONFIG.SHEETS.PEMASUKAN);
+        if (mrb.length > 1) {
+          var mhb = headerMap_(mrb[0]);
           for (var m = 1; m < mrb.length; m++) {
             var kd = String(hGet_(mrb[m], mhb, 'kode', 0) || '');
             if (kd && String(hGet_(mrb[m], mhb, 'kategori', 2) || '').toLowerCase().indexOf('buku ir') !== -1) kodeBukuIR[kd] = true;
@@ -4564,9 +4581,9 @@ function getKepemilikanSaldo() {
         }
         // Transaksi Buku IR yang sudah punya rincian.
         var adaRincian = {};
-        var shIRb = ssb.getSheetByName(CONFIG.SHEETS.BUKU_IR);
-        if (shIRb && shIRb.getLastRow() > 1) {
-          var irb = shIRb.getDataRange().getValues(); var ihb = headerMap_(irb[0]);
+        var irb = sheetValues_(CONFIG.SHEETS.BUKU_IR);
+        if (irb.length > 1) {
+          var ihb = headerMap_(irb[0]);
           for (var z = 1; z < irb.length; z++) {
             var tzid = String(hGet_(irb[z], ihb, 'transaksiid', 1) || '');
             if (tzid) adaRincian[tzid] = true;
@@ -4574,9 +4591,9 @@ function getKepemilikanSaldo() {
         }
         // Jumlahkan transaksi Buku IR yang BELUM dirinci: periode berjalan +
         // transaksi tangguhan dari periode lalu (uangnya ikut terbawa di kas).
-        var shPb = ssb.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-        if (shPb && shPb.getLastRow() > 1) {
-          var prb = shPb.getDataRange().getValues(); var phb = headerMap_(prb[0]);
+        var prb = sheetValues_(CONFIG.SHEETS.INPUT_PENERIMAAN);
+        if (prb.length > 1) {
+          var phb = headerMap_(prb[0]);
           for (var q = 1; q < prb.length; q++) {
             var qid = String(hGet_(prb[q], phb, 'id', 0) || '');
             if (!qid || barisDibatalkan_(prb[q], phb)) continue;
@@ -4602,19 +4619,18 @@ function getKepemilikanSaldo() {
     if (periode) {
       saldoAwal = (Number(periode.saldoAwalTunai) || 0) + (Number(periode.saldoAwalBank) || 0);
       try {
-        var ssr = getSS_();
-        var shPm = ssr.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
-        if (shPm && shPm.getLastRow() > 1) {
-          var pm = shPm.getDataRange().getValues(); var pmh = headerMap_(pm[0]);
+        var pm = sheetValues_(CONFIG.SHEETS.INPUT_PENERIMAAN);
+        if (pm.length > 1) {
+          var pmh = headerMap_(pm[0]);
           for (var x = 1; x < pm.length; x++) {
             if (!hGet_(pm[x], pmh, 'id', 0) || barisDibatalkan_(pm[x], pmh)) continue;
             if (String(hGet_(pm[x], pmh, 'periodeid', 1)) !== String(pid)) continue;
             totalMasuk += Number(hGet_(pm[x], pmh, 'nominal', 5)) || 0;
           }
         }
-        var shPk = ssr.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
-        if (shPk && shPk.getLastRow() > 1) {
-          var pk = shPk.getDataRange().getValues(); var pkh = headerMap_(pk[0]);
+        var pk = sheetValues_(CONFIG.SHEETS.INPUT_PENGELUARAN);
+        if (pk.length > 1) {
+          var pkh = headerMap_(pk[0]);
           for (var y = 1; y < pk.length; y++) {
             if (!hGet_(pk[y], pkh, 'id', 0) || barisDibatalkan_(pk[y], pkh) || barisDraft_(pk[y], pkh)) continue;
             if (String(hGet_(pk[y], pkh, 'periodeid', 1)) !== String(pid)) continue;

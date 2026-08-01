@@ -579,6 +579,7 @@ function _migrasiHakAksesInput_(ss) {
   if (idx['trx.input.masuk'] == null) { sheet.appendRow(['trx.input.masuk', labelOf_('trx.input.masuk')].concat(legacy.slice(2))); ditambah.push('trx.input.masuk'); }
   if (idx['trx.input.keluar'] == null) { sheet.appendRow(['trx.input.keluar', labelOf_('trx.input.keluar')].concat(legacy.slice(2))); ditambah.push('trx.input.keluar'); }
   try { CacheService.getScriptCache().remove('perm_matrix'); } catch(e) {}
+  _permMatrixMemo = null;
   return ditambah.join(' & ') + ' (mengikuti nilai trx.input lama)';
 }
 
