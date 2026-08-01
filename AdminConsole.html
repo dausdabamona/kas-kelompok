@@ -239,7 +239,16 @@
     return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
   function rp(n) { return 'Rp ' + Number(n || 0).toLocaleString('id-ID'); }
-  function jt(n) { n = Number(n || 0); if (n >= 1e9) return 'Rp ' + (n/1e9).toFixed(1).replace('.',',') + 'M'; if (n >= 1e6) return 'Rp ' + (n/1e6).toFixed(1).replace('.',',') + 'jt'; if (n >= 1e3) return 'Rp ' + Math.round(n/1e3) + 'rb'; return 'Rp ' + n; }
+  // Ringkas ke jt/rb. Menangani angka negatif — sebelumnya nilai minus lolos ke
+  // cabang terakhir dan tercetak mentah (mis. 'Rp -1147596.6666666').
+  function jt(n) {
+    n = Number(n || 0);
+    var t = n < 0 ? '-' : '', a = Math.abs(n);
+    if (a >= 1e9) return t + 'Rp ' + (a/1e9).toFixed(1).replace('.',',') + 'M';
+    if (a >= 1e6) return t + 'Rp ' + (a/1e6).toFixed(1).replace('.',',') + 'jt';
+    if (a >= 1e3) return t + 'Rp ' + Math.round(a/1e3) + 'rb';
+    return t + 'Rp ' + Math.round(a);
+  }
   function initials(name) { return String(name||'?').split(' ').map(function(w){return w.charAt(0);}).join('').substring(0,2).toUpperCase(); }
 
   function gate(msg) {
@@ -1004,6 +1013,73 @@
     return '<span class="kpi-delta flat">0%</span>';
   }
 
+  // ── Panel: Dana Kelompok vs Kewajiban ──
+  // Menggantikan grafik arus kas. Menjawab satu pertanyaan: dana yang boleh
+  // dipakai kelompok cukup atau tidak untuk menutup kewajiban rutin bulan ini.
+  function panelDana(dana) {
+    // Catatan: --danger pada konsol ini bernilai emas (#B7893F), warna yang sama
+    // dengan 'belum dibayar'. Untuk keadaan kekurangan dana dipakai merah tegas
+    // agar terbaca sebagai peringatan, bukan sekadar penanda.
+    var MERAH = '#B91C1C';
+    if (!dana) {
+      return '<div class="panel"><div class="panel-head"><div class="panel-title">Dana Kelompok vs Kewajiban</div></div>'
+        + '<div class="empty" style="padding:20px 16px;">Belum dapat dihitung — pastikan ada periode aktif.</div></div>';
+    }
+    var rt = dana.rutin;
+    var tersedia = Number(dana.milikKelompok) || 0;
+    var wajibTotal = rt ? Number(rt.totalPrediksi) || 0 : 0;
+    var terkumpul = rt ? Number(rt.totalRealisasi) || 0 : 0;   // dana yang sudah dikeluarkan/tertutup
+    var belum = rt ? Number(rt.sisaPerkiraan) || 0 : 0;
+    var setelah = tersedia - belum;
+    var kurang = setelah < 0;
+
+    var pctBayar = wajibTotal > 0 ? Math.round(terkumpul / wajibTotal * 100) : 0;
+    var pctTutup = belum > 0 ? Math.max(0, Math.round(tersedia / belum * 100)) : 100;
+
+    function bar(pct, warna, latar) {
+      return '<div style="height:10px;border-radius:5px;background:' + (latar || 'var(--admin-soft, #DCEAE1)') + ';overflow:hidden;margin-top:6px;">'
+        + '<div style="height:100%;width:' + Math.max(0, Math.min(100, pct)) + '%;background:' + warna + ';"></div></div>';
+    }
+    function baris(lbl, nilai, ket, warna, tebal) {
+      return '<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--border);">'
+        + '<div><div style="font-size:13px;' + (tebal ? 'font-weight:700;' : '') + '">' + lbl + '</div>'
+        + (ket ? '<div style="font-size:11px;color:var(--text-muted);">' + ket + '</div>' : '') + '</div>'
+        + '<div class="num" style="font-weight:' + (tebal ? '800' : '700') + ';white-space:nowrap;'
+        + (warna ? 'color:' + warna + ';' : '') + '">' + rp(nilai) + '</div></div>';
+    }
+
+    var kiri = '<div style="flex:1 1 300px;min-width:260px;">'
+      + '<div style="font-size:12px;color:var(--text-muted);">Dana kelompok saat ini</div>'
+      + '<div style="font-size:32px;font-weight:800;color:' + (dana.kelompokNegatif ? MERAH : 'var(--admin)') + ';margin:2px 0 10px;">' + rp(tersedia) + '</div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:12px;"><span style="color:var(--text-muted);">Kewajiban terbayar</span><span style="font-weight:700;">' + pctBayar + '%</span></div>'
+      + bar(pctBayar, 'var(--admin)')
+      + '<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:10px;"><span style="color:var(--text-muted);">Daya tutup dana kelompok</span>'
+      + '<span style="font-weight:700;color:' + (kurang ? MERAH : 'var(--admin)') + ';">' + (pctTutup >= 100 ? '100%+' : pctTutup + '%') + '</span></div>'
+      + bar(pctTutup, kurang ? MERAH : 'var(--admin)', kurang ? '#FEE2E2' : null)
+      + '</div>';
+
+    var kanan = '<div style="flex:1 1 320px;min-width:280px;">'
+      + (rt
+        ? baris('Kewajiban rutin bulan ini', wajibTotal, rt.jumlahPos + ' pos terdaftar')
+          + baris('Dana yang telah terkumpul', terkumpul, 'sudah dibayarkan', 'var(--admin)')
+          + baris('Belum dibayar', belum, rt.belumBayar + ' pos menunggu', 'var(--g-gold, #B7893F)')
+          + '<div style="display:flex;justify-content:space-between;gap:12px;padding:11px 0 2px;margin-top:4px;border-top:2px solid var(--admin-soft, #DCEAE1);">'
+            + '<div style="font-size:13px;font-weight:800;">' + (kurang ? 'Kurang untuk menutup' : 'Sisa setelah kewajiban') + '</div>'
+            + '<div class="num" style="font-weight:800;font-size:17px;white-space:nowrap;color:' + (kurang ? MERAH : 'var(--admin)') + ';">' + rp(Math.abs(setelah)) + '</div></div>'
+          + (kurang
+            ? '<div style="font-size:12px;color:#B91C1C;background:#FEE2E2;border-radius:8px;padding:8px 10px;margin-top:10px;">⚠ Dana kelompok tidak cukup menutup kewajiban rutin bulan ini. Perlu tambahan pemasukan atau penjadwalan ulang.</div>'
+            : '')
+        : '<div class="empty" style="padding:16px 0;">Belum ada pengeluaran rutin terdaftar, jadi belum ada pembanding kewajiban. <a class="link" onclick="go(\'rutin\')">Daftarkan sekarang</a></div>')
+      + '</div>';
+
+    return '<div class="panel"><div class="panel-head"><div class="panel-title">Dana Kelompok vs Kewajiban <small>periode berjalan</small></div>'
+      + '<a class="link" style="margin-left:auto;" onclick="go(\'rutin\')">Kelola pengeluaran rutin</a></div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:26px;padding:16px;">' + kiri + kanan + '</div>'
+      + '<div style="padding:0 16px 14px;font-size:11px;color:var(--text-muted);">'
+      + 'Dana kelompok = Total Kas ' + rp(dana.totalKas) + ' dikurangi titipan desa, daerah, Buku IR belum dirinci, dan titipan jamaah. '
+      + 'Rinciannya ada di menu Kepemilikan Saldo.</div></div>';
+  }
+
   function viewDashboard(host) {
     var d = STATE;
     var arus = d.arus6 || [];
@@ -1011,8 +1087,6 @@
     var sparkOut = arus.map(function(a){ return a.keluar; });
     var prevMasuk = arus.length >= 2 ? arus[arus.length-2].masuk : 0;
     var prevKeluar = arus.length >= 2 ? arus[arus.length-2].keluar : 0;
-    var avgIn = arus.length ? arus.reduce(function(s,a){return s+a.masuk;},0)/arus.length : 0;
-    var avgOut = arus.length ? arus.reduce(function(s,a){return s+a.keluar;},0)/arus.length : 0;
 
     var roleMap = { 'ADMIN':'rc-admin', 'BENDAHARA_1':'rc-b1', 'BENDAHARA_2':'rc-b2', 'PENULIS':'rc-pen', 'PENEROBOS':'rc-per' };
     var donutColors = ['#0F766E','#14B8A6','#F59E0B','#3B82F6','#A78BFA','#6B21A8'];
@@ -1029,16 +1103,6 @@
       + '<div class="kpi"><div class="kpi-label"><span class="d" style="background:var(--admin)"></span> Transaksi Periode</div>'
       + '<div class="kpi-value"><span class="num">' + ((d.periode && d.periode.transaksi) || 0) + '</span></div>'
       + '<div class="kpi-foot"><span class="kpi-delta flat">periode berjalan</span></div></div>';
-
-    // ── Arus kas bars ──
-    var maxBar = Math.max(1, Math.max.apply(null, arus.map(function(a){ return Math.max(a.masuk, a.keluar); }).concat([1])));
-    var barsHtml = arus.length ? arus.map(function(a) {
-      var lbl = a.ym ? a.ym.substring(5) + '/' + a.ym.substring(2,4) : '';
-      return '<div class="bar-col"><div class="bar-stack">'
-        + '<div class="bar in" title="Masuk: ' + rp(a.masuk) + '" style="height:' + Math.round(a.masuk/maxBar*100) + '%"></div>'
-        + '<div class="bar out" title="Keluar: ' + rp(a.keluar) + '" style="height:' + Math.round(a.keluar/maxBar*100) + '%"></div>'
-        + '</div><div class="bar-label">' + esc(lbl) + '</div></div>';
-    }).join('') : '<div class="empty" style="margin:auto;">Belum ada data transaksi.</div>';
 
     // ── Buku besar ──
     var rows = (d.bukuBesar || []).map(function(t) {
@@ -1085,13 +1149,7 @@
       '<div class="small-note">💡 Konsol ini dirancang untuk layar lebar. Untuk HP, gunakan versi mobile.</div>'
       + '<div class="kpi-strip">' + kpis + '</div>'
       + '<div class="grid-main"><div class="stack">'
-        + '<div class="panel"><div class="panel-head"><div class="panel-title">Arus Kas <small>6 bulan terakhir</small></div></div>'
-          + '<div class="chart-body"><div class="bars">' + barsHtml + '</div>'
-          + '<div class="chart-side">'
-            + '<div class="cs-item"><div class="cs-l"><span class="sw" style="background:#059669"></span> Rata2 masuk</div><div class="cs-v num">' + jt(avgIn) + '</div></div>'
-            + '<div class="cs-item"><div class="cs-l"><span class="sw" style="background:#DC2626"></span> Rata2 keluar</div><div class="cs-v num">' + jt(avgOut) + '</div></div>'
-            + '<div class="cs-item"><div class="cs-l"><span class="sw" style="background:#0F766E"></span> Surplus rata2</div><div class="cs-v num" style="color:var(--admin)">' + jt(avgIn - avgOut) + '</div></div>'
-          + '</div></div></div>'
+        + panelDana(d.dana)
         + '<div class="panel"><div class="panel-head"><div class="panel-title">Buku Besar <small>transaksi periode berjalan</small></div></div>'
           + '<div style="overflow-x:auto;"><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Anggota / Ket.</th><th>Sumber</th><th class="r">Nominal</th><th>Oleh</th></tr></thead><tbody>' + bukuBody + '</tbody></table></div>'
           + '<div class="table-foot"><span>Menampilkan ' + (d.bukuBesar||[]).length + ' dari ' + ((d.periode && d.periode.transaksi) || 0) + ' transaksi</span></div></div>'

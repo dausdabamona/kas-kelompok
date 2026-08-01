@@ -1935,6 +1935,24 @@ function getAdminConsole() {
     if (!auth.success) return { success: false, message: auth.message };
     if (auth.user.role !== CONFIG.ROLES.ADMIN) return { success: false, message: 'Khusus Admin.' };
 
+    // Dihitung sekali di sini agar dashboard tidak perlu panggilan server kedua.
+    var danaRingkas = null;
+    try {
+      var kp0 = getKepemilikanSaldo();
+      if (kp0 && kp0.success) {
+        danaRingkas = {
+          milikKelompok: kp0.milikKelompok,
+          totalKas: kp0.totalKas,
+          milikDesa: kp0.milikDesa,
+          milikDaerah: kp0.milikDaerah,
+          belumDirinci: kp0.belumDirinci,
+          titipanJamaah: kp0.titipanJamaah,
+          kelompokNegatif: kp0.kelompokNegatif,
+          rutin: kp0.rutin
+        };
+      }
+    } catch(e) {}
+
     var ss = getSS_();
     var periode = getPeriodeAktif();
     var periodeId = periode ? periode.id : null;
@@ -2065,6 +2083,9 @@ function getAdminConsole() {
       kasTunai: saldo.tunai, kasBank: saldo.bank, totalKas: saldo.tunai + saldo.bank,
       masukBulan: masukBulan, keluarBulan: keluarBulan,
       arus6: arus6, bukuBesar: bukuBesar, komposisi: komposisi,
+      // Perbandingan dana kelompok vs kewajiban — menggantikan grafik arus kas
+      // di dashboard. Sudah termasuk ringkasan pengeluaran rutin.
+      dana: danaRingkas,
       roles: roleCount, userAktif: aktif, userNonaktif: nonaktif,
       perangkatAktif: perangkatAktif, sesiAktif: sesiAktif,
       belumDirinci: belumDirinci, belumDirinciNilai: belumDirinciNilai, serahMenunggu: serahMenunggu,
