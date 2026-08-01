@@ -388,30 +388,33 @@
 
   .rk-lbl {
     flex: 1 1 auto;
-    min-width: 0;              /* izinkan teks menyusut, bukan mendesak isian */
+    min-width: 0;              /* boleh menyusut & membungkus, bukan mendesak isian */
     font-weight: 600;
     font-size: 14px;
     color: var(--text);
-    line-height: 1.25;
+    line-height: 1.3;
+    overflow-wrap: anywhere;   /* label panjang turun baris, tidak melebar keluar */
   }
   .rk-lbl .rk-tuj {
     display: block;
     font-weight: 500;
     font-size: 10.5px;
     margin-top: 1px;
+    line-height: 1.35;
   }
 
+  /* Lebar isian TETAP, bukan persen: semua kotak angka sejajar rapi sehingga
+     digit ribuan mudah dibandingkan antar baris. Label memakai sisa ruang. */
   .rk-row input {
-    flex: 0 0 46%;
-    max-width: 46%;
+    flex: 0 0 138px;
+    width: 138px;
     text-align: right;
     padding: 9px 11px;
     font-weight: 700;
   }
 
-  /* Layar sangat sempit: isian diberi porsi lebih kecil agar label tak terpotong. */
   @media (max-width: 360px) {
-    .rk-row input { flex-basis: 42%; max-width: 42%; }
+    .rk-row input { flex-basis: 118px; width: 118px; }
     .rk-lbl { font-size: 13px; }
   }
 
