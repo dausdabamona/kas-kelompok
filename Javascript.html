@@ -4009,71 +4009,75 @@ var App = {
         self.renderLaporanSetoran(res);
       })
       .withFailureHandler(function(err) { self.showError(err.message); })
-      .getLaporanSetoran();
+      .getRekapSetoran();
   },
 
+  // Berbasis POS SETORAN (sama dengan menu Setoran Desa, Admin Console, & laporan PDF)
+  // supaya tidak ada lagi dua angka berbeda untuk hal yang sama.
   renderLaporanSetoran: function(res) {
     var self = this;
-    self._laporanSetoran = res;
-    var s = res.summary || {};
     var data = res.data || [];
+    App._setoranData = data;   // dipakai showEditSetoran (alur input realisasi pos)
 
-    var kewajiban = s.totalTarget || 0;
-    var persen = kewajiban > 0 ? Math.round((s.totalSudahSetor || 0) / kewajiban * 100) : 0;
+    var kewajiban = 0, disetor = 0;
+    data.forEach(function(p) { kewajiban += Number(p.target) || 0; disetor += Number(p.realisasi) || 0; });
+    var sisaTot = kewajiban - disetor;
+    var persen = kewajiban > 0 ? Math.round(disetor / kewajiban * 100) : 0;
 
     var summaryCards =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">' +
-        '<div style="background:linear-gradient(135deg,#2563EB,#1E40AF);border-radius:12px;padding:14px;color:white;">' +
-          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Kewajiban ke Desa</div>' +
+        '<div style="background:linear-gradient(135deg,#1F5D4C,#2F8F6F);border-radius:12px;padding:14px;color:white;">' +
+          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Kewajiban Setor</div>' +
           '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(kewajiban) + '</div>' +
-          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">' + (s.jumlahBulan || 1) + ' bln × ' + (s.jumlahJamaahAktif || 0) + ' jamaah</div>' +
+          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">' + data.length + ' pos setoran</div>' +
         '</div>' +
-        '<div style="background:linear-gradient(135deg,#059669,#047857);border-radius:12px;padding:14px;color:white;">' +
-          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Jatah dari Pemasukan</div>' +
-          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(s.totalJatahDesa || 0) + '</div>' +
-          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">otomatis dari % Desa</div>' +
-        '</div>' +
-        '<div style="background:linear-gradient(135deg,#7C3AED,#6D28D9);border-radius:12px;padding:14px;color:white;">' +
+        '<div style="background:linear-gradient(135deg,#2F8F6F,#8FC9AD);border-radius:12px;padding:14px;color:white;">' +
           '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Sudah Disetor</div>' +
-          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(s.totalSudahSetor || 0) + '</div>' +
+          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(disetor) + '</div>' +
           '<div style="font-size:10px;opacity:0.75;margin-top:3px;">realisasi (' + persen + '%)</div>' +
         '</div>' +
-        '<div style="background:linear-gradient(135deg,#F59E0B,#D97706);border-radius:12px;padding:14px;color:white;">' +
-          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Tambahan dari Kas</div>' +
-          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(s.totalTopUpKas || 0) + '</div>' +
-          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">kekurangan pemasukan</div>' +
+        '<div style="background:linear-gradient(135deg,#B7893F,#8a6730);border-radius:12px;padding:14px;color:white;">' +
+          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Sisa Kewajiban</div>' +
+          '<div style="font-size:16px;font-weight:800;">' + App.formatNumber(sisaTot > 0 ? sisaTot : 0) + '</div>' +
+          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">belum disetor</div>' +
+        '</div>' +
+        '<div style="background:linear-gradient(135deg,#475569,#334155);border-radius:12px;padding:14px;color:white;">' +
+          '<div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Pos Lunas</div>' +
+          '<div style="font-size:16px;font-weight:800;">' + data.filter(function(p){ return p.persen >= 100; }).length + ' / ' + data.length + '</div>' +
+          '<div style="font-size:10px;opacity:0.75;margin-top:3px;">status setoran</div>' +
         '</div>' +
       '</div>';
 
     var cards = data.map(function(item, idx) {
-      var badgeClass = item.status === 'Lunas' ? 'lunas' : (item.status === 'Sebagian' ? 'pending' : 'belum');
-      var topUpRow = item.topUpKas > 0
-        ? '<div class="pos-card-row"><span class="pos-card-label">+ dari Kas</span><span class="pos-card-value" style="color:#D97706;">' + App.formatNumber(item.topUpKas) + '</span></div>'
-        : '';
-      var targetRow = item.targetMusyawaroh > 0
-        ? '<div class="pos-card-row"><span class="pos-card-label">Target Musyawaroh</span><span class="pos-card-value">' + App.formatNumber(item.targetMusyawaroh) + '</span></div>'
-        : '';
+      var badgeClass = item.persen >= 100 ? 'lunas' : (item.realisasi > 0 ? 'pending' : 'belum');
+      var badgeTxt = item.persen >= 100 ? 'Lunas' : (item.realisasi > 0 ? 'Sebagian' : 'Belum Setor');
+      // Pos 'tetap' berdana penutup (mis. Index → Jatah Desa): tampilkan dana & kurang/lebih.
+      var danaRow = '';
+      if (item.danaTersedia !== null && item.danaTersedia !== undefined) {
+        danaRow = '<div class="pos-card-row"><span class="pos-card-label">Dana ' + App.escapeHtml(item.danaRef || '') + '</span><span class="pos-card-value text-success">' + App.formatNumber(item.danaTersedia) + '</span></div>' +
+          (item.danaKurang > 0
+            ? '<div class="pos-card-row"><span class="pos-card-label">Kurang (dari kas)</span><span class="pos-card-value" style="color:#B7893F;">' + App.formatNumber(item.danaKurang) + '</span></div>'
+            : (item.danaLebih > 0
+              ? '<div class="pos-card-row"><span class="pos-card-label">Lebih (utk kelompok)</span><span class="pos-card-value text-success">' + App.formatNumber(item.danaLebih) + '</span></div>' : ''));
+      }
       return '<div class="pos-card">' +
         '<div class="pos-card-header">' +
-          '<div class="pos-card-nama">' + App.escapeHtml(item.nama) + ' <span style="font-size:10px;color:var(--text-muted);font-weight:500;">(' + item.pctDesa + '% desa)</span></div>' +
-          '<span class="status-badge ' + badgeClass + '">' + item.status + '</span>' +
+          '<div class="pos-card-nama">' + App.escapeHtml(item.nama) + '</div>' +
+          '<span class="status-badge ' + badgeClass + '">' + badgeTxt + '</span>' +
         '</div>' +
-        '<div class="pos-card-row"><span class="pos-card-label">Pemasukan</span><span class="pos-card-value">' + App.formatNumber(item.totalMasuk) + '</span></div>' +
-        '<div class="pos-card-row"><span class="pos-card-label">Jatah Desa (otomatis)</span><span class="pos-card-value text-success">' + App.formatNumber(item.jatahDesa) + '</span></div>' +
-        targetRow +
-        topUpRow +
-        '<div class="pos-card-row"><span class="pos-card-label">Sudah Disetor</span><span class="pos-card-value">' + App.formatNumber(item.sudahSetor) + (item.sudahDiinput ? '' : ' <span style="font-size:9px;color:var(--text-muted);">(belum diinput)</span>') + '</span></div>' +
+        '<div style="font-size:10.5px;color:var(--text-muted);margin:-2px 0 6px;">' + App.escapeHtml(item.sumberKet || '') + '</div>' +
+        '<div class="pos-card-row"><span class="pos-card-label">Kewajiban</span><span class="pos-card-value">' + App.formatNumber(item.target) + '</span></div>' +
+        danaRow +
+        '<div class="pos-card-row"><span class="pos-card-label">Sudah Disetor</span><span class="pos-card-value">' + App.formatNumber(item.realisasi) + '</span></div>' +
         '<div class="pos-card-row"><span class="pos-card-label">Sisa</span><span class="pos-card-value" style="color:' + (item.sisa > 0 ? 'var(--danger)' : 'var(--success)') + ';font-weight:700;">' + App.formatNumber(item.sisa) + '</span></div>' +
-        (item.tindakLanjut ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">' + item.tindakLanjut + '</div>' : '') +
         '<div style="display:flex;gap:6px;margin-top:8px;">' +
-          '<button class="btn btn-outline btn-sm" style="flex:1;font-size:12px;" onclick="App.showEditSetoranDesa(' + idx + ')">✏️ Input Setoran</button>' +
-          '<button class="action-btn-sm edit" style="flex:1;justify-content:center;font-size:12px;" onclick="App.pageJamaahBelumBayar(\'' + String(item.id).replace(/'/g, "\\'") + '\')">👥 Cek Jamaah</button>' +
+          '<button class="btn btn-outline btn-sm" style="flex:1;font-size:12px;" onclick="App.showEditSetoran(' + idx + ')">✏️ Input Setoran</button>' +
         '</div>' +
       '</div>';
-    }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada jenis pemasukan dengan jatah desa. Atur % Desa di Master Pemasukan.</div>';
+    }).join('') || '<div class="text-center text-muted" style="padding:32px;">Belum ada Pos Setoran. Atur di Setting → Kelola Pos Setoran.</div>';
 
     var html = self.pageWrapper('Laporan Setoran Desa',
-      summaryCards + cards + '<div id="setoranDesaModal"></div>'
+      summaryCards + cards + '<div id="setoranModal"></div>'
     );
     document.getElementById('app').innerHTML = html;
   },
