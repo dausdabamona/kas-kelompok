@@ -654,14 +654,15 @@ function getDashboardData() {
       try { cache.put(cacheKey, JSON.stringify(saldoData), 60); } catch(e) {}
     }
 
-    // Ambil jumlah belum dirincikan dari cache buku IR (jika ada, gratis)
-    var belumCount = 0;
+    // Jumlah & nilai Buku IR belum dirincikan. Hitung dari getBukuIRData (punya
+    // cache 90 detik sendiri) — sebelumnya hanya membaca cache mentah, sehingga
+    // saat cache kosong hasilnya selalu 0 dan "Perlu Tindakan" tampak bersih.
+    var belumCount = 0, belumNilai = 0;
     try {
-      var bukuCache = cache.get('buku_ir_data');
-      if (bukuCache) {
-        var bd = JSON.parse(bukuCache);
-        belumCount = (bd.data && bd.data.belumDirincikan) ? bd.data.belumDirincikan.length : 0;
-      }
+      var bir0 = getBukuIRData();
+      var lb0 = (bir0 && bir0.success && bir0.data && bir0.data.belumDirincikan) ? bir0.data.belumDirincikan : [];
+      belumCount = lb0.length;
+      lb0.forEach(function(t) { belumNilai += Number(t.nominal) || 0; });
     } catch(e) {}
 
     // T12: pengeluaran menunggu persetujuan (Draft).
@@ -700,6 +701,7 @@ function getDashboardData() {
       agingHari: agingHari,
       totalKas: saldoData.tunai + saldoData.bank + (penerobosDalamTotal ? kp.total : 0),
       belumDirincikanCount: belumCount,
+      belumDirincikanNilai: belumNilai,
       menungguApproval: draft,
       peringatan: saldoData.peringatan || '',
       buildDate: buildDate
@@ -1957,8 +1959,13 @@ function getAdminConsole() {
     if (shSes) { var rs = shSes.getDataRange().getValues(); var hs = headerMap_(rs[0]); for (var i = 1; i < rs.length; i++) { if (String(hGet_(rs[i], hs, 'status', 5)) !== 'Aktif') continue; var ev = hGet_(rs[i], hs, 'kadaluarsa', 4); var em = (ev instanceof Date) ? ev.getTime() : new Date(ev).getTime(); if (nowMs <= em) sesiAktif++; } }
 
     // Perlu tindakan
-    var belumDirinci = 0;
-    try { var bc = CacheService.getScriptCache().get('buku_ir_data'); if (bc) { var bd = JSON.parse(bc); belumDirinci = (bd.data && bd.data.belumDirincikan) ? bd.data.belumDirincikan.length : 0; } } catch(e) {}
+    var belumDirinci = 0, belumDirinciNilai = 0;
+    try {
+      var birA = getBukuIRData();
+      var lbA = (birA && birA.success && birA.data && birA.data.belumDirincikan) ? birA.data.belumDirincikan : [];
+      belumDirinci = lbA.length;
+      lbA.forEach(function(t) { belumDirinciNilai += Number(t.nominal) || 0; });
+    } catch(e) {}
     var serahMenunggu = 0;
     var shST = ss.getSheetByName(CONFIG.SHEETS.SERAH_TERIMA);
     if (shST) { var rst = shST.getDataRange().getValues(); var hst = headerMap_(rst[0]); for (var i = 1; i < rst.length; i++) { if (hGet_(rst[i], hst, 'id', 0) && String(hGet_(rst[i], hst, 'status', 7)) === 'Menunggu') serahMenunggu++; } }
@@ -1987,7 +1994,7 @@ function getAdminConsole() {
       arus6: arus6, bukuBesar: bukuBesar, komposisi: komposisi,
       roles: roleCount, userAktif: aktif, userNonaktif: nonaktif,
       perangkatAktif: perangkatAktif, sesiAktif: sesiAktif,
-      belumDirinci: belumDirinci, serahMenunggu: serahMenunggu,
+      belumDirinci: belumDirinci, belumDirinciNilai: belumDirinciNilai, serahMenunggu: serahMenunggu,
       logs: logs
     };
   } catch(e) {
@@ -4326,6 +4333,111 @@ function getBagiHasil(periodeId) {
       totalMasuk: totMasuk,
       kelompok: totKel, desa: totDesa, daerah: totDaerah,
       rincian: rincian
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// Pantau setoran Buku IR tiap jamaah selama 6 bulan terakhir (matriks
+// jamaah × bulan). Dipakai untuk melihat siapa yang rutin & siapa yang menunggak.
+// Sumber: Detail Buku IR (rincian yatim diabaikan). Bulan dari kolom Tanggal.
+function getPantauIR(jumlahBulan) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var n = Number(jumlahBulan) || 6;
+    if (n < 1) n = 6; if (n > 24) n = 24;
+    var ss = getSS_();
+
+    // Daftar bulan (YYYY-MM) dari yang terlama ke terbaru.
+    var bulanList = [], label = [];
+    var namaBln = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    var kini = new Date();
+    for (var b = n - 1; b >= 0; b--) {
+      var d = new Date(kini.getFullYear(), kini.getMonth() - b, 1);
+      var ym = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+      bulanList.push(ym);
+      label.push(namaBln[d.getMonth()] + ' ' + String(d.getFullYear()).slice(-2));
+    }
+    var idxBulan = {};
+    bulanList.forEach(function(ym, i) { idxBulan[ym] = i; });
+
+    // Jamaah aktif.
+    var jamaah = [], angNama = {};
+    var shA = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
+    if (shA && shA.getLastRow() > 1) {
+      var ar = shA.getDataRange().getValues(); var ah = headerMap_(ar[0]);
+      for (var a = 1; a < ar.length; a++) {
+        var aid = String(hGet_(ar[a], ah, 'id', 0) || '');
+        if (!aid) continue;
+        if (String(hGet_(ar[a], ah, 'status', 4) || '').trim().toLowerCase() === 'nonaktif') continue;
+        angNama[aid] = String(hGet_(ar[a], ah, 'nama', 1) || aid);
+        jamaah.push(aid);
+      }
+    }
+
+    // Agregasi setoran Buku IR per jamaah per bulan.
+    var data = {};          // anggotaId → array nilai per bulan
+    function pastikan(aid) {
+      if (!data[aid]) { data[aid] = []; for (var z = 0; z < n; z++) data[aid].push(0); }
+      return data[aid];
+    }
+    var setBatal = trxPenerimaanDibatalkan_();
+    var totalBulan = []; for (var t0 = 0; t0 < n; t0++) totalBulan.push(0);
+    var shIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+    if (shIR && shIR.getLastRow() > 1) {
+      var ir = shIR.getDataRange().getValues(); var ih = headerMap_(ir[0]);
+      for (var k = 1; k < ir.length; k++) {
+        if (!ir[k][0]) continue;
+        if (rincianYatim_(ir[k], ih, setBatal)) continue;
+        var tgl = toDateStr_(hGet_(ir[k], ih, 'tanggal', 4));
+        if (!/^\d{4}-\d{2}/.test(tgl)) continue;
+        var ym2 = tgl.substring(0, 7);
+        var col = idxBulan[ym2];
+        if (col === undefined) continue;     // di luar rentang
+        var aid2 = String(hGet_(ir[k], ih, 'anggotaid', 3) || '');
+        if (!aid2) continue;
+        var jml = (Number(hGet_(ir[k], ih, 'ir', 5)) || 0) + (Number(hGet_(ir[k], ih, 'ir10', 6)) || 0) +
+                  (Number(hGet_(ir[k], ih, 'cicilan', 7)) || 0) + (Number(hGet_(ir[k], ih, 'infakdaerah', 8)) || 0) +
+                  (Number(hGet_(ir[k], ih, 'index', 9)) || 0);
+        if (jml <= 0) continue;
+        if (!angNama[aid2]) { angNama[aid2] = aid2; jamaah.push(aid2); }   // jamaah nonaktif yg pernah setor
+        pastikan(aid2)[col] += jml;
+        totalBulan[col] += jml;
+      }
+    }
+
+    // Susun baris + statistik kepatuhan.
+    var rows = [];
+    jamaah.forEach(function(aid) {
+      var v = data[aid] || null;
+      var arr = v ? v : (function() { var e = []; for (var z = 0; z < n; z++) e.push(0); return e; })();
+      var total = 0, isiBulan = 0, terakhir = '';
+      for (var c = 0; c < n; c++) {
+        total += arr[c];
+        if (arr[c] > 0) { isiBulan++; terakhir = label[c]; }
+      }
+      rows.push({
+        anggotaId: aid, nama: angNama[aid] || aid,
+        nilai: arr, total: total, bulanTerisi: isiBulan,
+        bulanKosong: n - isiBulan,
+        terakhirSetor: terakhir,
+        aktifBulanIni: arr[n - 1] > 0
+      });
+    });
+    // Menunggak (belum setor bulan ini) di atas, lalu total terkecil.
+    rows.sort(function(x, y) {
+      if (x.aktifBulanIni !== y.aktifBulanIni) return x.aktifBulanIni ? 1 : -1;
+      return x.total - y.total;
+    });
+
+    var grand = 0; totalBulan.forEach(function(v) { grand += v; });
+    return {
+      success: true, bulan: label, ym: bulanList, rows: rows,
+      totalBulan: totalBulan, grandTotal: grand,
+      jumlahJamaah: rows.length,
+      belumSetorBulanIni: rows.filter(function(r) { return !r.aktifBulanIni; }).length
     };
   } catch(e) {
     return { success: false, message: e.message };

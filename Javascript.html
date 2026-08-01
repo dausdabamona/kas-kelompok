@@ -474,7 +474,7 @@ var App = {
       prioRows += '<div class="np-prio" onclick="App.pageApproval()"><span class="ic">✅</span><div class="bd"><div class="tt">Perlu Persetujuan</div><div class="mt">' + data.menungguApproval.count + ' pengeluaran menunggu</div></div><span class="vv coral">' + fn(data.menungguApproval.total) + '</span></div>';
     }
     if (App.can('bukuIR.input') && data.belumDirincikanCount > 0) {
-      prioRows += '<div class="np-prio gold" onclick="App.pageBukuIR()"><span class="ic">📖</span><div class="bd"><div class="tt">Perlu Dirinci</div><div class="mt">Buku IR belum dirincikan</div></div><span class="vv coral">' + data.belumDirincikanCount + '</span></div>';
+      prioRows += '<div class="np-prio gold" onclick="App.pageBukuIR()"><span class="ic">📖</span><div class="bd"><div class="tt">Perlu Dirinci</div><div class="mt">Haknya belum diketahui · ' + self.formatNumber(data.belumDirincikanNilai || 0) + '</div></div><span class="vv coral">' + data.belumDirincikanCount + '</span></div>';
     }
     var prio = prioRows ? ('<div class="np-kickh"><span class="t">Perlu Tindakan</span></div>' + prioRows) : '';
 

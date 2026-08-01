@@ -280,7 +280,7 @@
   function menuDef() {
     return [
       { grp:'Ringkasan', items:[ ['dashboard','📊','Dashboard'], ['saldo','🧮','Pemeriksaan Saldo'], ['pdf','📄','Laporan PDF'] ] },
-      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['rincianir','🧾','Rincian IR'], ['kepemilikan','🧭','Kepemilikan Saldo'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'] ] },
+      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['rincianir','🧾','Rincian IR'], ['pantauir','📅','Pantau IR 6 Bulan'], ['kepemilikan','🧭','Kepemilikan Saldo'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'] ] },
       { grp:'Jamaah', items:[ ['anggota','👥','Anggota'], ['terobosan','🤝','Terobosan Kelompok'], ['serah','🤲','Serah Terima'] ] },
       { grp:'Tata Kelola', items:[ ['users','🔑','Kelola User'], ['hakakses','🛡️','Hak Akses'], ['devices','📱','Perangkat &amp; Sesi'], ['master','🗂️','Master &amp; Pos'], ['periode','🗓️','Periode'], ['log','📜','Activity Log'] ] }
     ];
@@ -293,6 +293,7 @@
     bukuir:         { title:'Buku IR', ep:'getBukuIRData', run: renderBukuIR },
     kepemilikan:    { title:'Kepemilikan Saldo', ep:'getKepemilikanSaldo', run: renderKepemilikan },
     rincianir:      { title:'Rincian IR', ep:'getRincianIR', run: renderRincianIR },
+    pantauir:       { title:'Pantau IR 6 Bulan', ep:'getPantauIR', epArgs:[6], run: renderPantauIR },
     setorandesa:    { title:'Setoran Desa', ep:'getRekapSetoran', run: renderSetoranDesa },
     bank:           { title:'Bank & Rekonsiliasi', ep:'getRekonsiliasiData', run: renderBank },
     laporansetoran: { title:'Laporan Setoran', ep:'getRekapSetoran', run: renderLaporanSetoran },
@@ -399,6 +400,53 @@
       { label:'Saldo Bank (Sistem)', val: rp(s.bank), color:'var(--bank)' },
       { label:'Total Kas', val: rp(s.total), color:'var(--admin)' }
     ]) + panelBox('Pemeriksaan Saldo', res.periode ? res.periode.nama : '', '<div class="sec-body"><p style="color:var(--text-muted);padding:6px 0;">Input saldo aktual & tutup buku dilakukan di aplikasi.</p><a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl()) + '">Buka di Aplikasi →</a></div>');
+  }
+
+  // ── VIEW: Pantau IR 6 Bulan (matriks jamaah × bulan) ──
+  function renderPantauIR(host, res) {
+    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
+    var bulan = res.bulan || [], rows = res.rows || [];
+    var kartu = '<div class="kpi-strip" style="grid-template-columns:repeat(4,1fr);">' +
+      '<div class="kpi" style="background:linear-gradient(150deg,var(--g-deep),var(--g-mid));color:#fff;border:none;box-shadow:var(--shadow-emerald);">' +
+        '<div class="kpi-label" style="color:rgba(255,255,255,.85);">Total ' + bulan.length + ' Bulan</div>' +
+        '<div class="kpi-value" style="color:#fff;">' + rp(res.grandTotal) + '</div>' +
+        '<div class="kpi-foot"><span class="kpi-delta" style="color:rgba(255,255,255,.8);">seluruh jamaah</span></div></div>' +
+      '<div class="kpi"><div class="kpi-label">Jamaah Terpantau</div><div class="kpi-value">' + res.jumlahJamaah + '</div>' +
+        '<div class="kpi-foot"><span class="kpi-delta flat">punya setoran / aktif</span></div></div>' +
+      '<div class="kpi" style="background:var(--g-gold-soft);"><div class="kpi-label">Belum Setor Bln Ini</div>' +
+        '<div class="kpi-value" style="color:#6f5220;">' + res.belumSetorBulanIni + '</div>' +
+        '<div class="kpi-foot"><span class="kpi-delta flat">perlu ditindaklanjuti</span></div></div>' +
+      '<div class="kpi" style="background:var(--g-mist);"><div class="kpi-label">Bulan Terakhir</div>' +
+        '<div class="kpi-value">' + rp((res.totalBulan || [])[bulan.length - 1] || 0) + '</div>' +
+        '<div class="kpi-foot"><span class="kpi-delta flat">' + esc(bulan[bulan.length - 1] || '') + '</span></div></div>' +
+    '</div>';
+
+    var cols = [{t:'Jamaah'}].concat(bulan.map(function(b) { return { t: b, r: true }; }))
+      .concat([{t:'Total', r:true},{t:'Rutin', r:true}]);
+    var body = rows.map(function(x) {
+      var sel = x.nilai.map(function(v, i) {
+        var akhir = (i === bulan.length - 1);
+        if (v > 0) return '<td class="r amt" style="color:var(--g-mid);">' + num(v) + '</td>';
+        // Nol ditulis "—"; bulan berjalan yang kosong ditandai agar mudah dilihat.
+        return '<td class="r" style="color:' + (akhir ? 'var(--g-gold)' : '#b9c4bf') + ';">—</td>';
+      }).join('');
+      var rutin = x.bulanTerisi + '/' + bulan.length;
+      var warna = x.bulanTerisi === bulan.length ? 'var(--g-mid)' : (x.bulanTerisi === 0 ? 'var(--g-gold)' : 'var(--text-muted)');
+      return '<tr' + (x.aktifBulanIni ? '' : ' style="background:var(--g-gold-soft);"') + '>' +
+        '<td class="t-jenis">' + esc(x.nama) +
+          (x.aktifBulanIni ? '' : '<div class="t-name" style="font-size:11px;">belum setor bulan ini' +
+            (x.terakhirSetor ? ' · terakhir ' + esc(x.terakhirSetor) : ' · belum pernah') + '</div>') + '</td>' +
+        sel +
+        '<td class="r amt" style="font-weight:800;">' + num(x.total) + '</td>' +
+        '<td class="r" style="color:' + warna + ';font-weight:700;">' + rutin + '</td></tr>';
+    }).join('');
+    var foot = '<tr style="font-weight:800;border-top:2px solid var(--admin-soft);"><td>TOTAL</td>' +
+      (res.totalBulan || []).map(function(v) { return '<td class="r amt">' + num(v) + '</td>'; }).join('') +
+      '<td class="r amt">' + num(res.grandTotal) + '</td><td></td></tr>';
+
+    host.innerHTML = kartu +
+      panelBox('Setoran Buku IR per Jamaah', bulan.length + ' bulan terakhir', tableHtml(cols, body + foot)) +
+      '<p style="color:var(--text-muted);font-size:12px;margin-top:-6px;">Nilai = jumlah seluruh komponen Buku IR (IR + 1/10 IR + Cicilan + Infak Daerah + Index) yang sudah <b>dirincikan</b> pada bulan tersebut. Baris bertanda kuning = belum setor bulan ini; kolom "Rutin" menunjukkan berapa bulan dari ' + bulan.length + ' yang terisi. Setoran yang belum dirincikan belum muncul di sini.</p>';
   }
 
   // ── VIEW: Rincian IR (per jamaah + komponen) ──
@@ -788,8 +836,8 @@
 
     // ── Perlu tindakan ──
     var acts = [];
-    if (d.belumDirinci > 0) acts.push(actItem('warn', '📖', 'Buku IR belum dirinci', 'Masuk tanpa rincian', d.belumDirinci));
-    if (d.serahMenunggu > 0) acts.push(actItem('info', '🤲', 'Serah terima menunggu', 'Perlu konfirmasi bendahara', d.serahMenunggu));
+    if (d.belumDirinci > 0) acts.push(actItem('warn', '📖', 'Buku IR belum dirinci', 'Haknya belum diketahui · ' + rp(d.belumDirinciNilai || 0), d.belumDirinci, 'bukuir'));
+    if (d.serahMenunggu > 0) acts.push(actItem('info', '🤲', 'Serah terima menunggu', 'Perlu konfirmasi bendahara', d.serahMenunggu, 'serah'));
     var actHtml = acts.length ? acts.join('') : '<div class="empty" style="padding:20px 16px;">✅ Tidak ada yang perlu ditindak.</div>';
     var actCount = acts.length;
 
@@ -899,8 +947,10 @@
       + '<span class="plate plate-m" aria-hidden="true">' + t + '</span>'
       + '<span class="plate plate-y" aria-hidden="true">' + t + '</span></span>';
   }
-  function actItem(cls, ico, title, sub, count) {
-    return '<div class="act ' + cls + '"><div class="act-ico">' + ico + '</div><div class="act-body"><div class="act-title">' + esc(title) + '</div><div class="act-sub">' + esc(sub) + '</div></div><div class="act-count">' + count + ' <span class="chev">›</span></div></div>';
+  // view opsional: bila diisi, kartu bisa diklik menuju menu terkait.
+  function actItem(cls, ico, title, sub, count, view) {
+    var klik = view ? ' style="cursor:pointer;" onclick="go(\'' + view + '\')"' : '';
+    return '<div class="act ' + cls + '"' + klik + '><div class="act-ico">' + ico + '</div><div class="act-body"><div class="act-title">' + esc(title) + '</div><div class="act-sub">' + esc(sub) + '</div></div><div class="act-count">' + count + ' <span class="chev">›</span></div></div>';
   }
   function donut(komp, colors) {
     var size=118, stroke=20, r=(size-stroke)/2, cx=size/2, cy=size/2, circ=2*Math.PI*r, off=0;
