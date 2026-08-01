@@ -574,7 +574,7 @@ var App = {
         '⚠ Nilainya minus — kas yang ada belum cukup menutup titipan desa/daerah. Jangan dipakai belanja sebelum setoran beres.</div>'
       : '';
 
-    el.innerHTML = '<div class="card" style="border-left:4px solid ' + (neg ? '#B91C1C' : 'var(--np-mid, #2F8F6F)') + ';">' +
+    el.innerHTML = '<div class="card" style="cursor:pointer;border-left:4px solid ' + (neg ? '#B91C1C' : 'var(--np-mid, #2F8F6F)') + ';" onclick="App.pageKepemilikan()">' +
         '<div style="font-size:12px;color:var(--text-muted);">Boleh dipakai kelompok</div>' +
         '<div style="font-size:26px;font-weight:800;color:' + (neg ? '#B91C1C' : 'var(--np-deep, #1F5D4C)') + ';margin:2px 0 8px;">' + fn(r.milikKelompok) + '</div>' +
         '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;">' +
@@ -584,7 +584,93 @@ var App = {
         kurang('Titipan Daerah', r.milikDaerah, 'infak daerah belum disetor') +
         kurang('Buku IR belum dirinci', r.belumDirinci, 'haknya belum diketahui') +
         blokSumber + catatanNeg +
+        '<div style="margin-top:10px;font-size:11px;color:var(--np-mid, #2F8F6F);font-weight:700;">Lihat rincian hak kelompok, desa &amp; daerah →</div>' +
       '</div>';
+  },
+
+  // Halaman rincian kepemilikan saldo (mobile) — versi ringkas dari layar
+  // Kepemilikan Saldo di Admin Console. Hanya Bendahara 1 & Admin.
+  pageKepemilikan: function() {
+    var self = this;
+    self.history.push('dashboard');
+    self.showLoading('Menghitung kepemilikan saldo…');
+    App.srv()
+      .withSuccessHandler(function(r) { if (r && r.success) self.renderKepemilikanMobile(r); else self.showError((r && r.message) || 'Gagal memuat'); })
+      .withFailureHandler(function(e) { self.showError((e && e.message) || 'Gagal terhubung'); })
+      .getKepemilikanSaldo();
+  },
+
+  renderKepemilikanMobile: function(r) {
+    var self = this;
+    var fn = function(v) { return self.formatNumber(v); };
+
+    // Tiga pemilik saldo, ditambah pos "belum dirinci" yang haknya belum jelas.
+    function blokMilik(label, nilai, warna, ket) {
+      return '<div class="card" style="margin-bottom:10px;border-left:4px solid ' + warna + ';">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">' +
+            '<div style="font-weight:700;">' + label + '</div>' +
+            '<div style="font-weight:800;color:' + warna + ';white-space:nowrap;">' + fn(nilai) + '</div>' +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">' + ket + '</div>' +
+        '</div>';
+    }
+
+    var ringkas =
+      '<div class="card" style="margin-bottom:12px;">' +
+        '<div style="display:flex;justify-content:space-between;font-size:13px;">' +
+          '<span style="color:var(--text-muted);">Total Kas Saat Ini</span>' +
+          '<span style="font-weight:800;">' + fn(r.totalKas) + '</span></div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">' +
+          'Saldo awal ' + fn(r.saldoAwal) + ' + masuk ' + fn(r.totalMasuk) + ' − keluar ' + fn(r.totalKeluar) + '</div>' +
+      '</div>' +
+      blokMilik('Hak Kelompok', r.milikKelompok, r.kelompokNegatif ? '#B91C1C' : 'var(--np-mid, #2F8F6F)',
+        'Boleh dipakai untuk kebutuhan kelompok.') +
+      blokMilik('Titipan Desa', r.milikDesa, 'var(--np-gold, #B7893F)',
+        'Kewajiban setor ke desa yang belum dibayar. Uangnya ada di kas, tapi bukan hak kelompok.') +
+      blokMilik('Titipan Daerah', r.milikDaerah, 'var(--np-gold, #B7893F)',
+        'Infak daerah yang belum disetor.') +
+      blokMilik('Belum Dirinci', r.belumDirinci, '#94a3b8',
+        'Buku IR yang belum dirincikan — haknya belum diketahui milik siapa.');
+
+    // Rincian kewajiban per pos setoran: dasar hitungan, sudah setor, sisa.
+    var pos = (r.rincianPos || []).map(function(p) {
+      var lunas = p.sisa <= 0;
+      return '<div class="card" style="margin-bottom:8px;">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;">' +
+            '<div style="font-weight:700;font-size:13px;">' + self.escapeHtml(p.nama) +
+              ' <span style="font-size:10px;font-weight:600;color:var(--text-muted);">→ ' + self.escapeHtml(p.tujuan) + '</span></div>' +
+            '<div style="font-size:11px;font-weight:700;color:' + (lunas ? 'var(--np-mid, #2F8F6F)' : 'var(--np-gold, #B7893F)') + ';white-space:nowrap;">' +
+              (lunas ? (p.lebih > 0 ? 'Lebih ' + fn(p.lebih) : 'Lunas') : 'Kurang ' + fn(p.sisa)) + '</div>' +
+          '</div>' +
+          (p.dasar ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">' + self.escapeHtml(p.dasar) + '</div>' : '') +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:5px;color:var(--text-muted);">' +
+            '<span>Kewajiban ' + fn(p.kewajiban) + '</span><span>Disetor ' + fn(p.disetor) + '</span>' +
+          '</div>' +
+        '</div>';
+    }).join('') || '<div class="info-box">Belum ada pos setoran pada periode ini.</div>';
+
+    // Dari mana hak kelompok berasal (index, sewa kos, lain-lain, dst).
+    var sumber = (r.sumberKelompok || []).map(function(s) {
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid rgba(0,0,0,.06);font-size:12px;">' +
+          '<span>' + self.escapeHtml(s.jenis) + '</span>' +
+          '<span style="font-weight:700;">' + fn(s.nilai) + '</span>' +
+        '</div>';
+    }).join('');
+    var blokSumber = sumber
+      ? '<div class="card">' +
+          '<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;">' +
+            '<span>Hak kelompok periode ini</span><span>' + fn(r.hakKelompokPeriode) + '</span></div>' +
+          sumber +
+          '<div style="font-size:10px;color:var(--text-muted);margin-top:6px;">Ini hak yang lahir pada periode berjalan. Angka “Hak Kelompok” di atas adalah sisa kas nyata, jadi wajar berbeda.</div>' +
+        '</div>'
+      : '';
+
+    var judul = 'Kepemilikan Saldo' + (r.periode ? ' · ' + r.periode.nama : '');
+    document.getElementById('app').innerHTML = this.pageWrapper(judul,
+      ringkas +
+      '<div class="section-title mb-8">Kewajiban Setor per Pos</div>' + pos +
+      (blokSumber ? '<div class="section-title mb-8">Asal Hak Kelompok</div>' + blokSumber : '')
+    );
   },
 
   // Tanggal pendek Bahasa Indonesia untuk rel masthead.
@@ -670,6 +756,8 @@ var App = {
       pantauIR: App.can('view.jamaah') ? '<div class="menu-item" onclick="App.pagePantauIR()"><span class="icon">📅</span><span>Pantau IR 6 Bulan</span></div>' : '',
       kelolaBuku: (!isPenerobos && App.can('view.kelolaBuku')) ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '',
       pemeriksaanSaldo: (!isPenerobos && App.can('view.pemeriksaanSaldo')) ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
+      // Rincian hak kelompok/desa/daerah — keputusan belanja ada di tangan mereka.
+      kepemilikan: (App.currentUser && (App.currentUser.role === 'ADMIN' || App.currentUser.role === 'BENDAHARA_1')) ? '<div class="menu-item" onclick="App.pageKepemilikan()"><span class="icon">⚖️</span><span>Kepemilikan Saldo</span></div>' : '',
       kasPenerobos: App.can('view.kasPenerobos') ? '<div class="menu-item" onclick="App.pageKasPenerobos()"><span class="icon">💼</span><span>Kas Penerobos</span></div>' : '',
       kelolaPenerobos: App.can('penerobos.kelola') ? '<div class="menu-item" onclick="App.pageKelolaKasPenerobos()"><span class="icon">🔧</span><span>Kelola Kas Penerobos</span></div>' : '',
       serahTerima: App.can('view.serahTerima') ? '<div class="menu-item" onclick="App.pageSerahTerima()"><span class="icon">🤲</span><span>Serah Terima</span></div>' : '',
@@ -682,7 +770,7 @@ var App = {
     };
     var groups = [
       { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah, item.pantauIR] },
-      { judul: '💰 Keuangan', items: [item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
+      { judul: '💰 Keuangan', items: [item.kepemilikan, item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
       { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF, item.periode] },
       { judul: '⚙️ Admin', items: [item.setting, item.kelolaPerangkat, item.kelolaPenerobos] }
     ];
