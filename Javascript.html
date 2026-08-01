@@ -889,11 +889,13 @@ var App = {
     var listBelum = belum.length === 0
       ? '<div class="text-center text-muted" style="padding:32px;">Semua sudah dirincikan 👍</div>'
       : belum.map(function(item) {
-          return '<div class="card" style="cursor:pointer;" onclick="App.pageRincianIR(\'' + item.id + '\')">' +
+          return '<div class="card" style="cursor:pointer;' + (item.ditangguhkan ? 'border-left:3px solid #B7893F;' : '') + '" onclick="App.pageRincianIR(\'' + item.id + '\')">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
               '<div>' +
-                '<div class="font-bold">' + (item.anggota ? item.anggota.nama : item.anggotaId || 'Umum') + '</div>' +
-                '<div class="text-small text-muted">' + App.formatDate(item.tanggal) + '</div>' +
+                '<div class="font-bold">' + (item.anggota ? item.anggota.nama : item.anggotaId || 'Umum') +
+                  (item.ditangguhkan ? ' <span class="badge" style="background:#F3E6CF;color:#6f5220;font-size:10px;">tangguhan</span>' : '') + '</div>' +
+                '<div class="text-small text-muted">' + App.formatDate(item.tanggal) +
+                  (item.dariPeriodeLain ? ' · <span style="color:#B7893F;">dari periode lalu</span>' : '') + '</div>' +
               '</div>' +
               '<div style="text-align:right;">' +
                 '<div class="font-bold text-success">' + App.formatNumber(item.nominal) + '</div>' +
@@ -2196,6 +2198,20 @@ var App = {
         if (res && res.success) {
           self.toast(res.newPeriode ? ('Buku ditutup ✓ Periode baru: ' + res.newPeriode.nama) : 'Buku berhasil ditutup ✓');
           self.loadDashboard();
+          return;
+        }
+        // Buku IR belum dirinci → tawarkan penangguhan ke periode berikutnya.
+        if (res && res.bisaTangguhkan) {
+          var n = res.jumlahBelumDirinci || 0;
+          var ok = confirm('⚠️ Masih ada ' + n + ' transaksi Buku IR yang BELUM DIRINCI.\n\n' +
+            'Pilih OK untuk MENANGGUHKAN rinciannya ke periode berikutnya:\n' +
+            '• Uang tetap tercatat di periode ini (saldo tidak berubah)\n' +
+            '• Rinciannya diisi di periode berikutnya\n' +
+            '• Kewajiban setor dari rincian itu jatuh di periode berikutnya\n\n' +
+            'Pilih Batal untuk merinci dulu sekarang (lebih rapi).');
+          if (!ok) { self.pageBukuIR ? self.pageBukuIR() : self.loadDashboard(); return; }
+          payload.tangguhkanRincian = true;
+          self._kirimTutupBuku(payload);
           return;
         }
         if (res && res.adaSelisih) {

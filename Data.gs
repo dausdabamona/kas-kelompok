@@ -74,6 +74,14 @@ function trxPenerimaanDibatalkan_() {
   return set;
 }
 
+// Penangguhan rincian: transaksi Buku IR yang boleh dirinci di periode berikutnya
+// walau periode asalnya sudah ditutup. Uang TETAP di periode asal — yang berpindah
+// hanya kewajiban setornya, karena baru diketahui saat rincian diisi.
+function rincianDitangguhkan_(row, h) {
+  if (!h || h['rincianditangguhkan'] === undefined) return false;
+  return String(row[h['rincianditangguhkan']] || '').trim().toLowerCase() === 'ya';
+}
+
 // Baris Detail Buku IR dianggap batal bila transaksi induknya batal.
 function rincianYatim_(irRow, irH, setBatal) {
   var trxId = String(hGet_(irRow, irH, 'transaksiid', 1) || '');
@@ -896,13 +904,70 @@ function cekSyaratTutupBuku_(periodeId) {
         return { ok: false, message: 'Masih ada Serah Terima berstatus Menunggu. Konfirmasi dulu.' };
     }
   }
-  // Buku IR belum dirincikan
+  // Buku IR belum dirincikan (yang sudah DITANGGUHKAN tidak memblokir).
   try {
     var bir = getBukuIRData();
-    if (bir && bir.success && bir.data && bir.data.belumDirincikan && bir.data.belumDirincikan.length > 0)
-      return { ok: false, message: 'Masih ada ' + bir.data.belumDirincikan.length + ' transaksi Buku IR yang belum dirincikan.' };
+    var belum = (bir && bir.success && bir.data && bir.data.belumDirincikan) ? bir.data.belumDirincikan : [];
+    var blokir = belum.filter(function(t) { return !t.ditangguhkan; });
+    if (blokir.length > 0)
+      return { ok: false, bisaTangguhkan: true, jumlahBelumDirinci: blokir.length,
+        message: 'Masih ada ' + blokir.length + ' transaksi Buku IR yang belum dirincikan.' };
   } catch(e) {}
   return { ok: true };
+}
+
+// Tandai transaksi Buku IR periode ini yang BELUM dirinci sebagai "ditangguhkan",
+// agar tutup buku tidak terhalang dan rinciannya bisa diisi di periode berikutnya.
+// Uang tidak dipindah — hanya penanda pada baris transaksi. Mengembalikan jumlahnya.
+function _tangguhkanRincianBukuIR_(periodeId, email) {
+  var ss = getSS_();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  ensureColumns_(sheet, ['Rincian Ditangguhkan', 'Ditangguhkan At']);
+  // Jenis berkategori Buku IR.
+  var bukuIRIds = {};
+  var shM = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
+  if (shM && shM.getLastRow() > 1) {
+    var mr = shM.getDataRange().getValues(); var mh = headerMap_(mr[0]);
+    for (var m = 1; m < mr.length; m++) {
+      var kd = String(hGet_(mr[m], mh, 'kode', 0) || '');
+      if (kd && String(hGet_(mr[m], mh, 'kategori', 2) || '').toLowerCase().indexOf('buku ir') !== -1) bukuIRIds[kd] = true;
+    }
+  }
+  // Transaksi yang sudah punya rincian.
+  var sudah = {};
+  var shIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+  if (shIR && shIR.getLastRow() > 1) {
+    var ir = shIR.getDataRange().getValues(); var ih = headerMap_(ir[0]);
+    for (var k = 1; k < ir.length; k++) {
+      var t = String(hGet_(ir[k], ih, 'transaksiid', 1) || '');
+      if (t) sudah[t] = true;
+    }
+  }
+  var rows = sheet.getDataRange().getValues();
+  var h = headerMap_(rows[0]);
+  var colTgh = h['rincianditangguhkan'], colAt = h['ditangguhkanat'];
+  if (colTgh === undefined) return 0;
+  var n = 0, daftar = [];
+  var nowS = toDateStr_(new Date());
+  for (var i = 1; i < rows.length; i++) {
+    var id = String(hGet_(rows[i], h, 'id', 0) || '');
+    if (!id || barisDibatalkan_(rows[i], h)) continue;
+    if (String(hGet_(rows[i], h, 'periodeid', 1)) !== String(periodeId)) continue;
+    if (!bukuIRIds[String(hGet_(rows[i], h, 'jenisid', 2) || '')]) continue;
+    if (sudah[id]) continue;                       // sudah dirinci
+    if (rincianDitangguhkan_(rows[i], h)) continue; // sudah ditandai
+    sheet.getRange(i + 1, colTgh + 1).setValue('Ya');
+    if (colAt !== undefined) sheet.getRange(i + 1, colAt + 1).setValue(nowS);
+    daftar.push(id + '(' + (Number(hGet_(rows[i], h, 'nominal', 5)) || 0) + ')');
+    n++;
+  }
+  if (n > 0) {
+    logActivityWajib_(email, 'PRIVILEGED_TANGGUHKAN_RINCIAN_IR',
+      'Periode: ' + periodeId + ' | ' + n + ' transaksi ditangguhkan ke periode berikutnya | ' + daftar.join(', '));
+    try { CacheService.getScriptCache().remove('buku_ir_data'); } catch(e) {}
+  }
+  return n;
 }
 
 // Buat baris penyesuaian "Selisih Kas" agar saldo sistem = aktual (T5.7).
@@ -982,9 +1047,17 @@ function tutupBuku(data) {
     var ss = getSS_();
     var now = new Date();
 
+    // Opsi: tangguhkan rincian Buku IR yang belum diisi ke periode berikutnya.
+    // Uang TETAP di periode ini; hanya rincian (dan kewajiban setor yang timbul
+    // darinya) yang dikerjakan di periode berikutnya.
+    var jmlTangguh = 0;
+    if (data.tangguhkanRincian) {
+      jmlTangguh = _tangguhkanRincianBukuIR_(periode.id, auth.user.email);
+    }
+
     // FASE 2: syarat wajib sebelum tutup buku (T5).
     var syarat = cekSyaratTutupBuku_(periode.id);
-    if (!syarat.ok) return { success: false, message: syarat.message };
+    if (!syarat.ok) return { success: false, message: syarat.message, bisaTangguhkan: !!syarat.bisaTangguhkan, jumlahBelumDirinci: syarat.jumlahBelumDirinci || 0 };
 
     // Saldo AKTUAL (hasil cash count) dari pengurus.
     var aktualTunai = Number(data.saldoTunaiAktual) || 0;
@@ -2531,9 +2604,13 @@ function getBukuIRData() {
         var row = pRows[i];
         if (!row[c_id]) continue;
         if (barisDibatalkan_(row, pHdr)) continue;   // ← K2: penerimaan batal jangan dihitung "belum dirincikan"
-        if (periodeId && row[c_pid] !== periodeId) continue;
         if (bukuIRIds.indexOf(row[c_jid]) === -1) continue;
         var trxIdStr = String(row[c_id]);
+        var ditangguhkan = rincianDitangguhkan_(row, pHdr);
+        var periodeLain = (periodeId && row[c_pid] !== periodeId);
+        // Transaksi periode lain hanya ikut bila DITANGGUHKAN dan belum dirinci —
+        // supaya bisa diselesaikan di periode berjalan.
+        if (periodeLain && !(ditangguhkan && !rincianMap[trxIdStr])) continue;
         var item = {
           id: trxIdStr, periodeId: String(row[c_pid]), jenisId: String(row[c_jid]),
           anggotaId: String(row[c_aid] || ''),
@@ -2541,7 +2618,9 @@ function getBukuIRData() {
           nominal: Number(row[c_nom]) || 0,
           sumberKas: String(row[c_kas] || ''),
           catatan: String(row[c_cat] || ''),
-          anggota: anggotaMap[String(row[c_aid])] || null
+          anggota: anggotaMap[String(row[c_aid])] || null,
+          ditangguhkan: ditangguhkan,
+          dariPeriodeLain: !!periodeLain
         };
         if (rincianMap[trxIdStr]) {
           item.rincian = rincianMap[trxIdStr]; // sertakan breakdown untuk edit
@@ -2599,9 +2678,20 @@ function submitRincianIR(data) {
     var trxAnggotaId = String(hGet_(trxRow, pH, 'anggotaid', 3) || '');
     var trxTanggal   = toDateStr_(hGet_(trxRow, pH, 'tanggal', 4));
 
-    // Kunci periode tertutup (T2).
-    var ap = assertPeriodeOpen_(trxPeriodeId);
-    if (!ap.ok) return { success: false, message: ap.message };
+    // Kunci periode tertutup (T2) — KECUALI transaksi yang rinciannya DITANGGUHKAN.
+    // Rincian tidak mengubah uang periode lama (kas tetap di sana); yang dicatat di
+    // periode berjalan hanyalah komposisinya, sehingga kewajiban setornya jatuh di
+    // periode tempat rincian diisi (tempat ia akan disetor).
+    var ditangguhkan = rincianDitangguhkan_(trxRow, pH);
+    var periodeRincian = trxPeriodeId;
+    if (ditangguhkan) {
+      var pAktif = getPeriodeAktif();
+      if (!pAktif) return { success: false, message: 'Tidak ada periode aktif untuk mencatat rincian tangguhan.' };
+      periodeRincian = pAktif.id;
+    } else {
+      var ap = assertPeriodeOpen_(trxPeriodeId);
+      if (!ap.ok) return { success: false, message: ap.message };
+    }
 
     var ir = Number(data.ir) || 0;
     var ir10 = Number(data.ir10) || 0;
@@ -2638,9 +2728,14 @@ function submitRincianIR(data) {
       logActivity(auth.user.email, 'RINCIAN_EDIT', 'Transaksi: ' + data.transaksiId);
     } else {
       id = generateID('IR');
-      // Periode/anggota/tanggal dari transaksi (server), bukan klien (A1).
-      sheet.appendRow([id, data.transaksiId, trxPeriodeId, trxAnggotaId, trxTanggal,
+      // Anggota/tanggal dari transaksi (server), bukan klien (A1). PeriodeID memakai
+      // periodeRincian: sama dengan transaksi, atau periode berjalan bila ditangguhkan.
+      sheet.appendRow([id, data.transaksiId, periodeRincian, trxAnggotaId, trxTanggal,
         ir, ir10, cicilan, infakDaerah, index, auth.user.email, toDateStr_(new Date())]);
+      if (ditangguhkan) {
+        logActivityWajib_(auth.user.email, 'RINCIAN_TANGGUHAN_DIISI',
+          'Transaksi: ' + data.transaksiId + ' | periode asal: ' + trxPeriodeId + ' | dicatat di periode: ' + periodeRincian);
+      }
     }
     try { var c = CacheService.getScriptCache(); c.remove('master_trx_data'); c.remove('buku_ir_data'); c.remove('dashboard_saldo'); } catch(e) {}
     return { success: true, id: id, updated: existingRow > 0 };

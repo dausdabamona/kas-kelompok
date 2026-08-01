@@ -523,6 +523,11 @@ function migrasiPengendalian() {
     shL.appendRow(['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status']);
     log.push('✅ DIBUAT: ' + CONFIG.SHEETS.LAMPIRAN);
   }
+  // Penangguhan rincian Buku IR: transaksi boleh dirinci di periode berikutnya
+  // walau periode asalnya sudah ditutup (uang tetap di periode asal).
+  var shPnT = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+  if (shPnT) { ensureColumns_(shPnT, ['Rincian Ditangguhkan', 'Ditangguhkan At']); log.push('🔧 Kolom penangguhan rincian dipastikan → ' + CONFIG.SHEETS.INPUT_PENERIMAAN); }
+
   // L2c: kolom pembatalan & koreksi pada Kas Penerobos (soft delete + jejak).
   var shKP6 = ss.getSheetByName(CONFIG.SHEETS.KAS_PENEROBOS);
   if (shKP6) { ensureColumns_(shKP6, ['Dibatalkan By', 'Dibatalkan At', 'Alasan Batal', 'Koreksi Ref']); log.push('🔧 Kolom pembatalan/koreksi dipastikan → ' + CONFIG.SHEETS.KAS_PENEROBOS); }
