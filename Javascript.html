@@ -838,10 +838,6 @@ var App = {
       : (!isMutasi && !k.jenisId) ? 'Pilih jenis dulu'
       : (isMutasi ? 'Simpan ' + (k.arah === 'setor' ? 'Setor' : 'Tarik') : 'Simpan ' + k.sumberKas) + ' · ' + self._ktSingkat(nominal);
 
-    var pad = ['1','2','3','4','5','6','7','8','9','000','0','⌫'].map(function(t) {
-      return '<button onclick="App._ktKey(\'' + t + '\')">' + t + '</button>';
-    }).join('');
-
     document.getElementById('app').innerHTML =
       '<div class="kt-screen">' +
         '<div class="kt-head">' +
@@ -851,30 +847,51 @@ var App = {
         '<div class="kt-rail"><span>' + esc(self._tglPendek()) + '</span><span>No. bukti otomatis</span></div>' +
         '<div class="kt-body">' +
           segHtml +
+          // Input asli → keyboard angka HP muncul saat diketuk (tanpa keypad menetap).
           '<div class="kt-nomwrap"><span class="kt-nomrp">Rp</span>' +
-            '<span class="kt-nom' + (nominal > 0 ? '' : ' kosong') + '">' + (nominal > 0 ? nominal.toLocaleString('id-ID') : '0') + '</span></div>' +
-          '<div class="kt-verbal">' + esc(self._ktTerbilang(nominal)) + '</div>' +
+            '<input id="ktNom" class="kt-nom" type="text" inputmode="numeric" pattern="[0-9]*" ' +
+            'placeholder="0" value="' + (nominal > 0 ? nominal.toLocaleString('id-ID') : '') + '" ' +
+            'oninput="App._ktOnNominal(this)"></div>' +
+          '<div class="kt-verbal" id="ktVerbal">' + esc(self._ktTerbilang(nominal)) + '</div>' +
           jenisHtml +
           kasHtml +
         '</div>' +
         '<div class="kt-foot">' +
-          '<div class="kt-pad">' + pad + '</div>' +
-          '<button class="kt-save" ' + (siap ? '' : 'disabled') + ' onclick="App._ktSimpan()">' + esc(labelSimpan) + '</button>' +
+          '<button class="kt-save" id="ktSave" ' + (siap ? '' : 'disabled') + ' onclick="App._ktSimpan()">' + esc(labelSimpan) + '</button>' +
           '<button class="kt-link" onclick="App.pageTransaksiLengkap(\'' + k.tipe + '\')">Form lengkap (tanggal, catatan, bukti foto)</button>' +
         '</div>' +
       '</div>';
+  },
+
+  // Update saat mengetik — TANPA render ulang penuh, agar fokus keyboard tak hilang.
+  _ktOnNominal: function(el) {
+    var self = this, k = self._kt;
+    var digits = String(el.value).replace(/[^0-9]/g, '').slice(0, 12);
+    k.digits = digits;
+    var n = Number(digits || '0');
+    // Tampilkan berpemisah ribuan, pertahankan kursor di akhir.
+    el.value = n > 0 ? n.toLocaleString('id-ID') : '';
+    var v = document.getElementById('ktVerbal');
+    if (v) v.textContent = self._ktTerbilang(n);
+    self._ktUpdateSimpan();
+  },
+
+  _ktUpdateSimpan: function() {
+    var self = this, k = self._kt;
+    var n = Number(k.digits || '0');
+    var isMutasi = (k.tipe === 'mutasi');
+    var siap = n > 0 && (isMutasi || k.jenisId);
+    var label = n <= 0 ? 'Masukkan nominal dulu'
+      : (!isMutasi && !k.jenisId) ? 'Pilih jenis dulu'
+      : (isMutasi ? 'Simpan ' + (k.arah === 'setor' ? 'Setor' : 'Tarik') : 'Simpan ' + k.sumberKas) + ' · ' + self._ktSingkat(n);
+    var b = document.getElementById('ktSave');
+    if (b) { b.textContent = label; if (siap) b.removeAttribute('disabled'); else b.setAttribute('disabled', 'disabled'); }
   },
 
   _ktSetTipe: function(t) { this._kt.tipe = t; this._kt.jenisId = ''; this._kt.anggotaId = ''; this._renderKT(); },
   _ktSetJenis: function(id) { this._kt.jenisId = (this._kt.jenisId === id) ? '' : id; this._renderKT(); },
   _ktSetKas: function(s) { this._kt.sumberKas = s; this._renderKT(); },
   _ktSetArah: function(a) { this._kt.arah = a; this._renderKT(); },
-  _ktKey: function(t) {
-    var k = this._kt;
-    if (t === '⌫') k.digits = k.digits.slice(0, -1);
-    else if (k.digits.length + t.length <= 10) k.digits = (k.digits === '' && t === '000') ? '' : (k.digits + t);
-    this._renderKT();
-  },
   _ktPilihLain: function() {
     var self = this, k = self._kt;
     var master = (k.tipe === 'masuk') ? (self._masterP || []) : (self._masterPK || []);

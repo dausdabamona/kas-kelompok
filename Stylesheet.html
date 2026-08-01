@@ -1084,8 +1084,13 @@
 
   .kt-nomwrap { margin-top: 10px; border-bottom: 2px solid var(--np-accent); padding-bottom: 4px; display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; }
   .kt-nomrp { font-size: 17px; font-weight: 600; color: var(--text-muted); }
-  .kt-nom { font-family: var(--np-serif); font-size: 36px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
-  .kt-nom.kosong { color: #b9c4bf; }
+  /* Nominal = input asli agar keyboard angka HP muncul saat diketuk. */
+  .kt-nom { font-family: var(--np-serif); font-size: 36px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums;
+    flex: 1; min-width: 0; text-align: right; border: none; outline: none; background: transparent;
+    color: var(--text); padding: 0; -moz-appearance: textfield; }
+  .kt-nom::-webkit-outer-spin-button, .kt-nom::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .kt-nom::placeholder { color: #b9c4bf; }
+  .kt-nom:focus { border-bottom: none; }
   .kt-verbal { text-align: right; font-size: 12.5px; color: var(--text-muted); margin-top: 4px; min-height: 16px; }
 
   .kt-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin: 12px 0 6px; }
@@ -1100,20 +1105,17 @@
   .kt-kasbtn.on { border-color: var(--np-accent); background: var(--np-accent-100); }
   .kt-kasbtn.on .k1, .kt-kasbtn.on .k2 { color: var(--np-accent-600); }
 
-  /* Panel keypad dijaga ringkas agar Jenis & Sumber Kas tetap terlihat. */
-  .kt-foot { flex: none; background: #F1F5F2; border-top: 1px solid var(--np-line); padding: 7px 12px calc(7px + env(safe-area-inset-bottom)); }
-  .kt-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-  .kt-pad button { height: 42px; font-size: 19px; font-weight: 700; font-family: inherit; background: #fff; border: 1px solid var(--np-line); border-radius: 9px; cursor: pointer; color: var(--text); }
-  .kt-pad button:active { background: var(--np-accent-100); }
-  .kt-save { width: 100%; height: 48px; margin-top: 7px; border: none; border-radius: 11px; background: var(--np-accent); color: #fff; font-family: inherit; font-size: 16px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+  /* Tanpa keypad sendiri — memakai keyboard angka bawaan HP, sehingga tidak ada
+     panel yang menetap menutupi Jenis & Sumber Kas. */
+  .kt-foot { flex: none; background: #F1F5F2; border-top: 1px solid var(--np-line); padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+  .kt-save { width: 100%; height: 50px; border: none; border-radius: 11px; background: var(--np-accent); color: #fff; font-family: inherit; font-size: 16px; font-weight: 700; white-space: nowrap; cursor: pointer; }
   .kt-save[disabled] { background: #c3d3cc; color: #6b7c79; cursor: not-allowed; }
-  .kt-link { display: block; width: 100%; margin-top: 5px; background: none; border: none; color: var(--np-accent); font-family: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; text-decoration: underline; }
+  .kt-link { display: block; width: 100%; margin-top: 6px; background: none; border: none; color: var(--np-accent); font-family: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; text-decoration: underline; }
 
-  /* Layar pendek (<=700px): rapatkan lagi agar tak ada yang tertutup. */
+  /* Layar pendek (<=700px): rapatkan sedikit. */
   @media (max-height: 700px) {
     .kt-nom { font-size: 30px; }
-    .kt-pad button { height: 38px; font-size: 18px; }
-    .kt-save { height: 44px; margin-top: 6px; }
+    .kt-save { height: 46px; }
     .kt-chip, .kt-seg button { height: 40px; }
     .kt-kasbtn { height: 46px; }
   }
