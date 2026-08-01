@@ -154,13 +154,23 @@ function doGet(e) {
   // Konsol admin desktop terpisah: ?view=admin (khusus ADMIN, gate di server).
   var view = (e && e.parameter && e.parameter.view) ? String(e.parameter.view) : '';
   if (view === 'admin') {
-    return HtmlService.createTemplateFromFile('AdminConsole')
+    var tAdmin = HtmlService.createTemplateFromFile('AdminConsole');
+    // URL /exec asli. Wajib disuntik dari server: di dalam iframe HtmlService,
+    // window.location.href menunjuk sandbox googleusercontent.com, sehingga
+    // tautan "Buka di Aplikasi" mengarah ke alamat yang salah.
+    try { tAdmin.APP_URL = ScriptApp.getService().getUrl() || ''; } catch(e) { tAdmin.APP_URL = ''; }
+    return tAdmin
       .evaluate()
       .setTitle('Admin Console · Kas Kelompok')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
-  return HtmlService.createTemplateFromFile('Index')
+  var tApp = HtmlService.createTemplateFromFile('Index');
+  // ?p=<halaman> → aplikasi langsung membuka halaman itu setelah login pulih.
+  // Dipakai tautan dari Admin Console. Hanya huruf/angka, dicocokkan whitelist di klien.
+  var p = (e && e.parameter && e.parameter.p) ? String(e.parameter.p) : '';
+  tApp.START_PAGE = /^[a-zA-Z]{1,24}$/.test(p) ? p : '';
+  return tApp
     .evaluate()
     .setTitle('Kas Kelompok')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')

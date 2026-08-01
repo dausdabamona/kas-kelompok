@@ -226,10 +226,14 @@
 <div id="root"><div class="loading">Memuat konsol admin…</div></div>
 
 <script>
-  // Base URL aplikasi mobile (buang parameter view).
-  function appUrl() {
-    var u = window.location.href.split('?')[0];
-    return u;
+  // URL /exec aplikasi, disuntik server (lihat doGet). Tidak boleh mengandalkan
+  // window.location: di dalam iframe HtmlService itu alamat sandbox, bukan /exec.
+  var APP_URL_SRV = '<?= APP_URL ?>';
+  function appUrl(halaman) {
+    var u = (APP_URL_SRV && APP_URL_SRV.indexOf('http') === 0)
+      ? APP_URL_SRV
+      : window.location.href.split('?')[0];      // cadangan terakhir
+    return halaman ? (u + '?p=' + encodeURIComponent(halaman)) : u;
   }
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -399,7 +403,7 @@
       { label:'Saldo Tunai (Sistem)', val: rp(s.tunai), color:'var(--tunai)' },
       { label:'Saldo Bank (Sistem)', val: rp(s.bank), color:'var(--bank)' },
       { label:'Total Kas', val: rp(s.total), color:'var(--admin)' }
-    ]) + panelBox('Pemeriksaan Saldo', res.periode ? res.periode.nama : '', '<div class="sec-body"><p style="color:var(--text-muted);padding:6px 0;">Input saldo aktual & tutup buku dilakukan di aplikasi.</p><a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl()) + '">Buka di Aplikasi →</a></div>');
+    ]) + panelBox('Pemeriksaan Saldo', res.periode ? res.periode.nama : '', '<div class="sec-body"><p style="color:var(--text-muted);padding:6px 0;">Input saldo aktual & tutup buku dilakukan di aplikasi.</p><a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl('pemeriksaansaldo')) + '">Buka di Aplikasi →</a></div>');
   }
 
   // ── VIEW: Pantau IR 6 Bulan (matriks jamaah × bulan) ──
@@ -539,7 +543,7 @@
 
   // ── VIEW: Laporan PDF ──
   function renderPdf(host) {
-    host.innerHTML = panelBox('Laporan PDF', '', '<div class="sec-body"><p style="color:var(--text-muted);padding:6px 0 14px;">Pembuatan & unduh berkas PDF laporan dilakukan lewat aplikasi.</p><a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl()) + '">📄 Buka Laporan PDF di Aplikasi →</a></div>');
+    host.innerHTML = panelBox('Laporan PDF', '', '<div class="sec-body"><p style="color:var(--text-muted);padding:6px 0 14px;">Pembuatan & unduh berkas PDF laporan dilakukan lewat aplikasi.</p><a class="qbtn primary" style="display:inline-flex;" href="' + esc(appUrl('laporanpdf')) + '">📄 Buka Laporan PDF di Aplikasi →</a></div>');
   }
 
   // ── VIEW: Buku IR ──

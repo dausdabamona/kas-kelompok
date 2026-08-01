@@ -130,7 +130,7 @@ var App = {
       .withSuccessHandler(function(res) {
         if (res && res.success && res.user) {
           self.currentUser = res.user;
-          self.loadDashboard();
+          if (!self._bukaHalamanAwal()) self.loadDashboard();
           self.updateSyncFab();
           setTimeout(function() { self.checkAndFlushQueue(); }, 3000);
         } else {
@@ -142,6 +142,30 @@ var App = {
         self.renderLoginEmail();
       })
       .apiCurrentUser(token);
+  },
+
+  // Buka halaman tertentu langsung setelah login, sesuai ?p= pada URL
+  // (dipakai tautan dari Admin Console). Whitelist — bukan pemanggilan bebas.
+  // true bila halaman dibuka, false bila harus jatuh ke beranda.
+  _bukaHalamanAwal: function() {
+    var p = '';
+    try { p = (typeof START_PAGE === 'string') ? START_PAGE : ''; } catch(e) { p = ''; }
+    if (!p) return false;
+    var peta = {
+      laporanpdf: 'pageLaporanPDF',
+      setorandesa: 'pageSetoranDesa',
+      laporansetoran: 'pageLaporanSetoran',
+      bukuir: 'pageBukuIR',
+      pantauir: 'pagePantauIR',
+      kepemilikan: 'pageKepemilikan',
+      pemeriksaansaldo: 'pagePemeriksaanSaldo',
+      periode: 'pagePeriode',
+      jamaah: 'pageJamaah'
+    };
+    var fn = peta[String(p).toLowerCase()];
+    if (!fn || typeof this[fn] !== 'function') return false;
+    try { START_PAGE = ''; } catch(e) {}   // sekali pakai; tombol Kembali ke beranda
+    try { this[fn](); return true; } catch(e) { return false; }
   },
 
   // ─── FASE 2c: ALUR LOGIN (email → PIN / OTP → set PIN) ───
