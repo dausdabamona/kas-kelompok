@@ -4261,6 +4261,7 @@ function getKepemilikanSaldo() {
     // (Pos Setoran). Dihitung per pos agar kelebihan setor di satu pos tidak
     // menutupi kekurangan pos lain.
     var sisaDesa = 0, sisaDaerah = 0, kewajiban = 0, sudahSetor = 0;
+    var rincianPos = [];   // rincian kewajiban per pos (utk penjelasan titipan)
     if (periode) {
       try {
         var rs = getRekapSetoran();
@@ -4273,6 +4274,8 @@ function getKepemilikanSaldo() {
             var rf = String(p.sumberRef || '').toLowerCase();
             var keDaerah = (rf === 'infakdaerah' || nm.indexOf('daerah') !== -1);
             if (keDaerah) sisaDaerah += sisa; else sisaDesa += sisa;
+            rincianPos.push({ nama: p.nama, tujuan: keDaerah ? 'Daerah' : 'Desa',
+              kewajiban: t, disetor: rl, sisa: sisa, lebih: Math.max(0, rl - t), dasar: p.sumberKet || '' });
           });
         }
       } catch(e) {}
@@ -4314,6 +4317,49 @@ function getKepemilikanSaldo() {
     var milikDaerah = sisaDaerah;
     var milikKelompok = totalKas - milikDesa - milikDaerah;
 
+    // Rekonsiliasi Total Kas: saldo awal + pemasukan − pengeluaran.
+    var saldoAwal = 0, totalMasuk = 0, totalKeluar = 0;
+    if (periode) {
+      saldoAwal = (Number(periode.saldoAwalTunai) || 0) + (Number(periode.saldoAwalBank) || 0);
+      try {
+        var ssr = getSS_();
+        var shPm = ssr.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
+        if (shPm && shPm.getLastRow() > 1) {
+          var pm = shPm.getDataRange().getValues(); var pmh = headerMap_(pm[0]);
+          for (var x = 1; x < pm.length; x++) {
+            if (!hGet_(pm[x], pmh, 'id', 0) || barisDibatalkan_(pm[x], pmh)) continue;
+            if (String(hGet_(pm[x], pmh, 'periodeid', 1)) !== String(pid)) continue;
+            totalMasuk += Number(hGet_(pm[x], pmh, 'nominal', 5)) || 0;
+          }
+        }
+        var shPk = ssr.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+        if (shPk && shPk.getLastRow() > 1) {
+          var pk = shPk.getDataRange().getValues(); var pkh = headerMap_(pk[0]);
+          for (var y = 1; y < pk.length; y++) {
+            if (!hGet_(pk[y], pkh, 'id', 0) || barisDibatalkan_(pk[y], pkh) || barisDraft_(pk[y], pkh)) continue;
+            if (String(hGet_(pk[y], pkh, 'periodeid', 1)) !== String(pid)) continue;
+            totalKeluar += Number(hGet_(pk[y], pkh, 'nominal', 4)) || 0;
+          }
+        }
+      } catch(e) {}
+    }
+
+    // Sumber hak kelompok dari pemasukan periode ini (konteks, bukan penjumlahan
+    // langsung ke Milik Kelompok — karena sebagian sudah terpakai untuk pengeluaran).
+    var sumberKelompok = [], hakKelompokPeriode = 0;
+    if (periode) {
+      try {
+        var bh2 = getBagiHasil(pid);
+        if (bh2 && bh2.success) {
+          hakKelompokPeriode = Number(bh2.kelompok) || 0;
+          (bh2.rincian || []).forEach(function(x) {
+            if ((Number(x.kelompok) || 0) > 0) sumberKelompok.push({ jenis: x.jenis, nilai: x.kelompok });
+          });
+          sumberKelompok.sort(function(a, b) { return b.nilai - a.nilai; });
+        }
+      } catch(e) {}
+    }
+
     return {
       success: true,
       periode: periode ? { id: pid, nama: periode.nama, status: periode.status } : null,
@@ -4324,8 +4370,15 @@ function getKepemilikanSaldo() {
       kewajiban: kewajiban,
       sudahSetor: sudahSetor,
       sisaKewajiban: sisaDesa + sisaDaerah,
+      sisaDesa: sisaDesa,
+      sisaDaerah: sisaDaerah,
       belumDirinci: belumDirinci,
-      kelompokNegatif: milikKelompok < 0
+      kelompokNegatif: milikKelompok < 0,
+      // Rincian untuk halaman penjelasan
+      saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar,
+      rincianPos: rincianPos,
+      sumberKelompok: sumberKelompok,
+      hakKelompokPeriode: hakKelompokPeriode
     };
   } catch(e) {
     return { success: false, message: e.message };
