@@ -545,6 +545,19 @@ function migrasiPengendalian() {
     shL.appendRow(['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status']);
     log.push('✅ DIBUAT: ' + CONFIG.SHEETS.LAMPIRAN);
   }
+  // Pengeluaran rutin: daftar kewajiban berulang + dasar perkiraannya.
+  // Dibuat di sini (bukan hanya di setupSheets) agar spreadsheet yang sudah
+  // berjalan ikut mendapatkannya tanpa perlu setup ulang.
+  var shRT = ss.getSheetByName(CONFIG.SHEETS.RUTIN);
+  if (!shRT) {
+    shRT = ss.insertSheet(CONFIG.SHEETS.RUTIN);
+    shRT.appendRow(['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Status', 'Catatan', 'Created By', 'Created At']);
+    log.push('✅ DIBUAT: ' + CONFIG.SHEETS.RUTIN);
+  } else {
+    ensureColumns_(shRT, ['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Status', 'Catatan', 'Created By', 'Created At']);
+    log.push('🔧 Kolom dipastikan → ' + CONFIG.SHEETS.RUTIN);
+  }
+
   // Rapelan: satu setoran Buku IR bisa mewakili beberapa bulan sekaligus.
   // Hanya untuk pemantauan bulanan — tidak mengubah kas maupun kewajiban setor.
   var shIRr = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
