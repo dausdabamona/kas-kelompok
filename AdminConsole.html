@@ -295,7 +295,7 @@
     rincianir:      { title:'Rincian IR', ep:'getRincianIR', run: renderRincianIR },
     setorandesa:    { title:'Setoran Desa', ep:'getRekapSetoran', run: renderSetoranDesa },
     bank:           { title:'Bank & Rekonsiliasi', ep:'getRekonsiliasiData', run: renderBank },
-    laporansetoran: { title:'Laporan Setoran', ep:'getLaporanSetoran', run: renderLaporanSetoran },
+    laporansetoran: { title:'Laporan Setoran', ep:'getRekapSetoran', run: renderLaporanSetoran },
     anggota:        { title:'Anggota', ep:'getAnggota', run: renderAnggota },
     terobosan:      { title:'Terobosan Kelompok', ep:'getPatunganList', run: renderTerobosan },
     serah:          { title:'Serah Terima', ep:'getSerahTerimaList', run: renderSerah },
@@ -530,19 +530,40 @@
   }
 
   // ── VIEW: Laporan Setoran ──
+  // Berbasis POS SETORAN (satu sumber kebenaran) — sama dengan menu Setoran Desa
+  // dan seksi D laporan PDF, sehingga angkanya tidak lagi berbeda antar menu.
   function renderLaporanSetoran(host, res) {
     if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
-    var sm = res.summary || {};
+    var data = res.data || [];
+    var tT = 0, tS = 0;
+    data.forEach(function(p) { tT += Number(p.target) || 0; tS += Number(p.realisasi) || 0; });
     var cards = statCards([
-      { label:'Total Target', val: rp(sm.totalTarget), color:'var(--admin)' },
-      { label:'Sudah Setor', val: rp(sm.totalSudahSetor), color:'var(--success)' },
-      { label:'Sisa', val: rp(sm.totalSisa), color:'var(--danger)' }
+      { label:'Total Kewajiban', val: rp(tT), color:'var(--admin)' },
+      { label:'Sudah Setor', val: rp(tS), color:'var(--success)' },
+      { label:'Sisa', val: rp(tT - tS), color:'var(--danger)' }
     ]);
-    var cols = [{t:'Jenis'},{t:'Kewajiban',r:true},{t:'Sudah Setor',r:true},{t:'Sisa',r:true},{t:'%',r:true},{t:'Status'}];
-    var rows = (res.data || []).map(function(p) {
-      return '<tr><td class="t-jenis">' + esc(p.nama || p.kode || '-') + '</td><td class="r amt">' + num(p.kewajiban || p.target) + '</td><td class="r amt in">' + num(p.sudahSetor) + '</td><td class="r amt">' + num(p.sisa) + '</td><td class="r">' + (p.persen || 0) + '%</td><td>' + statusBadge(p.status) + '</td></tr>';
+    var cols = [{t:'Pos Setoran'},{t:'Dasar'},{t:'Kewajiban',r:true},{t:'Sudah Setor',r:true},{t:'Sisa',r:true},{t:'%',r:true},{t:'Status'}];
+    var rows = data.map(function(p) {
+      // Untuk pos 'tetap' yang punya dana penutup (mis. Index → Jatah Desa),
+      // tampilkan dana tersedia + kurang/lebihnya di bawah nama pos.
+      var ear = '';
+      if (p.danaTersedia !== null && p.danaTersedia !== undefined) {
+        ear = '<div style="font-size:10.5px;color:var(--text-muted);font-weight:400;">Dana ' + esc(p.danaRef || '') + ': ' + rp(p.danaTersedia) +
+          (p.danaKurang > 0 ? ' · <span style="color:var(--g-gold);">kurang ' + rp(p.danaKurang) + ' dari kas</span>'
+                            : (p.danaLebih > 0 ? ' · <span style="color:var(--g-mid);">lebih ' + rp(p.danaLebih) + ' utk kelompok</span>' : '')) + '</div>';
+      }
+      return '<tr><td class="t-jenis">' + esc(p.nama || '-') + ear + '</td>' +
+        '<td class="t-name" style="font-size:11.5px;">' + esc(p.sumberKet || '') + '</td>' +
+        '<td class="r amt">' + num(p.target) + '</td>' +
+        '<td class="r amt in">' + num(p.realisasi) + '</td>' +
+        '<td class="r amt">' + num(p.sisa) + '</td>' +
+        '<td class="r">' + (p.persen || 0) + '%</td>' +
+        '<td>' + statusBadge(p.status) + '</td></tr>';
     }).join('');
-    host.innerHTML = cards + panelBox('Laporan Setoran', res.periode ? res.periode.nama : '', tableHtml(cols, rows));
+    var foot = '<tr style="font-weight:800;border-top:2px solid var(--admin-soft);"><td colspan="2">TOTAL</td>' +
+      '<td class="r amt">' + num(tT) + '</td><td class="r amt in">' + num(tS) + '</td>' +
+      '<td class="r amt">' + num(tT - tS) + '</td><td colspan="2"></td></tr>';
+    host.innerHTML = cards + panelBox('Laporan Setoran', 'berbasis Pos Setoran', tableHtml(cols, rows + foot));
   }
 
   // ── VIEW: Anggota ──
