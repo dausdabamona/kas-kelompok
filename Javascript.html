@@ -1430,13 +1430,16 @@ var App = {
     var tujuanTeks = { desa: '\u2192 disetor ke desa', daerah: '\u2192 disetor ke desa (hak daerah)',
                        kelompok: '\u2192 kas kelompok', jamaah: '\u2192 titipan jamaah' };
     var tujuanWarna = { desa: '#2563eb', daerah: '#2563eb', kelompok: '#166534', jamaah: '#B45309' };
-    var fields = komp.map(function(k) {
-      return '<div class="form-group"><label>' + App.escapeHtml(k.label) + ' (Rp) ' +
-          '<span style="font-size:11px;color:' + (tujuanWarna[k.milik] || '#666') + ';">' +
-            (tujuanTeks[k.milik] || '') + '</span></label>' +
-        '<input type="text" inputmode="numeric" data-tsep="1" id="rk_' + k.kunci + '" value="' +
-          nilaiAwal(k) + '" oninput="App.cekTotalRincian()"/></div>';
-    }).join('');
+    // Label kiri, isian kanan — satu baris per komponen.
+    var fields = '<div class="card" style="padding:4px 14px;margin-bottom:12px;">' + komp.map(function(k) {
+      return '<div class="rk-row">' +
+          '<label class="rk-lbl" for="rk_' + k.kunci + '">' + App.escapeHtml(k.label) +
+            '<span class="rk-tuj" style="color:' + (tujuanWarna[k.milik] || '#666') + ';">' +
+              (tujuanTeks[k.milik] || '') + '</span></label>' +
+          '<input type="text" inputmode="numeric" data-tsep="1" id="rk_' + k.kunci + '" value="' +
+            nilaiAwal(k) + '" oninput="App.cekTotalRincian()"/>' +
+        '</div>';
+    }).join('') + '</div>';
 
     var html = this.pageWrapper(isEdit ? 'Ubah Rincian IR' : 'Rincian IR',
       '<div class="card">' +
