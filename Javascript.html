@@ -482,6 +482,15 @@ var App = {
     var kasPenerobosCard = (!isPenerobos && ((data.kasPenerobos || 0) > 0 || (data.penerobosTutup && data.penerobosTutup.count > 0)))
       ? '<div class="np-kickh"><span class="t">Kas di Tangan Penerobos</span></div>' + this._renderKasPenerobos(data) : '';
 
+    // ── Kepemilikan saldo: berapa dari kas yang benar-benar boleh dipakai
+    // kelompok. Ditampilkan untuk Bendahara 1 & Admin — merekalah yang
+    // memutuskan belanja. Diisi lewat panggilan terpisah agar beranda tetap cepat.
+    var bolehLihatMilik = (role === 'BENDAHARA_1' || role === 'ADMIN');
+    var kepemilikanCard = bolehLihatMilik
+      ? '<div class="np-kickh"><span class="t">Dapat Digunakan Kelompok</span></div>' +
+        '<div id="npMilik"><div class="card" style="color:var(--text-muted);font-size:12px;">Menghitung…</div></div>'
+      : '';
+
     // ── Aksi Cepat (gated kapabilitas) ──
     function qa(icon, label, onclick) { return '<div class="np-qa-item" onclick="' + onclick + '"><div class="qi">' + icon + '</div><span class="ql">' + label + '</span></div>'; }
     var actions = [];
@@ -509,11 +518,73 @@ var App = {
     var html = '<div class="np-screen">' +
         '<div class="np">' +
           '<div class="np-header">' + mast + '</div>' +
-          '<div class="np-body">' + warn + hero + prio + kasPenerobosCard + aksiCepat + lain + footer + '</div>' +
+          '<div class="np-body">' + warn + hero + prio + kepemilikanCard + kasPenerobosCard + aksiCepat + lain + footer + '</div>' +
         '</div>' +
         this._renderTabbar(role, periode) +
       '</div>';
     document.getElementById('app').innerHTML = html;
+    if (bolehLihatMilik) this._muatMilikKelompok();
+  },
+
+  // Ambil & gambar kartu "Dapat Digunakan Kelompok" pada beranda mobile.
+  _muatMilikKelompok: function() {
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) { self._renderMilikKelompok(r); })
+      .withFailureHandler(function() { self._renderMilikKelompok(null); })
+      .getKepemilikanSaldo();
+  },
+
+  _renderMilikKelompok: function(r) {
+    var self = this, el = document.getElementById('npMilik');
+    if (!el) return;
+    if (!r || !r.success) {
+      el.innerHTML = '<div class="card" style="color:var(--text-muted);font-size:12px;">Belum dapat dihitung' +
+        (r && r.message ? ' — ' + self.escapeHtml(r.message) : '') + '.</div>';
+      return;
+    }
+    var fn = function(v) { return self.formatNumber(v); };
+    var neg = !!r.kelompokNegatif;
+
+    // Baris pengurang: hanya tampilkan yang nilainya ada, agar tidak ramai.
+    function kurang(label, nilai, ket) {
+      if (!nilai) return '';
+      return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid rgba(0,0,0,.06);">' +
+          '<div><div style="font-size:12px;">− ' + label + '</div>' +
+            (ket ? '<div style="font-size:10px;color:var(--text-muted);">' + ket + '</div>' : '') + '</div>' +
+          '<div style="font-weight:700;font-size:12px;white-space:nowrap;">' + fn(nilai) + '</div>' +
+        '</div>';
+    }
+
+    var sumber = (r.sumberKelompok || []).map(function(s) {
+      return '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;font-size:11px;">' +
+          '<span style="color:var(--text-muted);">' + self.escapeHtml(s.jenis) + '</span>' +
+          '<span style="font-weight:600;">' + fn(s.nilai) + '</span>' +
+        '</div>';
+    }).join('');
+    var blokSumber = sumber
+      ? '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed rgba(0,0,0,.14);">' +
+          '<div style="font-size:11px;font-weight:700;color:var(--np-deep, #1F5D4C);margin-bottom:2px;">Hak kelompok periode ini ' + fn(r.hakKelompokPeriode) + '</div>' +
+          sumber +
+        '</div>'
+      : '';
+
+    var catatanNeg = neg
+      ? '<div style="font-size:11px;color:#B91C1C;background:#FEE2E2;border-radius:6px;padding:6px 8px;margin-top:10px;">' +
+        '⚠ Nilainya minus — kas yang ada belum cukup menutup titipan desa/daerah. Jangan dipakai belanja sebelum setoran beres.</div>'
+      : '';
+
+    el.innerHTML = '<div class="card" style="border-left:4px solid ' + (neg ? '#B91C1C' : 'var(--np-mid, #2F8F6F)') + ';">' +
+        '<div style="font-size:12px;color:var(--text-muted);">Boleh dipakai kelompok</div>' +
+        '<div style="font-size:26px;font-weight:800;color:' + (neg ? '#B91C1C' : 'var(--np-deep, #1F5D4C)') + ';margin:2px 0 8px;">' + fn(r.milikKelompok) + '</div>' +
+        '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;">' +
+          '<span style="color:var(--text-muted);">Total Kas</span><span style="font-weight:700;">' + fn(r.totalKas) + '</span>' +
+        '</div>' +
+        kurang('Titipan Desa', r.milikDesa, 'kewajiban setor yang belum dibayar') +
+        kurang('Titipan Daerah', r.milikDaerah, 'infak daerah belum disetor') +
+        kurang('Buku IR belum dirinci', r.belumDirinci, 'haknya belum diketahui') +
+        blokSumber + catatanNeg +
+      '</div>';
   },
 
   // Tanggal pendek Bahasa Indonesia untuk rel masthead.
