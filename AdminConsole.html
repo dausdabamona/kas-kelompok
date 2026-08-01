@@ -457,23 +457,39 @@
   function renderRincianIR(host, res) {
     if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
     var t = res.total || {};
-    var cols = [{t:'Tanggal'},{t:'Jamaah'},{t:'IR',r:true},{t:'1/10 IR',r:true},{t:'Cicilan',r:true},{t:'Infak Daerah',r:true},{t:'Index',r:true},{t:'Total',r:true}];
+    // Kolom mengikuti komponen yang ada di sheet (server yang menentukan).
+    var kk = res.kolom || [
+      { kunci:'ir', label:'IR', milik:'desa' }, { kunci:'ir10', label:'1/10 IR', milik:'desa' },
+      { kunci:'cicilan', label:'Cicilan', milik:'desa' }, { kunci:'infakdaerah', label:'Infak Daerah', milik:'daerah' },
+      { kunci:'index', label:'Index', milik:'kelompok' }
+    ];
+    var warna = { kelompok:'var(--g-mid)', jamaah:'#B45309' };
+    var cols = [{t:'Tanggal'},{t:'Jamaah'}].concat(kk.map(function(k){ return {t:k.label, r:true}; })).concat([{t:'Total',r:true}]);
     var body = (res.rows || []).map(function(x) {
       return '<tr><td class="t-date">' + esc(x.tanggal) + '</td><td class="t-jenis">' + esc(x.anggota) + '</td>' +
-        '<td class="r amt">' + num(x.ir) + '</td>' +
-        '<td class="r amt">' + num(x.ir10) + '</td>' +
-        '<td class="r amt">' + num(x.cicilan) + '</td>' +
-        '<td class="r amt">' + num(x.infakdaerah) + '</td>' +
-        '<td class="r amt" style="color:var(--g-mid);">' + num(x.index) + '</td>' +
+        kk.map(function(k) {
+          return '<td class="r amt"' + (warna[k.milik] ? ' style="color:' + warna[k.milik] + ';"' : '') + '>' + num(x[k.kunci]) + '</td>';
+        }).join('') +
         '<td class="r amt" style="font-weight:800;">' + num(x.total) + '</td></tr>';
     }).join('');
     var foot = '<tr style="font-weight:800;border-top:2px solid var(--admin-soft);"><td colspan="2">TOTAL (' + (res.jumlah || 0) + ' rincian)</td>' +
-      '<td class="r amt">' + num(t.ir) + '</td><td class="r amt">' + num(t.ir10) + '</td><td class="r amt">' + num(t.cicilan) + '</td>' +
-      '<td class="r amt">' + num(t.infakdaerah) + '</td><td class="r amt" style="color:var(--g-mid);">' + num(t.index) + '</td>' +
+      kk.map(function(k) {
+        return '<td class="r amt"' + (warna[k.milik] ? ' style="color:' + warna[k.milik] + ';"' : '') + '>' + num(t[k.kunci]) + '</td>';
+      }).join('') +
       '<td class="r amt">' + num(t.total) + '</td></tr>';
+    // Keterangan pemilik dirakit dari data, bukan ditulis tangan — ikut berubah
+    // bila komponen ditambah.
+    var per = { desa: [], daerah: [], kelompok: [], jamaah: [] };
+    kk.forEach(function(k) { if (per[k.milik]) per[k.milik].push(k.label); });
+    var ket = [];
+    if (per.desa.length || per.daerah.length) ket.push(per.desa.concat(per.daerah).join(', ') + ' = hak Desa/Daerah');
+    if (per.kelompok.length) ket.push(per.kelompok.join(', ') + ' = hak Kelompok');
+    if (per.jamaah.length) ket.push(per.jamaah.join(', ') + ' = titipan Jamaah (bukan hak kelompok)');
     host.innerHTML = panelBox('Rincian IR', (res.periode && res.periode.nama) || '', tableHtml(cols, body + foot)) +
-      '<p style="color:var(--text-muted);font-size:12px;margin-top:-6px;">IR, 1/10 IR, Cicilan, Infak Daerah = hak Desa; Index = hak Kelompok. Rincian dari transaksi yang dibatalkan tidak ditampilkan.</p>';
+      '<p style="color:var(--text-muted);font-size:12px;margin-top:-6px;">' + esc(ket.join('; ')) +
+      '. Rincian dari transaksi yang dibatalkan tidak ditampilkan.</p>';
   }
+
 
   // ── VIEW: Kepemilikan Saldo — rincian asal Milik Kelompok & Titipan Desa/Daerah ──
   function renderKepemilikan(host, res) {

@@ -607,6 +607,7 @@ var App = {
         kurang('Titipan Desa', r.milikDesa, 'kewajiban setor yang belum dibayar') +
         kurang('Titipan Daerah', r.milikDaerah, 'infak daerah belum disetor') +
         kurang('Buku IR belum dirinci', r.belumDirinci, 'haknya belum diketahui') +
+        kurang('Titipan jamaah', r.titipanJamaah, 'mis. Qurban — dikumpulkan sampai diwujudkan') +
         blokSumber + catatanNeg +
         '<div style="margin-top:10px;font-size:11px;color:var(--np-mid, #2F8F6F);font-weight:700;">Lihat rincian hak kelompok, desa &amp; daerah →</div>' +
       '</div>';
@@ -654,7 +655,12 @@ var App = {
       blokMilik('Titipan Daerah', r.milikDaerah, 'var(--np-gold, #B7893F)',
         'Infak daerah yang belum disetor.') +
       blokMilik('Belum Dirinci', r.belumDirinci, '#94a3b8',
-        'Buku IR yang belum dirincikan — haknya belum diketahui milik siapa.');
+        'Buku IR yang belum dirincikan — haknya belum diketahui milik siapa.') +
+      blokMilik('Titipan Jamaah', r.titipanJamaah, '#B45309',
+        'Uang jamaah yang dititipkan untuk tujuan tertentu (mis. Qurban), dikumpulkan sampai diwujudkan. Bukan hak kelompok.' +
+        ((r.rincianTitipan && r.rincianTitipan.length)
+          ? ' · ' + r.rincianTitipan.map(function(x) { return self.escapeHtml(x.jenis) + ' ' + fn(x.nilai); }).join(', ')
+          : ''));
 
     // Rincian kewajiban per pos setoran: dasar hitungan, sudah setor, sisa.
     var pos = (r.rincianPos || []).map(function(p) {
@@ -1278,6 +1284,9 @@ var App = {
 
   renderBukuIR: function(data, activeTab) {
     this._bukuIRData = data;
+    // Daftar komponen rincian datang dari server (komponenRincianIR_), supaya
+    // menambah jenis titipan cukup di satu tempat.
+    if (data && data.komponen && data.komponen.length) this._kompIR = data.komponen;
     var belum = data.belumDirincikan || [];
     var sudah = data.sudahDirincikan || [];
 
@@ -1405,23 +1414,37 @@ var App = {
     var isEdit = !!item.rincian; // sedang mengedit rincian yang sudah ada
     var r = item.rincian || {};
     // Jika edit: pakai nilai tersimpan. Jika baru: pakai default dari master anggota.
-    var vIR = isEdit ? r.ir : (anggota.ir || 0);
-    var vIR10 = isEdit ? r.ir10 : (anggota.ir10 || 0);
-    var vCicilan = isEdit ? r.cicilan : 0;
-    var vInfak = isEdit ? r.infakDaerah : (anggota.infakDaerah || 0);
-    var vIndex = isEdit ? r.index : (anggota.index || 0);
+    var komp = this._kompIR || [
+      { kunci: 'ir', label: 'IR', milik: 'desa' },
+      { kunci: 'ir10', label: '1/10 IR', milik: 'desa' },
+      { kunci: 'cicilan', label: 'Cicilan', milik: 'desa' },
+      { kunci: 'infakDaerah', label: 'Infak Daerah', milik: 'daerah' },
+      { kunci: 'index', label: 'Index', milik: 'kelompok' }
+    ];
+    this._kompAktif = komp;
+    // Nilai awal: rincian tersimpan bila mengedit, selain itu default master anggota
+    // (hanya ir/ir10/index/infakDaerah yang punya default; sisanya 0).
+    function nilaiAwal(k) {
+      return Number(isEdit ? r[k.kunci] : anggota[k.kunci]) || 0;
+    }
+    var tujuanTeks = { desa: '\u2192 disetor ke desa', daerah: '\u2192 disetor ke desa (hak daerah)',
+                       kelompok: '\u2192 kas kelompok', jamaah: '\u2192 titipan jamaah' };
+    var tujuanWarna = { desa: '#2563eb', daerah: '#2563eb', kelompok: '#166534', jamaah: '#B45309' };
+    var fields = komp.map(function(k) {
+      return '<div class="form-group"><label>' + App.escapeHtml(k.label) + ' (Rp) ' +
+          '<span style="font-size:11px;color:' + (tujuanWarna[k.milik] || '#666') + ';">' +
+            (tujuanTeks[k.milik] || '') + '</span></label>' +
+        '<input type="text" inputmode="numeric" data-tsep="1" id="rk_' + k.kunci + '" value="' +
+          nilaiAwal(k) + '" oninput="App.cekTotalRincian()"/></div>';
+    }).join('');
 
     var html = this.pageWrapper(isEdit ? 'Ubah Rincian IR' : 'Rincian IR',
       '<div class="card">' +
         '<div class="stat-row"><span class="stat-label">Jamaah</span><span class="stat-value">' + (anggota.nama || '-') + '</span></div>' +
         '<div class="stat-row"><span class="stat-label">Total Diterima</span><span class="stat-value text-success">' + this.formatNumber(total) + '</span></div>' +
       '</div>' +
-      (isEdit ? '<div class="info-box" style="margin-bottom:12px;">✎ Mengubah rincian yang sudah ada. Perubahan dapat dilakukan selama buku belum ditutup.</div>' : '') +
-      '<div class="form-group"><label>IR (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rIR" value="' + vIR + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>1/10 IR (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rIR10" value="' + vIR10 + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Cicilan (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rCicilan" value="' + vCicilan + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Infak Daerah (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rInfakDaerah" value="' + vInfak + '" oninput="App.cekTotalRincian()"/></div>' +
-      '<div class="form-group"><label>Index (Rp) <span style="font-size:11px;color:#166534;">→ kas kelompok</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rIndex" value="' + vIndex + '" oninput="App.cekTotalRincian()"/></div>' +
+      (isEdit ? '<div class="info-box" style="margin-bottom:12px;">\u270E Mengubah rincian yang sudah ada. Perubahan dapat dilakukan selama buku belum ditutup.</div>' : '') +
+      fields +
       '<div class="form-group"><label>Rapelan — untuk berapa bulan?</label>' +
         '<input type="number" min="1" max="24" id="rRapel" value="' + (item.rapelBulan || 1) + '"/>' +
         '<div class="text-small text-muted" style="margin-top:4px;">Isi 1 bila setoran bulan berjalan saja. Bila jamaah merapel (mis. 3 bulan sekaligus), isi 3 — nilainya akan disebar mundur di menu Pantau IR. Kas & kewajiban setor tidak berubah.</div></div>' +
@@ -1435,26 +1458,34 @@ var App = {
   },
 
   cekTotalRincian: function() {
-    var ir = App.num('rIR');
-    var ir10 = App.num('rIR10');
-    var cicilan = App.num('rCicilan');
-    var infak = App.num('rInfakDaerah');
-    var index = App.num('rIndex');
-    var totalRincian = ir + ir10 + cicilan + infak + index;
+    var komp = this._kompAktif || [];
+    var per = {}, totalRincian = 0;
+    komp.forEach(function(k) { var v = App.num('rk_' + k.kunci); per[k.kunci] = v; totalRincian += v; });
+
     var totalTrx = this._rincianItem ? this._rincianItem.nominal : 0;
     var el = document.getElementById('validasiRincian');
-    if (totalRincian === totalTrx) {
-      el.innerHTML = '<div class="valid-indicator ok">✓ Total sesuai: ' + this.formatNumber(totalRincian) + '</div>';
-    } else {
-      el.innerHTML = '<div class="valid-indicator error">✗ Total rincian: ' + this.formatNumber(totalRincian) + ' (selisih: ' + this.formatNumber(totalTrx - totalRincian) + ')</div>';
+    if (el) {
+      el.innerHTML = (totalRincian === totalTrx)
+        ? '<div class="valid-indicator ok">\u2713 Total sesuai: ' + this.formatNumber(totalRincian) + '</div>'
+        : '<div class="valid-indicator error">\u2717 Total rincian: ' + this.formatNumber(totalRincian) + ' (selisih: ' + this.formatNumber(totalTrx - totalRincian) + ')</div>';
     }
-    var setoranDesa = ir + ir10 + cicilan + infak;
+
+    // Rekap dijumlahkan per PEMILIK uang, bukan per nama komponen.
+    var bucket = { desa: 0, daerah: 0, kelompok: 0, jamaah: 0 };
+    komp.forEach(function(k) { bucket[k.milik] = (bucket[k.milik] || 0) + per[k.kunci]; });
     var rekEl = document.getElementById('rekapTujuan');
     if (rekEl) {
+      var baris = function(lbl, nilai, warna) {
+        if (!nilai) return '';
+        return '<div style="display:flex;justify-content:space-between;margin-bottom:3px;">' +
+          '<span style="color:' + warna + ';">' + lbl + '</span>' +
+          '<span style="font-weight:700;color:' + warna + ';">' + App.formatNumber(nilai) + '</span></div>';
+      };
       rekEl.innerHTML = '<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:10px 12px;font-size:12px;">' +
         '<div style="font-weight:600;margin-bottom:6px;color:#1E40AF;">Rekap Tujuan</div>' +
-        '<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="color:#2563EB;">→ Setoran Desa (IR + 1/10IR + Cicilan + Infak):</span><span style="font-weight:700;color:#1D4ED8;">' + App.formatNumber(setoranDesa) + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between;"><span style="color:#166534;">→ Kas Kelompok (Index):</span><span style="font-weight:700;color:#15803D;">' + App.formatNumber(index) + '</span></div>' +
+        baris('\u2192 Setoran Desa', bucket.desa + bucket.daerah, '#1D4ED8') +
+        baris('\u2192 Kas Kelompok', bucket.kelompok, '#15803D') +
+        baris('\u2192 Titipan Jamaah (mis. Qurban)', bucket.jamaah, '#B45309') +
       '</div>';
     }
     return totalRincian === totalTrx;
@@ -1469,15 +1500,12 @@ var App = {
     var data = {
       transaksiId: item.id, periodeId: item.periodeId, anggotaId: item.anggotaId,
       tanggal: item.tanggal,
-      ir: App.num('rIR'),
-      ir10: App.num('rIR10'),
-      cicilan: App.num('rCicilan'),
-      infakDaerah: App.num('rInfakDaerah'),
-      index: App.num('rIndex'),
       rapelBulan: Math.max(1, Math.min(24, parseInt((document.getElementById('rRapel') || {}).value, 10) || 1)),
       total: item.nominal,
       anggotaNama: item.anggota ? item.anggota.nama : ''
     };
+    // Semua komponen (termasuk kesehatan/sewa kos/qurban) ikut dikirim.
+    (this._kompAktif || []).forEach(function(k) { data[k.kunci] = App.num('rk_' + k.kunci); });
 
     // Simpan ke antrian lokal dulu (offline-first)
     App.queueRincian(data);

@@ -36,6 +36,55 @@ function sheetValues_(nama) {
   return v;
 }
 
+// ──────────────────────────────────────────────────────
+// KOMPONEN RINCIAN BUKU IR — sumber kebenaran tunggal
+// Dipakai form (mobile & admin), validasi keseimbangan di server, penulisan
+// sheet, dan pembagian hak pada Kepemilikan Saldo. Menambah komponen cukup
+// di sini + ensureColumns_ pada migrasiPengendalian.
+//
+// milik: 'desa' | 'daerah' | 'kelompok' | 'jamaah' → menentukan pemilik uangnya.
+//   'jamaah' = titipan milik jamaah yang dikumpulkan untuk tujuan tertentu
+//   (mis. Qurban, diakumulasi sampai diwujudkan jadi hewan). Uangnya ada di kas
+//   kelompok tapi BUKAN hak kelompok — tidak boleh dipakai belanja.
+// kunci: nama field yang dikirim klien.  kolom: nama kolom di sheet.
+// ──────────────────────────────────────────────────────
+function komponenRincianIR_() {
+  return [
+    { kunci: 'ir',          label: 'IR',           milik: 'desa',     headers: ['ir'] },
+    // headerMap_ membuang spasi & '/', tapi TIDAK membuang '-'. 'IR 1/10' → 'ir110'.
+    { kunci: 'ir10',        label: '1/10 IR',      milik: 'desa',     headers: ['ir110', 'ir10', '110ir'] },
+    { kunci: 'cicilan',     label: 'Cicilan',      milik: 'desa',     headers: ['cicilan'] },
+    { kunci: 'infakDaerah', label: 'Infak Daerah', milik: 'daerah',   headers: ['infakdaerah'] },
+    { kunci: 'index',       label: 'Index',        milik: 'kelompok', headers: ['index'] },
+    // Ditambahkan kemudian: titipan yang ikut masuk lewat Buku IR.
+    { kunci: 'kesehatan',   label: 'Kesehatan',    milik: 'desa',     headers: ['kesehatan'] },
+    { kunci: 'sewaKos',     label: 'Sewa Kos',     milik: 'kelompok', headers: ['sewakos'] },
+    { kunci: 'qurban',      label: 'Qurban',       milik: 'jamaah',   headers: ['qurban'] },
+    { kunci: 'lainLain',    label: 'Lain-lain',    milik: 'kelompok', headers: ['lain-lain', 'lainlain'] },
+    // Cadangan: kolom sudah ada di sheet, tapi belum ditampilkan di form.
+    { kunci: 'ekstra1',     label: 'Ekstra 1',     milik: 'kelompok', headers: ['ekstra1'], cadangan: true },
+    { kunci: 'ekstra2',     label: 'Ekstra 2',     milik: 'kelompok', headers: ['ekstra2'], cadangan: true },
+    { kunci: 'ekstra3',     label: 'Ekstra 3',     milik: 'kelompok', headers: ['ekstra3'], cadangan: true }
+  ];
+}
+
+// Komponen yang benar-benar punya kolom di sheet, lengkap dengan indeks kolomnya
+// (k.col). Sheet lama yang belum dimigrasi otomatis menghasilkan daftar lebih
+// pendek — tanpa error, dan nilai komponen yang tak ada kolomnya diabaikan.
+function komponenRincianAda_(irH) {
+  var out = [];
+  if (!irH) return out;
+  komponenRincianIR_().forEach(function(k) {
+    for (var i = 0; i < k.headers.length; i++) {
+      if (irH[k.headers[i]] !== undefined) {
+        out.push({ kunci: k.kunci, label: k.label, milik: k.milik, cadangan: !!k.cadangan, col: irH[k.headers[i]] });
+        return;
+      }
+    }
+  });
+  return out;
+}
+
 // Konversi nilai tanggal ke string YYYY-MM-DD secara konsisten.
 // Diperlukan karena Date object dari spreadsheet tidak bisa di-JSON.stringify.
 function toDateStr_(val) {
@@ -2605,14 +2654,12 @@ function getBukuIRData() {
         var trxId = String(hGet_(irRows[i], irH, 'transaksiid', 1) || '');
         if (!trxId) continue;
         if (rincianYatim_(irRows[i], irH, setBatalBIR)) continue;   // ← K1
-        rincianMap[trxId] = {
-          rincianId: String(hGet_(irRows[i], irH, 'id', 0) || ''),
-          ir: Number(hGet_(irRows[i], irH, 'ir', 5)) || 0,
-          ir10: Number(hGet_(irRows[i], irH, 'ir10', 6)) || 0,
-          cicilan: Number(hGet_(irRows[i], irH, 'cicilan', 7)) || 0,
-          infakDaerah: Number(hGet_(irRows[i], irH, 'infakdaerah', 8)) || 0,
-          index: Number(hGet_(irRows[i], irH, 'index', 9)) || 0
-        };
+        var rc = { rincianId: String(hGet_(irRows[i], irH, 'id', 0) || '') };
+        // Semua komponen yang ada kolomnya — termasuk kesehatan/sewa kos/qurban.
+        komponenRincianAda_(irH).forEach(function(k) {
+          rc[k.kunci] = Number(irRows[i][k.col]) || 0;
+        });
+        rincianMap[trxId] = rc;
       }
     }
 
@@ -2658,7 +2705,15 @@ function getBukuIRData() {
       }
     }
 
-    var result = { success: true, data: { belumDirincikan: belum, sudahDirincikan: sudah } };
+    // Daftar komponen untuk membangun form rincian di klien. Kolom cadangan
+    // ('Ekstra n') sengaja disembunyikan sampai diaktifkan di komponenRincianIR_.
+    var formKomp = [];
+    if (irRows.length > 1) {
+      komponenRincianAda_(headerMap_(irRows[0])).forEach(function(k) {
+        if (!k.cadangan) formKomp.push({ kunci: k.kunci, label: k.label, milik: k.milik });
+      });
+    }
+    var result = { success: true, data: { belumDirincikan: belum, sudahDirincikan: sudah, komponen: formKomp } };
     try { cache.put(cacheKey, JSON.stringify(result), 90); } catch(e) {}
     return result;
   } catch(e) {
@@ -2720,26 +2775,28 @@ function submitRincianIR(data) {
       if (!ap.ok) return { success: false, message: ap.message };
     }
 
-    var ir = Number(data.ir) || 0;
-    var ir10 = Number(data.ir10) || 0;
-    var cicilan = Number(data.cicilan) || 0;
-    var infakDaerah = Number(data.infakDaerah) || 0;
-    var index = Number(data.index) || 0;
-    if (ir < 0 || ir10 < 0 || cicilan < 0 || infakDaerah < 0 || index < 0) {
-      return { success: false, message: 'Komponen rincian tidak boleh negatif.' };
+    // Komponen dibaca dari daftar tunggal komponenRincianIR_, dibatasi pada kolom
+    // yang memang ada di sheet — sheet yang belum dimigrasi tetap jalan.
+    var irRowsA = sheet.getDataRange().getValues();
+    var irHA = headerMap_(irRowsA[0]);
+    var komp = komponenRincianAda_(irHA);
+    if (!komp.length) return { success: false, message: 'Kolom rincian tidak ditemukan di sheet Detail Buku IR.' };
+    var nilai = {}, totalKomp = 0;
+    for (var ki = 0; ki < komp.length; ki++) {
+      var vk = Number(data[komp[ki].kunci]) || 0;
+      if (vk < 0) return { success: false, message: 'Komponen rincian tidak boleh negatif: ' + komp[ki].label + '.' };
+      nilai[komp[ki].kunci] = vk;
+      totalKomp += vk;
     }
     // Validasi balance di SERVER (T6): total komponen = nominal transaksi.
-    var totalKomp = ir + ir10 + cicilan + infakDaerah + index;
     if (totalKomp !== trxNominal) {
       return { success: false, message: 'Rincian tidak seimbang: total Rp ' + totalKomp.toLocaleString('id-ID') + ' ≠ nominal transaksi Rp ' + trxNominal.toLocaleString('id-ID') + ' (selisih Rp ' + Math.abs(totalKomp - trxNominal).toLocaleString('id-ID') + ').' };
     }
 
     // Cek apakah transaksi ini sudah pernah dirincikan → update, bukan tambah baru.
     // Edit hanya boleh selama periode masih OPEN (getPeriodeAktif memfilter ke periode aktif).
-    var irRows = sheet.getDataRange().getValues();
-    var irH = headerMap_(irRows[0]);
+    var irRows = irRowsA, irH = irHA;
     var col_trx = irH['transaksiid'] !== undefined ? irH['transaksiid'] : 1;
-    var col_ir = (irH['ir'] !== undefined ? irH['ir'] : 5) + 1;
     var existingRow = -1;
     for (var ri = 1; ri < irRows.length; ri++) {
       if (String(irRows[ri][col_trx]) === String(data.transaksiId)) { existingRow = ri + 1; break; }
@@ -2747,8 +2804,10 @@ function submitRincianIR(data) {
 
     var id;
     if (existingRow > 0) {
-      // Update kolom IR..Index pada baris yang ada (5 kolom berurutan)
-      sheet.getRange(existingRow, col_ir, 1, 5).setValues([[ir, ir10, cicilan, infakDaerah, index]]);
+      // Tulis per kolom (bukan blok berurutan) agar aman terhadap urutan kolom apa pun.
+      for (var ku = 0; ku < komp.length; ku++) {
+        sheet.getRange(existingRow, komp[ku].col + 1).setValue(nilai[komp[ku].kunci]);
+      }
       var col_upd = irH['createdat'] !== undefined ? irH['createdat'] : -1;
       if (col_upd >= 0) sheet.getRange(existingRow, col_upd + 1).setValue(toDateStr_(new Date()));
       id = String(irRows[existingRow - 1][irH['id'] !== undefined ? irH['id'] : 0]);
@@ -2757,8 +2816,19 @@ function submitRincianIR(data) {
       id = generateID('IR');
       // Anggota/tanggal dari transaksi (server), bukan klien (A1). PeriodeID memakai
       // periodeRincian: sama dengan transaksi, atau periode berjalan bila ditangguhkan.
-      sheet.appendRow([id, data.transaksiId, periodeRincian, trxAnggotaId, trxTanggal,
-        ir, ir10, cicilan, infakDaerah, index, auth.user.email, toDateStr_(new Date())]);
+      // Baris dirakit mengikuti header sheet, bukan urutan kolom tetap.
+      var baris = [];
+      for (var bi = 0; bi < irRows[0].length; bi++) baris.push('');
+      function setKol_(h, v) { if (irH[h] !== undefined) baris[irH[h]] = v; }
+      setKol_('id', id);
+      setKol_('transaksiid', data.transaksiId);
+      setKol_('periodeid', periodeRincian);
+      setKol_('anggotaid', trxAnggotaId);
+      setKol_('tanggal', trxTanggal);
+      setKol_('createdby', auth.user.email);
+      setKol_('createdat', toDateStr_(new Date()));
+      for (var kb = 0; kb < komp.length; kb++) baris[komp[kb].col] = nilai[komp[kb].kunci];
+      sheet.appendRow(baris);
       if (ditangguhkan) {
         logActivityWajib_(auth.user.email, 'RINCIAN_TANGGUHAN_DIISI',
           'Transaksi: ' + data.transaksiId + ' | periode asal: ' + trxPeriodeId + ' | dicatat di periode: ' + periodeRincian);
@@ -4484,40 +4554,46 @@ function getRincianIR(periodeId) {
   try {
     var auth = checkAuth();
     if (!auth.success) return { success: false, message: auth.message };
-    var ss = getSS_();
     var periode = periodeId ? getPeriodeById_(periodeId) : getPeriodeAktif();
     if (!periode) return { success: false, message: 'Tidak ada periode untuk ditampilkan.' };
     var pid = periode.id;
     // Nama jamaah.
     var angMap = {};
-    var shA = ss.getSheetByName(CONFIG.SHEETS.ANGGOTA);
-    if (shA && shA.getLastRow() > 1) { var ar = shA.getDataRange().getValues(); for (var a = 1; a < ar.length; a++) if (ar[a][0]) angMap[String(ar[a][0])] = String(ar[a][1] || ''); }
+    var ar = sheetValues_(CONFIG.SHEETS.ANGGOTA);
+    for (var a = 1; a < ar.length; a++) if (ar[a][0]) angMap[String(ar[a][0])] = String(ar[a][1] || '');
+
     var setBatal = trxPenerimaanDibatalkan_();
-    var rows = [], tot = { ir: 0, ir10: 0, cicilan: 0, infakdaerah: 0, index: 0, total: 0 };
-    var shIR = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
-    if (shIR && shIR.getLastRow() > 1) {
-      var ir = shIR.getDataRange().getValues(); var ih = headerMap_(ir[0]);
-      for (var k = 1; k < ir.length; k++) {
-        if (!ir[k][0]) continue;
-        if (rincianYatim_(ir[k], ih, setBatal)) continue;
-        if (String(hGet_(ir[k], ih, 'periodeid', 2)) !== String(pid)) continue;
-        var c = {
-          ir: Number(hGet_(ir[k], ih, 'ir', 5)) || 0,
-          ir10: Number(hGet_(ir[k], ih, 'ir10', 6)) || 0,
-          cicilan: Number(hGet_(ir[k], ih, 'cicilan', 7)) || 0,
-          infakdaerah: Number(hGet_(ir[k], ih, 'infakdaerah', 8)) || 0,
-          index: Number(hGet_(ir[k], ih, 'index', 9)) || 0
-        };
-        var total = c.ir + c.ir10 + c.cicilan + c.infakdaerah + c.index;
+    var ir = sheetValues_(CONFIG.SHEETS.BUKU_IR);
+    var rows = [], tot = { total: 0 }, kolom = [];
+    if (ir.length > 1) {
+      var ih = headerMap_(ir[0]);
+      // Kolom laporan mengikuti komponen yang ada di sheet (termasuk kesehatan,
+      // sewa kos, qurban, lain-lain). Kolom cadangan tetap disembunyikan.
+      kolom = komponenRincianAda_(ih).filter(function(k) { return !k.cadangan; });
+      kolom.forEach(function(k) { tot[k.kunci] = 0; });
+      for (var k2 = 1; k2 < ir.length; k2++) {
+        if (!ir[k2][0]) continue;
+        if (rincianYatim_(ir[k2], ih, setBatal)) continue;
+        if (String(hGet_(ir[k2], ih, 'periodeid', 2)) !== String(pid)) continue;
+        var baris = {}, total = 0;
+        kolom.forEach(function(kk) {
+          var v = Number(ir[k2][kk.col]) || 0;
+          baris[kk.kunci] = v; total += v;
+        });
         if (total <= 0) continue;
-        var aid = String(hGet_(ir[k], ih, 'anggotaid', 3) || '');
-        rows.push({ tanggal: toDateStr_(hGet_(ir[k], ih, 'tanggal', 4)), anggota: angMap[aid] || aid || '-',
-          ir: c.ir, ir10: c.ir10, cicilan: c.cicilan, infakdaerah: c.infakdaerah, index: c.index, total: total });
-        tot.ir += c.ir; tot.ir10 += c.ir10; tot.cicilan += c.cicilan; tot.infakdaerah += c.infakdaerah; tot.index += c.index; tot.total += total;
+        var aid = String(hGet_(ir[k2], ih, 'anggotaid', 3) || '');
+        baris.tanggal = toDateStr_(hGet_(ir[k2], ih, 'tanggal', 4));
+        baris.anggota = angMap[aid] || aid || '-';
+        baris.total = total;
+        rows.push(baris);
+        kolom.forEach(function(kk) { tot[kk.kunci] += baris[kk.kunci]; });
+        tot.total += total;
       }
     }
     rows.sort(function(x, y) { return String(x.tanggal).localeCompare(String(y.tanggal)); });
-    return { success: true, periode: { id: pid, nama: periode.nama, status: periode.status }, rows: rows, total: tot, jumlah: rows.length };
+    return { success: true, periode: { id: pid, nama: periode.nama, status: periode.status },
+      kolom: kolom.map(function(k) { return { kunci: k.kunci, label: k.label, milik: k.milik }; }),
+      rows: rows, total: tot, jumlah: rows.length };
   } catch(e) {
     return { success: false, message: e.message };
   }
@@ -4610,9 +4686,35 @@ function _getKepemilikanSaldo_() {
     // PENTING: Buku IR yang belum dirinci TIDAK boleh diakui sebagai hak kelompok,
     // desa, maupun daerah — haknya memang belum diketahui sampai dirincikan.
     // Karena itu ia berdiri sebagai pos tersendiri, bukan ditambahkan ke titipan desa.
+    // Titipan jamaah (mis. Qurban) yang terkumpul lewat rincian Buku IR. Uangnya
+    // ada di kas kelompok tapi bukan hak kelompok — dikumpulkan sampai diwujudkan
+    // jadi hewan qurban. Dijumlahkan lintas periode karena sifatnya akumulatif.
+    var titipanJamaah = 0, rincianTitipan = [];
+    try {
+      var irT = sheetValues_(CONFIG.SHEETS.BUKU_IR);
+      if (irT.length > 1) {
+        var ihT = headerMap_(irT[0]);
+        var setBatalT = trxPenerimaanDibatalkan_();
+        var kompT = komponenRincianAda_(ihT).filter(function(k) { return k.milik === 'jamaah'; });
+        var perT = {};
+        for (var t = 1; t < irT.length; t++) {
+          if (!irT[t][0]) continue;
+          if (rincianYatim_(irT[t], ihT, setBatalT)) continue;
+          kompT.forEach(function(k) {
+            var v = Number(irT[t][k.col]) || 0;
+            if (!v) return;
+            titipanJamaah += v;
+            perT[k.label] = (perT[k.label] || 0) + v;
+          });
+        }
+        Object.keys(perT).forEach(function(nm) { rincianTitipan.push({ jenis: nm, nilai: perT[nm] }); });
+        rincianTitipan.sort(function(a, b) { return b.nilai - a.nilai; });
+      }
+    } catch(e) {}
+
     var milikDesa = sisaDesa;
     var milikDaerah = sisaDaerah;
-    var milikKelompok = totalKas - milikDesa - milikDaerah - belumDirinci;
+    var milikKelompok = totalKas - milikDesa - milikDaerah - belumDirinci - titipanJamaah;
 
     // Rekonsiliasi Total Kas: saldo awal + pemasukan − pengeluaran.
     var saldoAwal = 0, totalMasuk = 0, totalKeluar = 0;
@@ -4669,6 +4771,8 @@ function _getKepemilikanSaldo_() {
       sisaDesa: sisaDesa,
       sisaDaerah: sisaDaerah,
       belumDirinci: belumDirinci,
+      titipanJamaah: titipanJamaah,
+      rincianTitipan: rincianTitipan,
       kelompokNegatif: milikKelompok < 0,
       // Rincian untuk halaman penjelasan
       saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar,

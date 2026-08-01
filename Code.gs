@@ -551,6 +551,15 @@ function migrasiPengendalian() {
   // Isi No Bukti untuk data lama (berurutan per periode, urut tanggal+ID).
   try { var bk = _backfillNoBukti_(ss); if (bk) log.push('🔢 No Bukti data lama diisi: ' + bk); } catch(e) { log.push('⚠️ backfill No Bukti gagal: ' + e.message); }
 
+  // Kolom rincian tambahan pada Detail Buku IR: titipan yang ikut masuk lewat
+  // Buku IR (kesehatan, sewa kos, qurban, lain-lain) + 3 kolom cadangan.
+  // Idempoten; data lama bernilai kosong dan dibaca sebagai 0.
+  var shIR7 = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+  if (shIR7) {
+    ensureColumns_(shIR7, ['Kesehatan', 'Sewa Kos', 'Qurban', 'Lain-lain', 'Ekstra 1', 'Ekstra 2', 'Ekstra 3']);
+    log.push('🔧 Kolom rincian tambahan dipastikan → ' + CONFIG.SHEETS.BUKU_IR);
+  }
+
   // FASE 2: jenis khusus "Selisih Kas" di master (untuk baris penyesuaian tutup buku).
   var jm = ss.getSheetByName(CONFIG.SHEETS.PEMASUKAN);
   if (jm && !_adaKode_(jm, 'SELISIH_KAS')) { jm.appendRow(['SELISIH_KAS', 'Selisih Kas', 'Umum', 100, 0, 0, 'Umum', 'Aktif']); log.push('➕ Jenis Selisih Kas → Master Pemasukan'); }
