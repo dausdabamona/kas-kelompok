@@ -6114,10 +6114,12 @@ function migrasiTransaksiPenerobos() {
 // Berapa periode tertutup yang dipakai menghitung tren.
 var RUTIN_PERIODE_TREN_ = 3;
 
-// Realisasi pengeluaran per Jenis ID, dikelompokkan per periode.
+// Pembayaran per Jenis ID. Dikembalikan mentah (per baris) agar pemanggil bisa
+// menyaring menurut tanggal mulai tiap pos rutin — pos yang cicilannya sudah
+// berjalan sebelum aplikasi dipakai tidak boleh menghitung transaksi lama.
 // Mengabaikan baris dibatalkan (T3) dan draft yang belum disetujui (T12).
-function _realisasiPengeluaranPerJenis_() {
-  var out = {};   // jenisId → { periodeId → total }
+function _bayarPerJenis_() {
+  var out = {};   // jenisId → [{ pid, tgl, nominal }]
   var rows = sheetValues_(CONFIG.SHEETS.INPUT_PENGELUARAN);
   if (rows.length < 2) return out;
   var h = headerMap_(rows[0]);
@@ -6127,9 +6129,12 @@ function _realisasiPengeluaranPerJenis_() {
     if (barisDraft_(rows[i], h)) continue;
     var jid = String(hGet_(rows[i], h, 'jenisid', 2) || '');
     if (!jid) continue;
-    var pid = String(hGet_(rows[i], h, 'periodeid', 1) || '');
-    if (!out[jid]) out[jid] = {};
-    out[jid][pid] = (out[jid][pid] || 0) + (Number(hGet_(rows[i], h, 'nominal', 4)) || 0);
+    if (!out[jid]) out[jid] = [];
+    out[jid].push({
+      pid: String(hGet_(rows[i], h, 'periodeid', 1) || ''),
+      tgl: toDateStr_(hGet_(rows[i], h, 'tanggal', 3)),
+      nominal: Number(hGet_(rows[i], h, 'nominal', 4)) || 0
+    });
   }
   return out;
 }
@@ -6171,7 +6176,7 @@ function _getPengeluaranRutin_(periodeId) {
     var mk = sheetValues_(CONFIG.SHEETS.PENGELUARAN);
     for (var m = 1; m < mk.length; m++) if (mk[m][0]) namaJenis[String(mk[m][0])] = String(mk[m][1] || '');
 
-    var realisasi = _realisasiPengeluaranPerJenis_();
+    var bayar = _bayarPerJenis_();
     var periodeUrut = _periodeUrut_();
     // Periode SEBELUM periode yang dilihat — dasar perhitungan tren.
     var idxSekarang = -1;
@@ -6192,7 +6197,15 @@ function _getPengeluaranRutin_(periodeId) {
         var tipe = String(hGet_(rows[i], h, 'tipe', 3) || 'tetap').toLowerCase();
         var nilai = Number(hGet_(rows[i], h, 'nilai', 4)) || 0;
         var totalKewajiban = Number(hGet_(rows[i], h, 'totalkewajiban', 5)) || 0;
-        var perJenis = realisasi[jid] || {};
+        // Batas tanggal: pembayaran SEBELUM tanggal mulai tidak dihitung, karena
+        // sudah diwakili kolom 'Dibayar Sebelumnya'.
+        var mulai = toDateStr_(hGet_(rows[i], h, 'mulai', 6));
+        var dibayarSebelumnya = Number(hGet_(rows[i], h, 'dibayarsebelumnya', -1)) || 0;
+
+        var semua = bayar[jid] || [];
+        var dipakai = semua.filter(function(b) { return !mulai || !b.tgl || b.tgl >= mulai; });
+        var perJenis = {};
+        dipakai.forEach(function(b) { perJenis[b.pid] = (perJenis[b.pid] || 0) + b.nominal; });
         var real = Number(perJenis[pid]) || 0;
 
         // ── Perkiraan bulan ini ──
@@ -6216,7 +6229,9 @@ function _getPengeluaranRutin_(periodeId) {
         // ── Khusus cicilan: berapa sisa pokoknya ──
         var sudahDibayar = 0, sisaPokok = 0, sisaBulan = 0, lunas = false;
         if (tipe === 'cicilan') {
-          Object.keys(perJenis).forEach(function(k) { sudahDibayar += Number(perJenis[k]) || 0; });
+          // Akumulasi = yang sudah dibayar sebelum aplikasi dipakai + yang tercatat sejak tanggal mulai.
+          sudahDibayar = dibayarSebelumnya;
+          dipakai.forEach(function(b) { sudahDibayar += b.nominal; });
           sisaPokok = Math.max(0, totalKewajiban - sudahDibayar);
           lunas = (totalKewajiban > 0 && sisaPokok <= 0);
           if (lunas) prediksi = 0;
@@ -6242,6 +6257,9 @@ function _getPengeluaranRutin_(periodeId) {
         if (tipe === 'cicilan') {
           item.totalKewajiban = totalKewajiban;
           item.sudahDibayar = sudahDibayar;
+          item.dibayarSebelumnya = dibayarSebelumnya;
+          item.mulai = mulai;
+          item.dicatatAplikasi = sudahDibayar - dibayarSebelumnya;
           item.sisaPokok = sisaPokok;
           item.sisaBulan = sisaBulan;
           item.lunas = lunas;
@@ -6317,6 +6335,8 @@ function simpanPengeluaranRutin(data) {
         tulis(baris, 'tipe', tipe);
         tulis(baris, 'nilai', nilai);
         tulis(baris, 'totalkewajiban', totalKewajiban);
+        tulis(baris, 'dibayarsebelumnya', Number(data.dibayarSebelumnya) || 0);
+        if (String(data.mulai || '').trim()) tulis(baris, 'mulai', String(data.mulai).trim());
         tulis(baris, 'catatan', String(data.catatan || ''));
         tulis(baris, 'status', String(data.status || 'Aktif'));
         logActivityWajib_(auth.user.email, 'RUTIN_UBAH',
@@ -6334,7 +6354,8 @@ function simpanPengeluaranRutin(data) {
       set_('tipe', tipe);
       set_('nilai', nilai);
       set_('totalkewajiban', totalKewajiban);
-      set_('mulai', toDateStr_(new Date()));
+      set_('dibayarsebelumnya', Number(data.dibayarSebelumnya) || 0);
+      set_('mulai', String(data.mulai || '').trim() || toDateStr_(new Date()));
       set_('status', 'Aktif');
       set_('catatan', String(data.catatan || ''));
       set_('createdby', auth.user.email);

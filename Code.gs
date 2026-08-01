@@ -287,7 +287,7 @@ function getSheetSchema_() {
     },
     {
       name: CONFIG.SHEETS.RUTIN,
-      headers: ['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Status', 'Catatan', 'Created By', 'Created At'],
+      headers: ['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Dibayar Sebelumnya', 'Status', 'Catatan', 'Created By', 'Created At'],
       note: 'Tipe: tetap (nominal pasti) / tren (rata-rata realisasi) / cicilan (angsuran + sisa pokok) | Nilai = perkiraan per bulan | Total Kewajiban hanya untuk cicilan | Status: Aktif / Nonaktif'
     },
     {
@@ -551,10 +551,10 @@ function migrasiPengendalian() {
   var shRT = ss.getSheetByName(CONFIG.SHEETS.RUTIN);
   if (!shRT) {
     shRT = ss.insertSheet(CONFIG.SHEETS.RUTIN);
-    shRT.appendRow(['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Status', 'Catatan', 'Created By', 'Created At']);
+    shRT.appendRow(['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Dibayar Sebelumnya', 'Status', 'Catatan', 'Created By', 'Created At']);
     log.push('✅ DIBUAT: ' + CONFIG.SHEETS.RUTIN);
   } else {
-    ensureColumns_(shRT, ['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Status', 'Catatan', 'Created By', 'Created At']);
+    ensureColumns_(shRT, ['ID', 'Nama', 'Jenis ID', 'Tipe', 'Nilai', 'Total Kewajiban', 'Mulai', 'Dibayar Sebelumnya', 'Status', 'Catatan', 'Created By', 'Created At']);
     log.push('🔧 Kolom dipastikan → ' + CONFIG.SHEETS.RUTIN);
   }
 
