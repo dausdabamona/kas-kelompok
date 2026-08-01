@@ -109,7 +109,7 @@ function getDefaultPermMatrix_() {
     'bukuIR.input': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENULIS],
     'jamaah.add': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
     'jamaah.edit': [R.ADMIN, R.BENDAHARA_1, R.PENULIS, R.PENEROBOS],
-    'jamaah.delete': [R.ADMIN],
+    'jamaah.delete': [R.ADMIN, R.PENULIS],
     'terobosan.create': [R.ADMIN, R.BENDAHARA_1, R.PENULIS],
     'terobosan.bayar': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2, R.PENEROBOS],
     'terobosan.batal': [R.ADMIN, R.BENDAHARA_1, R.PENEROBOS],
@@ -122,8 +122,10 @@ function getDefaultPermMatrix_() {
     'pembelaan.manage': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
     'master.manage': [R.ADMIN],
     'user.manage': [R.ADMIN],
-    'trx.edit.tunai': [R.ADMIN, R.BENDAHARA_1],
-    'trx.edit.bank': [R.ADMIN, R.BENDAHARA_2],
+    // Penulis boleh membatalkan transaksi (soft delete, alasan wajib) selama
+    // periode masih terbuka. Persetujuan tetap bukan haknya — lihat trx.approve.
+    'trx.edit.tunai': [R.ADMIN, R.BENDAHARA_1, R.PENULIS],
+    'trx.edit.bank': [R.ADMIN, R.BENDAHARA_2, R.PENULIS],
     'periode.manage': [R.ADMIN],
     'view.kasPenerobos': [R.ADMIN, R.PENEROBOS],
     'view.serahTerima': [R.ADMIN, R.BENDAHARA_1, R.BENDAHARA_2],
