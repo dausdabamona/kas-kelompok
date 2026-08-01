@@ -523,6 +523,11 @@ function migrasiPengendalian() {
     shL.appendRow(['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status']);
     log.push('✅ DIBUAT: ' + CONFIG.SHEETS.LAMPIRAN);
   }
+  // Rapelan: satu setoran Buku IR bisa mewakili beberapa bulan sekaligus.
+  // Hanya untuk pemantauan bulanan — tidak mengubah kas maupun kewajiban setor.
+  var shIRr = ss.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+  if (shIRr) { ensureColumns_(shIRr, ['Rapel Bulan']); log.push('🔧 Kolom Rapel Bulan dipastikan → ' + CONFIG.SHEETS.BUKU_IR); }
+
   // Penangguhan rincian Buku IR: transaksi boleh dirinci di periode berikutnya
   // walau periode asalnya sudah ditutup (uang tetap di periode asal).
   var shPnT = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);

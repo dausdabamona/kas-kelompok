@@ -1183,6 +1183,9 @@ var App = {
       '<div class="form-group"><label>Cicilan (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rCicilan" value="' + vCicilan + '" oninput="App.cekTotalRincian()"/></div>' +
       '<div class="form-group"><label>Infak Daerah (Rp) <span style="font-size:11px;color:#2563eb;">→ disetor ke desa</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rInfakDaerah" value="' + vInfak + '" oninput="App.cekTotalRincian()"/></div>' +
       '<div class="form-group"><label>Index (Rp) <span style="font-size:11px;color:#166534;">→ kas kelompok</span></label><input type="text" inputmode="numeric" data-tsep="1" id="rIndex" value="' + vIndex + '" oninput="App.cekTotalRincian()"/></div>' +
+      '<div class="form-group"><label>Rapelan — untuk berapa bulan?</label>' +
+        '<input type="number" min="1" max="24" id="rRapel" value="' + (item.rapelBulan || 1) + '"/>' +
+        '<div class="text-small text-muted" style="margin-top:4px;">Isi 1 bila setoran bulan berjalan saja. Bila jamaah merapel (mis. 3 bulan sekaligus), isi 3 — nilainya akan disebar mundur di menu Pantau IR. Kas & kewajiban setor tidak berubah.</div></div>' +
       '<div id="rekapTujuan" style="margin-bottom:12px;"></div>' +
       '<div id="validasiRincian" class="mb-16"></div>' +
       '<div id="rincianError"></div>' +
@@ -1232,6 +1235,7 @@ var App = {
       cicilan: App.num('rCicilan'),
       infakDaerah: App.num('rInfakDaerah'),
       index: App.num('rIndex'),
+      rapelBulan: Math.max(1, Math.min(24, parseInt((document.getElementById('rRapel') || {}).value, 10) || 1)),
       total: item.nominal,
       anggotaNama: item.anggota ? item.anggota.nama : ''
     };

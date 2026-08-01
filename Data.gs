@@ -2745,8 +2745,16 @@ function submitRincianIR(data) {
           'Transaksi: ' + data.transaksiId + ' | periode asal: ' + trxPeriodeId + ' | dicatat di periode: ' + periodeRincian);
       }
     }
+    // Rapelan: berapa bulan yang diwakili setoran ini (1 = bulan berjalan saja).
+    // Hanya memengaruhi PEMANTAUAN bulanan; kas & kewajiban setor tidak berubah.
+    var rapel = Math.max(1, Math.min(24, Math.round(Number(data.rapelBulan) || 1)));
+    var colRapel = irH['rapelbulan'];
+    if (colRapel !== undefined) {
+      var barisRapel = (existingRow > 0) ? existingRow : sheet.getLastRow();
+      sheet.getRange(barisRapel, colRapel + 1).setValue(rapel);
+    }
     try { var c = CacheService.getScriptCache(); c.remove('master_trx_data'); c.remove('buku_ir_data'); c.remove('dashboard_saldo'); } catch(e) {}
-    return { success: true, id: id, updated: existingRow > 0 };
+    return { success: true, id: id, updated: existingRow > 0, rapelBulan: rapel };
     });
   } catch(e) {
     return { success: false, message: e.message };
@@ -4403,8 +4411,20 @@ function getPantauIR(jumlahBulan) {
                   (Number(hGet_(ir[k], ih, 'index', 9)) || 0);
         if (jml <= 0) continue;
         if (!angNama[aid2]) { angNama[aid2] = aid2; jamaah.push(aid2); }   // jamaah nonaktif yg pernah setor
-        pastikan(aid2)[col] += jml;
-        totalBulan[col] += jml;
+        // RAPELAN: setoran bisa mewakili beberapa bulan berturut-turut MUNDUR dari
+        // bulan pembayaran. Nilainya dibagi rata agar pemantauan bulanan tidak
+        // menampilkan bulan bolong palsu. Uang & kewajiban setor tidak terpengaruh.
+        var rapel = Math.max(1, Math.min(24, Math.round(Number(hGet_(ir[k], ih, 'rapelbulan', -1)) || 1)));
+        var perBulan = jml / rapel;
+        var sisaAlokasi = jml;
+        for (var rb = 0; rb < rapel; rb++) {
+          var kolom = col - rb;
+          var bagian = (rb === rapel - 1) ? sisaAlokasi : Math.round(perBulan);
+          sisaAlokasi -= bagian;
+          if (kolom < 0) continue;              // bulan di luar rentang tampil
+          pastikan(aid2)[kolom] += bagian;
+          totalBulan[kolom] += bagian;
+        }
       }
     }
 

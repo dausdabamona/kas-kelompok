@@ -627,14 +627,75 @@
   }
 
   // ── VIEW: Anggota ──
+  var ANGGOTA = {};   // id → data, untuk form edit
   function renderAnggota(host, res) {
     if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
-    var cols = [{t:'Nama'},{t:'No. Telp'},{t:'Alamat'},{t:'Status'},{t:'IR',r:true},{t:'1/10 IR',r:true},{t:'Index',r:true},{t:'Infak',r:true}];
+    ANGGOTA = {};
+    (res.data || []).forEach(function(a) { ANGGOTA[a.id] = a; });
+    var cols = [{t:'Nama'},{t:'No. Telp'},{t:'Alamat'},{t:'Status'},{t:'IR',r:true},{t:'1/10 IR',r:true},{t:'Index',r:true},{t:'Infak',r:true},{t:'Aksi'}];
     var rows = (res.data || []).map(function(a) {
+      var idJs = esc(String(a.id)).replace(/'/g, "\\'");
       return '<tr><td class="t-jenis">' + esc(a.nama) + '</td><td class="t-name">' + esc(a.noTelp || '-') + '</td><td class="t-name">' + esc(a.alamat || '-') + '</td><td>' + statusBadge(a.status) + '</td>'
-        + '<td class="r amt">' + num(a.ir) + '</td><td class="r amt">' + num(a.ir10) + '</td><td class="r amt">' + num(a.index) + '</td><td class="r amt">' + num(a.infakDaerah) + '</td></tr>';
+        + '<td class="r amt">' + num(a.ir) + '</td><td class="r amt">' + num(a.ir10) + '</td><td class="r amt">' + num(a.index) + '</td><td class="r amt">' + num(a.infakDaerah) + '</td>'
+        + '<td><button class="abtn" onclick="editAnggota(\'' + idJs + '\')">✏️ Edit</button></td></tr>';
     }).join('');
-    host.innerHTML = panelBox('Anggota / Jamaah', (res.data || []).length + ' orang', tableHtml(cols, rows));
+    host.innerHTML = '<div style="margin-bottom:12px;"><button class="qbtn primary" onclick="editAnggota(\'\')">➕ Tambah Jamaah</button></div>' +
+      panelBox('Anggota / Jamaah', (res.data || []).length + ' orang', tableHtml(cols, rows)) +
+      '<div id="angModal"></div>';
+  }
+
+  // Form tambah/ubah jamaah. id kosong = tambah baru.
+  function editAnggota(id) {
+    var a = ANGGOTA[id] || { id: '', nama: '', noTelp: '', alamat: '', status: 'Aktif', ir: 0, ir10: 0, index: 0, infakDaerah: 0 };
+    var baru = !id;
+    function f(lbl, key, tipe) {
+      return '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">' + lbl + '</label>' +
+        '<input id="ang_' + key + '" type="' + (tipe || 'text') + '" value="' + esc(String(a[key] == null ? '' : a[key])) + '" ' +
+        'style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;"></div>';
+    }
+    var html = '<div id="angOverlay" style="position:fixed;inset:0;background:rgba(24,61,51,.45);display:grid;place-items:center;z-index:80;padding:20px;" onclick="if(event.target===this)tutupAnggota()">' +
+      '<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:88vh;overflow:auto;padding:22px;box-shadow:var(--shadow-lg);">' +
+        '<h3 style="margin:0 0 14px;font-size:18px;font-weight:600;">' + (baru ? 'Tambah Jamaah' : 'Ubah Jamaah') + '</h3>' +
+        f('Nama *', 'nama') + f('No. Telp', 'noTelp') + f('Alamat', 'alamat') +
+        '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">Status</label>' +
+          '<select id="ang_status" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' +
+          '<option value="Aktif"' + (a.status !== 'Nonaktif' ? ' selected' : '') + '>Aktif</option>' +
+          '<option value="Nonaktif"' + (a.status === 'Nonaktif' ? ' selected' : '') + '>Nonaktif</option></select></div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+          f('IR (Rp)', 'ir', 'number') + f('1/10 IR (Rp)', 'ir10', 'number') +
+          f('Index (Rp)', 'index', 'number') + f('Infak Daerah (Rp)', 'infakDaerah', 'number') +
+        '</div>' +
+        '<p style="color:var(--text-muted);font-size:12px;margin:2px 0 14px;">Empat nilai di atas adalah <b>acuan setoran bulanan</b> jamaah ini, dipakai sebagai saran saat merinci Buku IR.</p>' +
+        '<div id="angErr" style="color:var(--g-gold);font-size:13px;margin-bottom:10px;"></div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+          '<button class="abtn" onclick="tutupAnggota()">Batal</button>' +
+          (baru ? '' : '<button class="abtn danger" onclick="hapusAnggota(\'' + esc(String(id)).replace(/'/g, "\\'") + '\')">Hapus</button>') +
+          '<button class="qbtn primary" onclick="simpanAnggota(\'' + esc(String(id)).replace(/'/g, "\\'") + '\')">Simpan</button>' +
+        '</div>' +
+      '</div></div>';
+    document.getElementById('angModal').innerHTML = html;
+  }
+  function tutupAnggota() { var m = document.getElementById('angModal'); if (m) m.innerHTML = ''; }
+  function nilaiAng(key) { var el = document.getElementById('ang_' + key); return el ? el.value : ''; }
+
+  function simpanAnggota(id) {
+    var nama = String(nilaiAng('nama')).trim();
+    if (!nama) { document.getElementById('angErr').textContent = 'Nama wajib diisi.'; return; }
+    var d = { id: id, nama: nama, noTelp: nilaiAng('noTelp'), alamat: nilaiAng('alamat'), status: nilaiAng('status'),
+      ir: Number(nilaiAng('ir')) || 0, ir10: Number(nilaiAng('ir10')) || 0,
+      index: Number(nilaiAng('index')) || 0, infakDaerah: Number(nilaiAng('infakDaerah')) || 0 };
+    call(id ? 'updateAnggota' : 'addAnggota', [d], function(r) {
+      if (r && r.success) { tutupAnggota(); toast(id ? 'Jamaah diperbarui' : 'Jamaah ditambahkan'); go('anggota'); }
+      else { var e = document.getElementById('angErr'); if (e) e.textContent = (r && r.message) || 'Gagal menyimpan.'; }
+    });
+  }
+  function hapusAnggota(id) {
+    var a = ANGGOTA[id] || {};
+    if (!confirm('Hapus jamaah "' + (a.nama || id) + '"?\nRiwayat transaksinya tidak ikut terhapus.')) return;
+    call('deleteAnggota', [id], function(r) {
+      if (r && r.success) { tutupAnggota(); toast('Jamaah dihapus'); go('anggota'); }
+      else { var e = document.getElementById('angErr'); if (e) e.textContent = (r && r.message) || 'Gagal menghapus.'; }
+    });
   }
 
   // ── VIEW: Terobosan Kelompok ──
