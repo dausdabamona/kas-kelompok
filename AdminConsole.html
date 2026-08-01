@@ -280,7 +280,7 @@
   function menuDef() {
     return [
       { grp:'Ringkasan', items:[ ['dashboard','📊','Dashboard'], ['saldo','🧮','Pemeriksaan Saldo'], ['pdf','📄','Laporan PDF'] ] },
-      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['rincianir','🧾','Rincian IR'], ['kepemilikan','🧭','Kepemilikan Saldo'], ['bagihasil','⚖️','Bagi Hasil'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'] ] },
+      { grp:'Keuangan', items:[ ['bukuir','📖','Buku IR'], ['rincianir','🧾','Rincian IR'], ['kepemilikan','🧭','Kepemilikan Saldo'], ['setorandesa','🏘️','Setoran Desa'], ['bank','🏦','Bank &amp; Rekonsiliasi'], ['laporansetoran','📈','Laporan Setoran'] ] },
       { grp:'Jamaah', items:[ ['anggota','👥','Anggota'], ['terobosan','🤝','Terobosan Kelompok'], ['serah','🤲','Serah Terima'] ] },
       { grp:'Tata Kelola', items:[ ['users','🔑','Kelola User'], ['hakakses','🛡️','Hak Akses'], ['devices','📱','Perangkat &amp; Sesi'], ['master','🗂️','Master &amp; Pos'], ['periode','🗓️','Periode'], ['log','📜','Activity Log'] ] }
     ];
@@ -291,7 +291,6 @@
     saldo:          { title:'Pemeriksaan Saldo', ep:'getPemeriksaanSaldo', run: renderSaldo },
     pdf:            { title:'Laporan PDF', run: renderPdf },
     bukuir:         { title:'Buku IR', ep:'getBukuIRData', run: renderBukuIR },
-    bagihasil:      { title:'Bagi Hasil', ep:'getBagiHasil', run: renderBagiHasil },
     kepemilikan:    { title:'Kepemilikan Saldo', ep:'getKepemilikanSaldo', run: renderKepemilikan },
     rincianir:      { title:'Rincian IR', ep:'getRincianIR', run: renderRincianIR },
     setorandesa:    { title:'Setoran Desa', ep:'getRekapSetoran', run: renderSetoranDesa },
@@ -427,7 +426,7 @@
   // ── VIEW: Kepemilikan Saldo — rincian asal Milik Kelompok & Titipan Desa/Daerah ──
   function renderKepemilikan(host, res) {
     if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
-    var kartu = '<div class="kpi-strip" style="grid-template-columns:repeat(4,1fr);">' +
+    var kartu = '<div class="kpi-strip" style="grid-template-columns:repeat(5,1fr);">' +
       '<div class="kpi" style="background:linear-gradient(150deg,var(--g-deep),var(--g-mid));color:#fff;border:none;box-shadow:var(--shadow-emerald);">' +
         '<div class="kpi-label" style="color:rgba(255,255,255,.85);">Milik Kelompok</div>' +
         '<div class="kpi-value" style="color:#fff;">' + rp(res.milikKelompok) + '</div>' +
@@ -438,6 +437,9 @@
       '<div class="kpi" style="background:var(--g-gold-soft);"><div class="kpi-label">Titipan Daerah</div>' +
         '<div class="kpi-value" style="color:#6f5220;">' + rp(res.milikDaerah) + '</div>' +
         '<div class="kpi-foot"><span class="kpi-delta flat">belum disetor</span></div></div>' +
+      '<div class="kpi" style="background:#eef1f0;"><div class="kpi-label">Belum Dirincikan</div>' +
+        '<div class="kpi-value" style="color:#5f7a70;">' + rp(res.belumDirinci) + '</div>' +
+        '<div class="kpi-foot"><span class="kpi-delta flat">haknya belum diketahui</span></div></div>' +
       '<div class="kpi"><div class="kpi-label">Total Kas</div>' +
         '<div class="kpi-value">' + rp(res.totalKas) + '</div>' +
         '<div class="kpi-foot"><span class="kpi-delta flat">' + esc((res.periode && res.periode.nama) || '') + '</span></div></div>' +
@@ -478,67 +480,13 @@
 
     host.innerHTML = kartu +
       '<div style="background:var(--card);border:1px solid var(--border-soft);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 18px;margin-bottom:18px;">' +
-        '<b>Milik Kelompok</b> = Total Kas ' + rp(res.totalKas) + ' − Titipan Desa ' + rp(res.milikDesa) + ' − Titipan Daerah ' + rp(res.milikDaerah) + ' = <b style="color:var(--g-deep);">' + rp(res.milikKelompok) + '</b>' +
+        '<b>Milik Kelompok</b> = Total Kas ' + rp(res.totalKas) + ' − Titipan Desa ' + rp(res.milikDesa) + ' − Titipan Daerah ' + rp(res.milikDaerah) + ' − Belum Dirincikan ' + rp(res.belumDirinci) + ' = <b style="color:var(--g-deep);">' + rp(res.milikKelompok) + '</b>' +
         (res.kelompokNegatif ? '<div style="color:var(--g-gold);margin-top:6px;">⚠ Kas lebih kecil dari kewajiban — ada kewajiban yang belum tertutup.</div>' : '') +
       '</div>' +
       panelBox('A. Dari mana Total Kas berasal', (res.periode && res.periode.nama) || '', tableHtml([{t:'Uraian'},{t:'Nilai',r:true}], rowsA)) +
       panelBox('B. Titipan — bagian yang bukan milik kelompok', 'kewajiban setor per pos', tableHtml([{t:'Pos'},{t:'Kewajiban',r:true},{t:'Disetor',r:true},{t:'Sisa',r:true},{t:'Keterangan'}], rowsB)) +
       panelBox('C. Sumber hak kelompok dari pemasukan periode ini', 'konteks — sebagian sudah terpakai untuk pengeluaran', tableHtml([{t:'Jenis'},{t:'Hak Kelompok',r:true}], rowsC)) +
       '<p style="color:var(--text-muted);font-size:12px;margin-top:-6px;">Tabel C bukan penjumlahan langsung ke Milik Kelompok: sebagian hak kelompok sudah terpakai untuk pengeluaran periode berjalan. Angka Milik Kelompok dihitung dari sisa kas setelah dikurangi kewajiban yang belum disetor.</p>';
-  }
-
-  // ── VIEW: Bagi Hasil (Hak Kelompok / Desa / Daerah) ──
-  function renderBagiHasil(host, res) {
-    if (!res || !res.success) { host.innerHTML = errPanel(res); return; }
-    var totMasuk = res.totalMasuk || 0;
-    function pct(v) { return totMasuk > 0 ? Math.round(v / totMasuk * 100) : 0; }
-    // Kartu ringkasan: 3 hak + total pemasukan.
-    var kartu = '<div class="kpi-strip" style="grid-template-columns:repeat(4,1fr);">' +
-      '<div class="kpi" style="background:linear-gradient(150deg,var(--g-deep),var(--g-mid));color:#fff;border:none;box-shadow:var(--shadow-emerald);">' +
-        '<div class="kpi-label" style="color:rgba(255,255,255,.85);">Hak Kelompok</div>' +
-        '<div class="kpi-value" style="color:#fff;">' + rp(res.kelompok) + '</div>' +
-        '<div class="kpi-foot"><span class="kpi-delta" style="color:rgba(255,255,255,.8);">' + pct(res.kelompok) + '% dari pemasukan</span></div></div>' +
-      '<div class="kpi" style="background:var(--g-mist);"><div class="kpi-label">Hak Desa</div>' +
-        '<div class="kpi-value">' + rp(res.desa) + '</div>' +
-        '<div class="kpi-foot"><span class="kpi-delta flat">' + pct(res.desa) + '% dari pemasukan</span></div></div>' +
-      '<div class="kpi" style="background:var(--g-gold-soft);"><div class="kpi-label">Hak Daerah</div>' +
-        '<div class="kpi-value" style="color:#6f5220;">' + rp(res.daerah) + '</div>' +
-        '<div class="kpi-foot"><span class="kpi-delta flat">' + pct(res.daerah) + '% dari pemasukan</span></div></div>' +
-      '<div class="kpi"><div class="kpi-label">Total Pemasukan</div>' +
-        '<div class="kpi-value">' + rp(totMasuk) + '</div>' +
-        '<div class="kpi-foot"><span class="kpi-delta flat">' + esc((res.periode && res.periode.nama) || '') + '</span></div></div>' +
-    '</div>';
-    // Bar proporsi.
-    var bar = '';
-    if (totMasuk > 0) {
-      bar = '<div style="display:flex;height:14px;border-radius:8px;overflow:hidden;margin:2px 0 18px;box-shadow:var(--shadow);">' +
-        '<div style="width:' + pct(res.kelompok) + '%;background:var(--g-mid);"></div>' +
-        '<div style="width:' + pct(res.desa) + '%;background:var(--g-soft);"></div>' +
-        '<div style="width:' + pct(res.daerah) + '%;background:var(--g-gold);"></div>' +
-      '</div>' +
-      '<div style="display:flex;gap:16px;font-size:12px;margin-bottom:6px;">' +
-        '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--g-mid);"></span> Kelompok</span>' +
-        '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--g-soft);"></span> Desa</span>' +
-        '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--g-gold);"></span> Daerah</span>' +
-      '</div>';
-    }
-    // Tabel rincian per jenis.
-    var cols = [{t:'Jenis'},{t:'Pemasukan',r:true},{t:'Kelompok',r:true},{t:'Desa',r:true},{t:'Daerah',r:true}];
-    var rows = (res.rincian || []).map(function(x) {
-      return '<tr><td class="t-jenis">' + esc(x.jenis) + '</td>' +
-        '<td class="r amt">' + num(x.masuk) + '</td>' +
-        '<td class="r amt" style="color:var(--g-mid);">' + num(x.kelompok) + '<div style="font-size:10px;color:var(--text-muted);font-weight:400;">' + x.pctK + '%</div></td>' +
-        '<td class="r amt" style="color:var(--g-deep);">' + num(x.desa) + '<div style="font-size:10px;color:var(--text-muted);font-weight:400;">' + x.pctD + '%</div></td>' +
-        '<td class="r amt" style="color:var(--g-gold);">' + num(x.daerah) + '<div style="font-size:10px;color:var(--text-muted);font-weight:400;">' + x.pctDr + '%</div></td></tr>';
-    }).join('');
-    var foot = '<tr style="font-weight:800;border-top:2px solid var(--admin-soft);"><td>TOTAL</td>' +
-      '<td class="r amt">' + num(totMasuk) + '</td>' +
-      '<td class="r amt" style="color:var(--g-mid);">' + num(res.kelompok) + '</td>' +
-      '<td class="r amt" style="color:var(--g-deep);">' + num(res.desa) + '</td>' +
-      '<td class="r amt" style="color:var(--g-gold);">' + num(res.daerah) + '</td></tr>';
-    host.innerHTML = kartu + bar +
-      panelBox('Rincian per Jenis Pemasukan', (res.periode && res.periode.nama) || '', tableHtml(cols, rows + foot)) +
-      '<p style="color:var(--text-muted);font-size:12px;margin-top:-6px;">Angka dihitung dari persentase %Kelompok / %Desa / %Daerah di Master Pemasukan, dikalikan pemasukan tiap jenis pada periode ini. Baris dibatalkan tidak dihitung.</p>';
   }
 
   // ── VIEW: Laporan PDF ──
@@ -921,6 +869,7 @@
             '<div style="width:' + pc(r.milikKelompok) + '%;background:var(--g-mid);"></div>' +
             '<div style="width:' + pc(r.milikDesa) + '%;background:var(--g-soft);"></div>' +
             '<div style="width:' + pc(r.milikDaerah) + '%;background:var(--g-gold);"></div>' +
+            '<div style="width:' + pc(r.belumDirinci) + '%;background:#9aa5a1;"></div>' +
           '</div>'
         : '';
       function row(sw, nama, val, sub) {
@@ -928,14 +877,11 @@
           '<div><div class="stat-name">' + nama + '</div>' + (sub ? '<div class="stat-sub">' + sub + '</div>' : '') + '</div>' +
           '<div class="stat-val">' + rp(val) + '</div></div>';
       }
-      // Rincikan asal angka titipan agar jelas: sisa kewajiban vs Buku IR belum dirinci.
-      var ketDesa = (r.belumDirinci > 0)
-        ? 'sisa kewajiban ' + rp(r.sisaKewajiban) + ' + belum dirinci ' + rp(r.belumDirinci)
-        : 'sisa kewajiban belum disetor';
       el.innerHTML = bar +
         row('var(--g-mid)', 'Milik Kelompok', r.milikKelompok, r.kelompokNegatif ? '⚠ kas kurang dari kewajiban' : 'bebas dipakai kelompok') +
-        row('var(--g-soft)', 'Titipan Desa', r.milikDesa, ketDesa) +
+        row('var(--g-soft)', 'Titipan Desa', r.milikDesa, 'sisa kewajiban belum disetor') +
         row('var(--g-gold)', 'Titipan Daerah', r.milikDaerah, 'sisa kewajiban ke daerah') +
+        row('#9aa5a1', 'Belum Dirincikan', r.belumDirinci, 'haknya belum diketahui') +
         '<div class="stat-row" style="border-top:1px solid var(--border-soft);"><span class="sw" style="width:11px;flex:none;"></span><div><div class="stat-name">Total Kas</div><div class="stat-sub">sudah disetor ' + rp(r.sudahSetor) + ' dari kewajiban ' + rp(r.kewajiban) + '</div></div><div class="stat-val">' + rp(tot) + '</div></div>';
     });
   }

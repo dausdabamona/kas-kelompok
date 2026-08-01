@@ -4430,26 +4430,40 @@ function getKepemilikanSaldo() {
             if (kd && String(hGet_(mrb[m], mhb, 'kategori', 2) || '').toLowerCase().indexOf('buku ir') !== -1) kodeBukuIR[kd] = true;
           }
         }
-        var masukBukuIR = 0;
+        // Transaksi Buku IR yang sudah punya rincian.
+        var adaRincian = {};
+        var shIRb = ssb.getSheetByName(CONFIG.SHEETS.BUKU_IR);
+        if (shIRb && shIRb.getLastRow() > 1) {
+          var irb = shIRb.getDataRange().getValues(); var ihb = headerMap_(irb[0]);
+          for (var z = 1; z < irb.length; z++) {
+            var tzid = String(hGet_(irb[z], ihb, 'transaksiid', 1) || '');
+            if (tzid) adaRincian[tzid] = true;
+          }
+        }
+        // Jumlahkan transaksi Buku IR yang BELUM dirinci: periode berjalan +
+        // transaksi tangguhan dari periode lalu (uangnya ikut terbawa di kas).
         var shPb = ssb.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
         if (shPb && shPb.getLastRow() > 1) {
           var prb = shPb.getDataRange().getValues(); var phb = headerMap_(prb[0]);
           for (var q = 1; q < prb.length; q++) {
-            if (!hGet_(prb[q], phb, 'id', 0)) continue;
-            if (barisDibatalkan_(prb[q], phb)) continue;
-            if (String(hGet_(prb[q], phb, 'periodeid', 1)) !== String(pid)) continue;
-            if (kodeBukuIR[String(hGet_(prb[q], phb, 'jenisid', 2) || '')]) masukBukuIR += Number(hGet_(prb[q], phb, 'nominal', 5)) || 0;
+            var qid = String(hGet_(prb[q], phb, 'id', 0) || '');
+            if (!qid || barisDibatalkan_(prb[q], phb)) continue;
+            if (!kodeBukuIR[String(hGet_(prb[q], phb, 'jenisid', 2) || '')]) continue;
+            if (adaRincian[qid]) continue;
+            var samaPeriode = (String(hGet_(prb[q], phb, 'periodeid', 1)) === String(pid));
+            if (!samaPeriode && !rincianDitangguhkan_(prb[q], phb)) continue;
+            belumDirinci += Number(hGet_(prb[q], phb, 'nominal', 5)) || 0;
           }
         }
-        var dirinci = 0;
-        try { var ri = getRincianIR(pid); if (ri && ri.success && ri.total) dirinci = Number(ri.total.total) || 0; } catch(e) {}
-        belumDirinci = Math.max(0, masukBukuIR - dirinci);
       } catch(e) {}
     }
 
-    var milikDesa = sisaDesa + belumDirinci;
+    // PENTING: Buku IR yang belum dirinci TIDAK boleh diakui sebagai hak kelompok,
+    // desa, maupun daerah — haknya memang belum diketahui sampai dirincikan.
+    // Karena itu ia berdiri sebagai pos tersendiri, bukan ditambahkan ke titipan desa.
+    var milikDesa = sisaDesa;
     var milikDaerah = sisaDaerah;
-    var milikKelompok = totalKas - milikDesa - milikDaerah;
+    var milikKelompok = totalKas - milikDesa - milikDaerah - belumDirinci;
 
     // Rekonsiliasi Total Kas: saldo awal + pemasukan − pengeluaran.
     var saldoAwal = 0, totalMasuk = 0, totalKeluar = 0;
