@@ -4753,6 +4753,21 @@ function _getKepemilikanSaldo_() {
       }
     } catch(e) {}
 
+    // Kewajiban rutin bulan ini (perkiraan, sudah dibayar, sisa yang harus disiapkan).
+    var rutinRingkas = null;
+    try {
+      var rt0 = _getPengeluaranRutin_(pid);
+      if (rt0 && rt0.success && (rt0.data || []).length) {
+        rutinRingkas = {
+          totalPrediksi: rt0.totalPrediksi,
+          totalRealisasi: rt0.totalRealisasi,
+          sisaPerkiraan: rt0.sisaPerkiraan,
+          belumBayar: rt0.belumBayar,
+          jumlahPos: (rt0.data || []).length
+        };
+      }
+    } catch(e) {}
+
     var milikDesa = sisaDesa;
     var milikDaerah = sisaDaerah;
     var milikKelompok = totalKas - milikDesa - milikDaerah - belumDirinci - titipanJamaah;
@@ -4819,7 +4834,11 @@ function _getKepemilikanSaldo_() {
       saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar,
       rincianPos: rincianPos,
       sumberKelompok: sumberKelompok,
-      hakKelompokPeriode: hakKelompokPeriode
+      hakKelompokPeriode: hakKelompokPeriode,
+      // Kewajiban rutin periode ini — disandingkan dengan dana kelompok supaya
+      // terlihat apakah uang yang boleh dipakai cukup menutupinya.
+      // Digabung di sini agar beranda tidak perlu panggilan server tambahan.
+      rutin: rutinRingkas
     };
   } catch(e) {
     return { success: false, message: e.message };

@@ -569,46 +569,73 @@ var App = {
     }
     var fn = function(v) { return self.formatNumber(v); };
     var neg = !!r.kelompokNegatif;
+    var rt = r.rutin;
 
-    // Baris pengurang: hanya tampilkan yang nilainya ada, agar tidak ramai.
-    function kurang(label, nilai, ket) {
-      if (!nilai) return '';
-      return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid rgba(0,0,0,.06);">' +
-          '<div><div style="font-size:12px;">− ' + label + '</div>' +
+    // Sanding dana kelompok dengan kewajiban rutin: cukup atau kurang.
+    var sisaWajib = rt ? Number(rt.sisaPerkiraan) || 0 : 0;
+    var setelahWajib = Number(r.milikKelompok) - sisaWajib;
+    var kurang = setelahWajib < 0;
+
+    function garis(lbl, nilai, ket, warna, tebal) {
+      return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid rgba(0,0,0,.06);">' +
+          '<div><div style="font-size:12px;' + (tebal ? 'font-weight:700;' : '') + '">' + lbl + '</div>' +
             (ket ? '<div style="font-size:10px;color:var(--text-muted);">' + ket + '</div>' : '') + '</div>' +
-          '<div style="font-weight:700;font-size:12px;white-space:nowrap;">' + fn(nilai) + '</div>' +
+          '<div style="font-weight:' + (tebal ? '800' : '700') + ';font-size:12px;white-space:nowrap;' +
+            (warna ? 'color:' + warna + ';' : '') + '">' + fn(nilai) + '</div>' +
         '</div>';
     }
 
-    var sumber = (r.sumberKelompok || []).map(function(s) {
-      return '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;font-size:11px;">' +
-          '<span style="color:var(--text-muted);">' + self.escapeHtml(s.jenis) + '</span>' +
-          '<span style="font-weight:600;">' + fn(s.nilai) + '</span>' +
-        '</div>';
-    }).join('');
-    var blokSumber = sumber
-      ? '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed rgba(0,0,0,.14);">' +
-          '<div style="font-size:11px;font-weight:700;color:var(--np-deep, #1F5D4C);margin-bottom:2px;">Hak kelompok periode ini ' + fn(r.hakKelompokPeriode) + '</div>' +
-          sumber +
+    // Grafik batang: (1) progres pembayaran kewajiban, (2) daya tutup dana kelompok.
+    function bar(isiPersen, warna, latar) {
+      return '<div style="height:8px;border-radius:4px;background:' + (latar || '#e6ece9') + ';overflow:hidden;margin-top:4px;">' +
+        '<div style="height:100%;width:' + Math.max(0, Math.min(100, isiPersen)) + '%;background:' + warna + ';"></div></div>';
+    }
+    var pctBayar = (rt && rt.totalPrediksi > 0) ? Math.round(rt.totalRealisasi / rt.totalPrediksi * 100) : 0;
+    // Daya tutup: berapa persen kewajiban yang BELUM dibayar sanggup ditutup dana kelompok.
+    var pctTutup = sisaWajib > 0
+      ? Math.max(0, Math.round(Number(r.milikKelompok) / sisaWajib * 100))
+      : 100;
+
+    var grafik = rt
+      ? '<div style="margin:10px 0 4px;">' +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;">' +
+            '<span style="color:var(--text-muted);">Kewajiban terbayar</span>' +
+            '<span style="font-weight:700;">' + pctBayar + '%</span></div>' +
+          bar(pctBayar, 'var(--np-mid, #2F8F6F)') +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:8px;">' +
+            '<span style="color:var(--text-muted);">Daya tutup dana kelompok</span>' +
+            '<span style="font-weight:700;color:' + (kurang ? '#B91C1C' : 'var(--np-mid, #2F8F6F)') + ';">' +
+              (pctTutup >= 100 ? '100%+' : pctTutup + '%') + '</span></div>' +
+          bar(pctTutup, kurang ? '#B91C1C' : 'var(--np-mid, #2F8F6F)', kurang ? '#FEE2E2' : '#e6ece9') +
         '</div>'
       : '';
 
+    var blokWajib = rt
+      ? grafik +
+        garis('Kewajiban rutin bulan ini', rt.totalPrediksi, rt.jumlahPos + ' pos terdaftar') +
+        garis('Sudah dibayar', rt.totalRealisasi, 'dana yang telah dikeluarkan', 'var(--np-mid, #2F8F6F)') +
+        garis('Belum dibayar', sisaWajib, rt.belumBayar + ' pos menunggu', 'var(--np-gold, #B7893F)') +
+        '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0 2px;margin-top:4px;border-top:2px solid rgba(0,0,0,.12);">' +
+          '<div style="font-size:12px;font-weight:800;">' + (kurang ? 'Kurang untuk menutup' : 'Sisa setelah kewajiban') + '</div>' +
+          '<div style="font-weight:800;font-size:14px;white-space:nowrap;color:' +
+            (kurang ? '#B91C1C' : 'var(--np-mid, #2F8F6F)') + ';">' + fn(Math.abs(setelahWajib)) + '</div>' +
+        '</div>' +
+        (kurang
+          ? '<div style="font-size:11px;color:#B91C1C;background:#FEE2E2;border-radius:6px;padding:6px 8px;margin-top:8px;">' +
+            '\u26a0 Dana kelompok tidak cukup menutup kewajiban rutin bulan ini. Perlu tambahan pemasukan atau penjadwalan ulang.</div>'
+          : '')
+      : '<div style="font-size:11px;color:var(--text-muted);padding:8px 0 2px;border-top:1px solid rgba(0,0,0,.06);">' +
+        'Belum ada pengeluaran rutin yang didaftarkan, jadi belum ada pembanding kewajiban.</div>';
+
     var catatanNeg = neg
       ? '<div style="font-size:11px;color:#B91C1C;background:#FEE2E2;border-radius:6px;padding:6px 8px;margin-top:10px;">' +
-        '⚠ Nilainya minus — kas yang ada belum cukup menutup titipan desa/daerah. Jangan dipakai belanja sebelum setoran beres.</div>'
+        '\u26a0 Nilainya minus \u2014 kas yang ada belum cukup menutup titipan desa/daerah. Jangan dipakai belanja sebelum setoran beres.</div>'
       : '';
 
     el.innerHTML = '<div class="card" style="cursor:pointer;border-left:4px solid ' + (neg ? '#B91C1C' : 'var(--np-mid, #2F8F6F)') + ';" onclick="App.pageKepemilikan()">' +
         '<div style="font-size:12px;color:var(--text-muted);">Boleh dipakai kelompok</div>' +
         '<div style="font-size:26px;font-weight:800;color:' + (neg ? '#B91C1C' : 'var(--np-deep, #1F5D4C)') + ';margin:2px 0 8px;">' + fn(r.milikKelompok) + '</div>' +
-        '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;">' +
-          '<span style="color:var(--text-muted);">Total Kas</span><span style="font-weight:700;">' + fn(r.totalKas) + '</span>' +
-        '</div>' +
-        kurang('Titipan Desa', r.milikDesa, 'kewajiban setor yang belum dibayar') +
-        kurang('Titipan Daerah', r.milikDaerah, 'infak daerah belum disetor') +
-        kurang('Buku IR belum dirinci', r.belumDirinci, 'haknya belum diketahui') +
-        kurang('Titipan jamaah', r.titipanJamaah, 'mis. Qurban — dikumpulkan sampai diwujudkan') +
-        blokSumber + catatanNeg +
+        blokWajib + catatanNeg +
         '<div style="margin-top:10px;font-size:11px;color:var(--np-mid, #2F8F6F);font-weight:700;">Lihat rincian hak kelompok, desa &amp; daerah →</div>' +
       '</div>';
   },
