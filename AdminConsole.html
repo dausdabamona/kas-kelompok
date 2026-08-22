@@ -1016,6 +1016,100 @@
   // ── Panel: Dana Kelompok vs Kewajiban ──
   // Menggantikan grafik arus kas. Menjawab satu pertanyaan: dana yang boleh
   // dipakai kelompok cukup atau tidak untuk menutup kewajiban rutin bulan ini.
+  // ── Perbaiki salah input (siapa pun pembuatnya) ──
+  // Memakai endpoint yang sudah ada: updateTransaksi (ubah) & deleteTransaksi
+  // (soft delete, alasan wajib). Server tetap menegakkan izin trx.edit.tunai /
+  // trx.edit.bank dan menolak transaksi dari periode yang sudah ditutup.
+  var BUKU = {}, TRX_JENIS = { masuk: [], keluar: [] };
+
+  function editTrx(id) {
+    var t = BUKU[id];
+    if (!t) { alert('Data transaksi tidak ditemukan. Muat ulang dashboard.'); return; }
+    var tipe = t.tipe || (t.arah === 'in' ? 'masuk' : 'keluar');
+    if (TRX_JENIS[tipe].length) { gambarFormTrx(t, tipe); return; }
+    call(tipe === 'masuk' ? 'getMasterPemasukan' : 'getMasterPengeluaran', [], function(r) {
+      if (r && r.success) TRX_JENIS[tipe] = (r.data || []).filter(function(j) {
+        return String(j.status || 'Aktif').toLowerCase() !== 'nonaktif';
+      });
+      gambarFormTrx(t, tipe);
+    });
+  }
+
+  function gambarFormTrx(t, tipe) {
+    function fld(lbl, key, tipeInput, nilai, ket) {
+      return '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">' + lbl + '</label>' +
+        '<input id="trx_' + key + '" type="' + tipeInput + '" value="' + esc(String(nilai == null ? '' : nilai)) + '" ' +
+        'style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' +
+        (ket ? '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">' + ket + '</div>' : '') + '</div>';
+    }
+    var opsiJenis = TRX_JENIS[tipe].map(function(j) {
+      var kode = String(j.kode || j.id || '');
+      return '<option value="' + esc(kode) + '"' + (kode === String(t.jenisId) ? ' selected' : '') + '>' + esc(j.nama || kode) + '</option>';
+    }).join('');
+    function opsiKas(v) { return '<option value="' + v + '"' + (String(t.sumber) === v ? ' selected' : '') + '>' + v + '</option>'; }
+
+    var html = '<div style="position:fixed;inset:0;background:rgba(24,61,51,.45);display:grid;place-items:center;z-index:80;padding:20px;" onclick="if(event.target===this)tutupTrx()">' +
+      '<div style="background:#fff;border-radius:16px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:22px;box-shadow:var(--shadow-lg);">' +
+        '<h3 style="margin:0 0 4px;font-size:18px;font-weight:600;">Perbaiki Transaksi</h3>' +
+        '<p style="margin:0 0 14px;font-size:12px;color:var(--text-muted);">' +
+          (tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran') + ' · dicatat oleh <b>' + esc(t.oleh) + '</b> · ' + esc(t.tgl) + '</p>' +
+        '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">Jenis</label>' +
+          '<select id="trx_jenisId" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' + opsiJenis + '</select></div>' +
+        fld('Tanggal', 'tanggal', 'date', t.tgl) +
+        fld('Nominal (Rp)', 'nominal', 'number', t.nominal) +
+        '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">Sumber Kas</label>' +
+          '<select id="trx_sumberKas" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' + opsiKas('Tunai') + opsiKas('Bank') + '</select></div>' +
+        fld('Catatan', 'catatan', 'text', t.catatan || '') +
+        '<div id="trxErr" style="color:var(--g-gold);font-size:13px;margin-bottom:10px;"></div>' +
+        '<p style="font-size:11px;color:var(--text-muted);margin:0 0 12px;">Perubahan dan pembatalan dicatat di Activity Log lengkap dengan nilai lamanya. Transaksi dari periode yang sudah ditutup akan ditolak.</p>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+          '<button class="abtn" onclick="tutupTrx()">Batal</button>' +
+          '<button class="abtn danger" onclick="batalkanTrx(\'' + esc(String(t.id)).replace(/'/g, "\\'") + '\')">Batalkan Transaksi</button>' +
+          '<button class="qbtn primary" onclick="simpanTrx(\'' + esc(String(t.id)).replace(/'/g, "\\'") + '\')">Simpan Perbaikan</button>' +
+        '</div>' +
+      '</div></div>';
+    var host = document.getElementById('trxModal');
+    if (!host) { host = document.createElement('div'); host.id = 'trxModal'; document.body.appendChild(host); }
+    host.innerHTML = html;
+  }
+  function tutupTrx() { var m = document.getElementById('trxModal'); if (m) m.innerHTML = ''; }
+  function valTrx(k) { var el = document.getElementById('trx_' + k); return el ? el.value : ''; }
+
+  function simpanTrx(id) {
+    var t = BUKU[id]; if (!t) return;
+    var err = document.getElementById('trxErr');
+    var data = {
+      id: id, tipe: t.tipe || (t.arah === 'in' ? 'masuk' : 'keluar'),
+      jenisId: valTrx('jenisId'), tanggal: valTrx('tanggal'),
+      nominal: Number(valTrx('nominal')) || 0, sumberKas: valTrx('sumberKas'),
+      anggotaId: t.anggotaId || '', catatan: valTrx('catatan')
+    };
+    if (!data.jenisId) { err.textContent = 'Jenis wajib dipilih.'; return; }
+    if (!(data.nominal > 0)) { err.textContent = 'Nominal harus lebih dari 0.'; return; }
+    err.textContent = 'Menyimpan…';
+    call('updateTransaksi', [data], function(r) {
+      if (r && r.success) { tutupTrx(); go('dashboard'); }
+      else err.textContent = (r && r.message) || 'Gagal menyimpan.';
+    });
+  }
+
+  function batalkanTrx(id) {
+    var t = BUKU[id]; if (!t) return;
+    var alasan = prompt('Alasan membatalkan transaksi ini? (wajib, tercatat di log)');
+    if (alasan === null) return;
+    if (!String(alasan).trim()) { alert('Alasan wajib diisi.'); return; }
+    var err = document.getElementById('trxErr');
+    if (err) err.textContent = 'Membatalkan…';
+    call('deleteTransaksi', [{
+      id: id, tipe: t.tipe || (t.arah === 'in' ? 'masuk' : 'keluar'),
+      sumberKas: valTrx('sumberKas') || t.sumber, alasan: alasan
+    }], function(r) {
+      if (r && r.success) { tutupTrx(); go('dashboard'); }
+      else if (err) err.textContent = (r && r.message) || 'Gagal membatalkan.';
+      else alert((r && r.message) || 'Gagal membatalkan.');
+    });
+  }
+
   function panelDana(dana) {
     // Catatan: --danger pada konsol ini bernilai emas (#B7893F), warna yang sama
     // dengan 'belum dibayar'. Untuk keadaan kekurangan dana dipakai merah tegas
@@ -1105,17 +1199,24 @@
       + '<div class="kpi-foot"><span class="kpi-delta flat">periode berjalan</span></div></div>';
 
     // ── Buku besar ──
+    BUKU = {};
     var rows = (d.bukuBesar || []).map(function(t) {
+      if (t.id) BUKU[t.id] = t;
       var chipCls = String(t.sumber).toLowerCase() === 'bank' ? 'bank' : 'tunai';
       var sign = t.arah === 'in' ? '+' : '−';
+      var idJs = esc(String(t.id || '')).replace(/'/g, "\\'");
+      var aksi = t.id
+        ? '<button class="abtn" onclick="editTrx(\'' + idJs + '\')">✏️ Perbaiki</button>'
+        : '<span style="color:var(--text-muted);font-size:11px;">—</span>';
       return '<tr><td class="t-date">' + esc(t.tgl) + '</td>'
         + '<td class="t-jenis">' + esc(t.jenis) + '</td>'
         + '<td class="t-name">' + esc(t.nama || '—') + '</td>'
         + '<td><span class="chip ' + chipCls + '"><span class="d"></span>' + esc(t.sumber) + '</span></td>'
-        + '<td class="r amt ' + t.arah + '">' + sign + Number(t.nominal).toLocaleString('id-ID') + '</td>'
-        + '<td><span class="t-oleh"><span class="av">' + esc(initials(t.oleh)) + '</span>' + esc(t.oleh) + '</span></td></tr>';
+        + '<td class="r amt ' + t.arah + '" style="padding-right:18px;">' + sign + Number(t.nominal).toLocaleString('id-ID') + '</td>'
+        + '<td><span class="t-oleh"><span class="av">' + esc(initials(t.oleh)) + '</span>' + esc(t.oleh) + '</span></td>'
+        + '<td>' + aksi + '</td></tr>';
     }).join('');
-    var bukuBody = rows || '<tr><td colspan="6"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>';
+    var bukuBody = rows || '<tr><td colspan="7"><div class="empty">Belum ada transaksi pada periode ini.</div></td></tr>';
 
     // ── Perlu tindakan ──
     var acts = [];
@@ -1151,7 +1252,7 @@
       + '<div class="grid-main"><div class="stack">'
         + panelDana(d.dana)
         + '<div class="panel"><div class="panel-head"><div class="panel-title">Buku Besar <small>transaksi periode berjalan</small></div></div>'
-          + '<div style="overflow-x:auto;"><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Anggota / Ket.</th><th>Sumber</th><th class="r">Nominal</th><th>Oleh</th></tr></thead><tbody>' + bukuBody + '</tbody></table></div>'
+          + '<div style="overflow-x:auto;"><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Anggota / Ket.</th><th>Sumber</th><th class="r" style="padding-right:18px;">Nominal</th><th>Oleh</th><th>Aksi</th></tr></thead><tbody>' + bukuBody + '</tbody></table></div>'
           + '<div class="table-foot"><span>Menampilkan ' + (d.bukuBesar||[]).length + ' dari ' + ((d.periode && d.periode.transaksi) || 0) + ' transaksi</span></div></div>'
       + '</div>'
       + '<div class="rail">'

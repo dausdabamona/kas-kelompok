@@ -1991,7 +1991,10 @@ function getAdminConsole() {
         trx.push({ tgl: tgl, ym: tgl.substring(0, 7), jenis: namaMasuk[jid] || 'Pemasukan', kat: katMasuk[jid] || 'Umum',
           nama: namaAnggota[aid] || '', sumber: String(hGet_(rin[i], hin, 'sumberkas', 6) || 'Tunai'),
           nominal: Number(hGet_(rin[i], hin, 'nominal', 5)) || 0, arah: 'in', oleh: namaUser[email] || email,
-          periodeId: String(hGet_(rin[i], hin, 'periodeid', 1) || '') });
+          periodeId: String(hGet_(rin[i], hin, 'periodeid', 1) || ''),
+          // Dibawa agar Buku Besar bisa dipakai memperbaiki salah input siapa pun.
+          id: String(hGet_(rin[i], hin, 'id', 0)), tipe: 'masuk', jenisId: jid,
+          anggotaId: String(aid || ''), catatan: String(hGet_(rin[i], hin, 'catatan', 7) || '') });
       }
     }
     var shOut = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
@@ -2006,7 +2009,9 @@ function getAdminConsole() {
         trx.push({ tgl: tgl2, ym: tgl2.substring(0, 7), jenis: namaKeluar[jid2] || 'Pengeluaran', kat: 'Umum',
           nama: String(hGet_(rout[i], hout, 'catatan', 6) || ''), sumber: String(hGet_(rout[i], hout, 'sumberkas', 5) || 'Tunai'),
           nominal: Number(hGet_(rout[i], hout, 'nominal', 4)) || 0, arah: 'out', oleh: namaUser[email2] || email2,
-          periodeId: String(hGet_(rout[i], hout, 'periodeid', 1) || '') });
+          periodeId: String(hGet_(rout[i], hout, 'periodeid', 1) || ''),
+          id: String(hGet_(rout[i], hout, 'id', 0)), tipe: 'keluar', jenisId: jid2,
+          anggotaId: '', catatan: String(hGet_(rout[i], hout, 'catatan', 6) || '') });
       }
     }
 
@@ -2024,7 +2029,7 @@ function getAdminConsole() {
     // Buku besar: transaksi periode berjalan terbaru (maks 12)
     var bukuBesar = trx.filter(function(t) { return !periodeId || t.periodeId === periodeId; })
       .sort(function(a, b) { return a.tgl < b.tgl ? 1 : (a.tgl > b.tgl ? -1 : 0); })
-      .slice(0, 12);
+      .slice(0, 25);
     var trxCountPeriode = trx.filter(function(t) { return !periodeId || t.periodeId === periodeId; }).length;
 
     // Komposisi pemasukan (per jenis, periode berjalan) → persentase
