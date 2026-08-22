@@ -6438,3 +6438,105 @@ function nonaktifkanPengeluaranRutin(id, alasan) {
     return { success: false, message: e.message };
   }
 }
+
+// ══════════════════════════════════════════════════════
+// SEMUA TRANSAKSI (mobile) — untuk memperbaiki salah input siapa pun.
+// Berbeda dari getRiwayatTransaksiSaya yang hanya menampilkan buatan sendiri.
+// Hanya boleh diakses yang berwenang mengubah transaksi; tombol per baris
+// tetap disaring menurut sumber kas (Tunai/Bank) di klien, dan server
+// menegakkan ulang izinnya saat updateTransaksi/deleteTransaksi dipanggil.
+// ══════════════════════════════════════════════════════
+function getSemuaTransaksi(periodeId) {
+  return withSheetCache_(function() { return _getSemuaTransaksi_(periodeId); });
+}
+
+function _getSemuaTransaksi_(periodeId) {
+  try {
+    var auth = checkAuth();
+    if (!auth.success) return { success: false, message: auth.message };
+    var bolehTunai = userCan_(auth.user.role, 'trx.edit.tunai');
+    var bolehBank = userCan_(auth.user.role, 'trx.edit.bank');
+    if (!bolehTunai && !bolehBank) return { success: false, message: 'Akses ditolak' };
+
+    var periode = periodeId ? getPeriodeById_(periodeId) : getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode untuk ditampilkan.' };
+    var pid = String(periode.id);
+
+    // Nama jenis & jamaah.
+    var namaMasuk = {}, namaKeluar = {}, namaAnggota = {};
+    var mp = sheetValues_(CONFIG.SHEETS.PEMASUKAN);
+    for (var a = 1; a < mp.length; a++) if (mp[a][0]) namaMasuk[String(mp[a][0])] = String(mp[a][1] || '');
+    var mk = sheetValues_(CONFIG.SHEETS.PENGELUARAN);
+    for (var b = 1; b < mk.length; b++) if (mk[b][0]) namaKeluar[String(mk[b][0])] = String(mk[b][1] || '');
+    var ang = sheetValues_(CONFIG.SHEETS.ANGGOTA);
+    for (var c = 1; c < ang.length; c++) if (ang[c][0]) namaAnggota[String(ang[c][0])] = String(ang[c][1] || '');
+    var namaUser = {};
+    try { getUserList_().forEach(function(u) { namaUser[String(u.email).toLowerCase()] = u.nama || u.email; }); } catch(e) {}
+
+    var list = [];
+
+    var rin = sheetValues_(CONFIG.SHEETS.INPUT_PENERIMAAN);
+    if (rin.length > 1) {
+      var hin = headerMap_(rin[0]);
+      for (var i = 1; i < rin.length; i++) {
+        if (!hGet_(rin[i], hin, 'id', 0)) continue;
+        if (String(hGet_(rin[i], hin, 'periodeid', 1)) !== pid) continue;
+        if (barisDibatalkan_(rin[i], hin)) continue;
+        var jid = String(hGet_(rin[i], hin, 'jenisid', 2) || '');
+        var aid = String(hGet_(rin[i], hin, 'anggotaid', 3) || '');
+        var em = String(hGet_(rin[i], hin, 'createdby', 8) || '');
+        list.push({
+          id: String(hGet_(rin[i], hin, 'id', 0)), tipe: 'masuk',
+          jenisId: jid, jenis: namaMasuk[jid] || jid || 'Pemasukan',
+          anggotaId: aid, anggota: namaAnggota[aid] || '',
+          tanggal: toDateStr_(hGet_(rin[i], hin, 'tanggal', 4)),
+          nominal: Number(hGet_(rin[i], hin, 'nominal', 5)) || 0,
+          sumberKas: String(hGet_(rin[i], hin, 'sumberkas', 6) || ''),
+          catatan: String(hGet_(rin[i], hin, 'catatan', 7) || ''),
+          oleh: namaUser[em.toLowerCase()] || em,
+          milikSaya: emailSama_(em, auth.user.email)
+        });
+      }
+    }
+
+    var rout = sheetValues_(CONFIG.SHEETS.INPUT_PENGELUARAN);
+    if (rout.length > 1) {
+      var hout = headerMap_(rout[0]);
+      for (var j = 1; j < rout.length; j++) {
+        if (!hGet_(rout[j], hout, 'id', 0)) continue;
+        if (String(hGet_(rout[j], hout, 'periodeid', 1)) !== pid) continue;
+        if (barisDibatalkan_(rout[j], hout)) continue;
+        var jid2 = String(hGet_(rout[j], hout, 'jenisid', 2) || '');
+        var em2 = String(hGet_(rout[j], hout, 'createdby', 7) || '');
+        list.push({
+          id: String(hGet_(rout[j], hout, 'id', 0)), tipe: 'keluar',
+          jenisId: jid2, jenis: namaKeluar[jid2] || jid2 || 'Pengeluaran',
+          anggotaId: '', anggota: '',
+          tanggal: toDateStr_(hGet_(rout[j], hout, 'tanggal', 3)),
+          nominal: Number(hGet_(rout[j], hout, 'nominal', 4)) || 0,
+          sumberKas: String(hGet_(rout[j], hout, 'sumberkas', 5) || ''),
+          catatan: String(hGet_(rout[j], hout, 'catatan', 6) || ''),
+          oleh: namaUser[em2.toLowerCase()] || em2,
+          draft: barisDraft_(rout[j], hout),
+          milikSaya: emailSama_(em2, auth.user.email)
+        });
+      }
+    }
+
+    // Terbaru di atas — salah input biasanya baru saja terjadi.
+    list.sort(function(x, y) {
+      if (x.tanggal !== y.tanggal) return String(y.tanggal).localeCompare(String(x.tanggal));
+      return String(y.id).localeCompare(String(x.id));
+    });
+
+    return {
+      success: true,
+      periode: { id: pid, nama: periode.nama, status: periode.status },
+      periodeOpen: String(periode.status).toUpperCase() === CONFIG.STATUS.OPEN,
+      bolehTunai: bolehTunai, bolehBank: bolehBank,
+      data: list
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}

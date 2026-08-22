@@ -814,6 +814,7 @@ var App = {
       kelolaBuku: (!isPenerobos && App.can('view.kelolaBuku')) ? '<div class="menu-item" onclick="App.pageKelolaBuku()"><span class="icon">📊</span><span>Kelola Buku</span></div>' : '',
       pemeriksaanSaldo: (!isPenerobos && App.can('view.pemeriksaanSaldo')) ? '<div class="menu-item" onclick="App.pagePemeriksaanSaldo()"><span class="icon">🧮</span><span>Pemeriksaan Saldo</span></div>' : '',
       // Rincian hak kelompok/desa/daerah — keputusan belanja ada di tangan mereka.
+      semuaTrx: (App.can('trx.edit.tunai') || App.can('trx.edit.bank')) ? '<div class="menu-item" onclick="App.pageSemuaTransaksi()"><span class="icon">🧾</span><span>Semua Transaksi</span></div>' : '',
       rutin: App.can('view.rutin') ? '<div class="menu-item" onclick="App.pagePengeluaranRutin()"><span class="icon">🔁</span><span>Pengeluaran Rutin</span></div>' : '',
       kepemilikan: (App.currentUser && (App.currentUser.role === 'ADMIN' || App.currentUser.role === 'BENDAHARA_1')) ? '<div class="menu-item" onclick="App.pageKepemilikan()"><span class="icon">⚖️</span><span>Kepemilikan Saldo</span></div>' : '',
       kasPenerobos: App.can('view.kasPenerobos') ? '<div class="menu-item" onclick="App.pageKasPenerobos()"><span class="icon">💼</span><span>Kas Penerobos</span></div>' : '',
@@ -828,7 +829,7 @@ var App = {
     };
     var groups = [
       { judul: '⚡ Sering Dipakai', items: [item.bukuIR, item.terobosan, item.jamaah, item.pantauIR] },
-      { judul: '💰 Keuangan', items: [item.kepemilikan, item.rutin, item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
+      { judul: '💰 Keuangan', items: [item.semuaTrx, item.kepemilikan, item.rutin, item.kelolaBuku, item.pemeriksaanSaldo, item.kasPenerobos, item.serahTerima, item.setoranDesa] },
       { judul: '📄 Laporan', items: [item.laporanSetoran, item.laporanPDF, item.periode] },
       { judul: '⚙️ Admin', items: [item.setting, item.kelolaPerangkat, item.kelolaPenerobos] }
     ];
@@ -1378,6 +1379,96 @@ var App = {
     document.getElementById('app').innerHTML = html;
   },
 
+  // ── SEMUA TRANSAKSI — perbaiki salah input siapa pun ──
+  // Berbeda dari "Riwayat Transaksi Saya" yang hanya menampilkan buatan sendiri.
+  pageSemuaTransaksi: function() {
+    var self = this;
+    self.history.push('dashboard');
+    self.showLoading('Memuat transaksi periode ini…');
+    App.srv()
+      .withSuccessHandler(function(r) { if (r && r.success) self.renderSemuaTransaksi(r); else self.showError((r && r.message) || 'Gagal memuat'); })
+      .withFailureHandler(function(e) { self.showError((e && e.message) || 'Gagal terhubung'); })
+      .getSemuaTransaksi(null);
+  },
+
+  renderSemuaTransaksi: function(res) {
+    var self = this;
+    var data = res.data || [];
+    self._semuaTrx = res;
+
+    // Alur ubah/batal memakai fungsi yang sudah ada (editTrx / hapusTrx).
+    App._editTrxReturn = 'semua';
+    App._editTrxMap = App._editTrxMap || {};
+    data.forEach(function(t) {
+      App._editTrxMap[t.id] = { tipe: t.tipe, sumber: t.sumberKas, jenisId: t.jenisId, jenis: t.jenis,
+        anggotaId: t.anggotaId || '', tanggal: t.tanggal, nominal: t.nominal, catatan: t.catatan };
+    });
+
+    var q = String(self._cariTrx || '').toLowerCase();
+    var tampil = q
+      ? data.filter(function(t) {
+          return (t.jenis + ' ' + (t.anggota || '') + ' ' + (t.catatan || '') + ' ' + t.oleh + ' ' + t.nominal)
+            .toLowerCase().indexOf(q) !== -1;
+        })
+      : data;
+
+    var kartu = tampil.map(function(t) {
+      var masuk = (t.tipe === 'masuk');
+      var warna = masuk ? 'var(--np-mid, #2F8F6F)' : '#B45309';
+      // Izin per baris mengikuti sumber kas — sama seperti yang ditegakkan server.
+      var boleh = (String(t.sumberKas) === 'Tunai') ? res.bolehTunai : res.bolehBank;
+      var idJs = String(t.id).replace(/'/g, '&#39;');
+      var aksi = (res.periodeOpen && boleh)
+        ? '<div style="display:flex;gap:8px;margin-top:9px;">' +
+            '<button class="btn btn-sm btn-outline" style="flex:1;" onclick="App.editTrx(\'' + idJs + '\')">✏️ Ubah</button>' +
+            '<button class="btn btn-sm btn-outline" style="flex:1;border-color:#B91C1C;color:#B91C1C;" onclick="App.hapusTrx(\'' + idJs + '\')">Batalkan</button>' +
+          '</div>'
+        : '<div style="font-size:11px;color:var(--text-muted);margin-top:7px;">' +
+            (!res.periodeOpen ? 'Periode sudah ditutup — tidak bisa diubah.' : 'Anda tidak berwenang mengubah transaksi ' + self.escapeHtml(t.sumberKas) + '.') +
+          '</div>';
+
+      return '<div class="card" style="margin-bottom:10px;border-left:3px solid ' + warna + ';">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">' +
+            '<div style="font-weight:700;">' + self.escapeHtml(t.jenis) + '</div>' +
+            '<div style="font-weight:800;color:' + warna + ';white-space:nowrap;">' +
+              (masuk ? '+' : '−') + self.formatNumber(t.nominal) + '</div>' +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' +
+            self.escapeHtml(t.tanggal) + ' · ' + self.escapeHtml(t.sumberKas) +
+            (t.anggota ? ' · ' + self.escapeHtml(t.anggota) : '') +
+            (t.draft ? ' · <span style="color:#B45309;font-weight:700;">menunggu persetujuan</span>' : '') +
+          '</div>' +
+          (t.catatan ? '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">' + self.escapeHtml(t.catatan) + '</div>' : '') +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Dicatat oleh <b>' + self.escapeHtml(t.oleh) + '</b>' +
+            (t.milikSaya ? ' (Anda)' : '') + '</div>' +
+          aksi +
+        '</div>';
+    }).join('') || '<div class="info-box">Tidak ada transaksi yang cocok.</div>';
+
+    var cari = '<div class="form-group" style="margin-bottom:12px;">' +
+      '<input type="text" id="cariTrx" placeholder="Cari jenis, jamaah, catatan, pencatat…" value="' +
+        self.escapeHtml(self._cariTrx || '') + '" oninput="App._filterSemuaTrx(this.value)"/></div>';
+
+    var info = '<div class="info-box" style="margin-bottom:12px;">Menampilkan seluruh transaksi periode ini, termasuk yang dicatat orang lain. ' +
+      'Pembatalan tidak menghapus data — hanya ditandai Dibatalkan, alasan wajib, dan tercatat di log.</div>';
+
+    document.getElementById('app').innerHTML = this.pageWrapper(
+      'Semua Transaksi' + (res.periode ? ' · ' + res.periode.nama : ''),
+      cari + info + '<div class="text-small text-muted mb-8">' + tampil.length + ' dari ' + data.length + ' transaksi</div>' + kartu);
+  },
+
+  // Saring di klien agar tidak bolak-balik ke server saat mengetik.
+  _filterSemuaTrx: function(v) {
+    this._cariTrx = v;
+    var posisi = null;
+    try { var el = document.getElementById('cariTrx'); posisi = el ? el.selectionStart : null; } catch(e) {}
+    if (this._semuaTrx) this.renderSemuaTransaksi(this._semuaTrx);
+    try {
+      var el2 = document.getElementById('cariTrx');
+      if (el2) { el2.focus(); if (posisi != null) el2.setSelectionRange(posisi, posisi); }
+    } catch(e) {}
+  },
+
   // ── PENGELUARAN RUTIN — perkiraan bulan ini vs realisasi ──
   // Melaporkan saja: tidak ada transaksi yang dibuat otomatis dari sini.
   pagePengeluaranRutin: function() {
@@ -1847,7 +1938,8 @@ var App = {
 
   // Setelah edit/hapus, kembali ke halaman asal (Rekap atau Riwayat).
   _afterTrxChange: function() {
-    if (App._editTrxReturn === 'riwayat') this.pageRiwayatSaya();
+    if (App._editTrxReturn === 'semua') this.pageSemuaTransaksi();
+    else if (App._editTrxReturn === 'riwayat') this.pageRiwayatSaya();
     else this.pageRekapitulasi();
   },
 
