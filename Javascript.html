@@ -1953,22 +1953,51 @@ var App = {
     App.srv()
       .withSuccessHandler(function(res) {
         if (!res.success) { self.showError(res.message); return; }
-        self._renderEditTrxModal(trx, res.data || []);
+        var master = res.data || [];
+        // Pemasukan: nama jamaah ikut bisa diperbaiki, jadi daftarnya perlu dimuat.
+        if (trx.tipe !== 'masuk') { self._renderEditTrxModal(trx, master, []); return; }
+        App.srv()
+          .withSuccessHandler(function(ra) {
+            var ang = (ra && ra.success) ? (ra.data || []) : [];
+            ang.sort(function(a, b) { return String(a.nama || '').localeCompare(String(b.nama || '')); });
+            self._renderEditTrxModal(trx, master, ang);
+          })
+          .withFailureHandler(function() { self._renderEditTrxModal(trx, master, []); })
+          .getAnggota();
       })
       .withFailureHandler(function(e) { self.showError(e.message); })
       [masterFn]();
   },
 
-  _renderEditTrxModal: function(trx, masterList) {
+  _renderEditTrxModal: function(trx, masterList, anggotaList) {
     var jenisopts = masterList.map(function(m) {
       return '<option value="' + m.id + '"' + (m.id === trx.jenisId ? ' selected' : '') + '>' + App.escapeHtml(m.nama) + '</option>';
     }).join('');
     var label = trx.tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran';
+
+    // Pemasukan: jamaah bisa diganti, atau ditambahkan bila namanya belum ada.
     var anggotaField = '';
-    // For 'masuk' (pemasukan) show anggota ID field only if needed — kept simple as text
+    if (trx.tipe === 'masuk') {
+      var opsiAng = (anggotaList || []).map(function(a) {
+        return '<option value="' + App.escapeHtml(String(a.id)) + '"' +
+          (String(a.id) === String(trx.anggotaId || '') ? ' selected' : '') + '>' + App.escapeHtml(a.nama) + '</option>';
+      }).join('');
+      anggotaField =
+        '<div class="form-group"><label>Jamaah</label>' +
+          '<select id="etAnggotaId" class="form-control" onchange="App._etToggleJamaah()">' +
+            '<option value="">— tanpa jamaah / umum —</option>' + opsiAng +
+            '<option value="__baru__">➕ Tambah jamaah baru…</option>' +
+          '</select>' +
+          '<div id="etBoxJamaahBaru" style="display:none;margin-top:8px;">' +
+            '<input type="text" id="etNamaBaru" class="form-control" placeholder="Nama jamaah baru">' +
+            '<div class="text-small text-muted" style="margin-top:4px;">Ditambahkan ke daftar Anggota dengan nilai acuan setoran 0 — lengkapi kemudian lewat menu Jamaah.</div>' +
+          '</div>' +
+        '</div>';
+    }
     var modal = '<div class="modal-overlay" id="editTrxOverlay" onclick="if(event.target===this)this.remove()">' +
       '<div class="modal">' +
         '<h3 class="modal-title">Edit ' + label + '</h3>' +
+        anggotaField +
         '<div class="form-group"><label>Jenis</label>' +
           '<select id="etJenisId" class="form-control"><option value="">-- Pilih --</option>' + jenisopts + '</select>' +
         '</div>' +
@@ -1986,7 +2015,7 @@ var App = {
         '</div>' +
         '<input type="hidden" id="etId" value="' + trx.id + '">' +
         '<input type="hidden" id="etTipe" value="' + trx.tipe + '">' +
-        '<input type="hidden" id="etAnggotaId" value="' + (trx.anggotaId || '') + '">' +
+        (trx.tipe === 'masuk' ? '' : '<input type="hidden" id="etAnggotaId" value="' + (trx.anggotaId || '') + '">') +
         '<div class="btn-group" style="margin-top:16px;">' +
           '<button class="btn btn-secondary" onclick="document.getElementById(\'editTrxOverlay\').remove()">Batal</button>' +
           '<button class="btn btn-primary" onclick="App.submitEditTrx()">Simpan</button>' +
@@ -1996,6 +2025,13 @@ var App = {
     document.body.insertAdjacentHTML('beforeend', modal);
     var nomEl = document.getElementById('etNominal');
     if (nomEl) App._formatTsep(nomEl);
+  },
+
+  _etToggleJamaah: function() {
+    var sel = document.getElementById('etAnggotaId'), box = document.getElementById('etBoxJamaahBaru');
+    if (!sel || !box) return;
+    box.style.display = (sel.value === '__baru__') ? '' : 'none';
+    if (sel.value === '__baru__') { var n = document.getElementById('etNamaBaru'); if (n) n.focus(); }
   },
 
   submitEditTrx: function() {
@@ -2009,16 +2045,38 @@ var App = {
     var anggotaId = document.getElementById('etAnggotaId').value;
     if (!jenisId) { alert('Pilih jenis terlebih dahulu'); return; }
     if (!nominal) { alert('Nominal tidak boleh 0'); return; }
+    var namaBaru = '';
+    if (anggotaId === '__baru__') {
+      var nb = document.getElementById('etNamaBaru');
+      namaBaru = nb ? String(nb.value || '').trim() : '';
+      if (!namaBaru) { alert('Nama jamaah baru wajib diisi.'); return; }
+    }
     var self = this;
-    self.showLoading('Menyimpan...');
+    self.showLoading(namaBaru ? 'Menambahkan jamaah...' : 'Menyimpan...');
     document.getElementById('editTrxOverlay').remove();
-    App.srv()
-      .withSuccessHandler(function(res) {
-        if (!res.success) { self.showError(res.message); return; }
-        self._afterTrxChange();
-      })
-      .withFailureHandler(function(e) { self.showError(e.message); })
-      .updateTransaksi({ id: id, tipe: tipe, jenisId: jenisId, tanggal: tanggal, nominal: nominal, sumberKas: sumberKas, catatan: catatan, anggotaId: anggotaId });
+
+    function simpan(aid) {
+      App.srv()
+        .withSuccessHandler(function(res) {
+          if (!res.success) { self.showError(res.message); return; }
+          self._afterTrxChange();
+        })
+        .withFailureHandler(function(e) { self.showError(e.message); })
+        .updateTransaksi({ id: id, tipe: tipe, jenisId: jenisId, tanggal: tanggal, nominal: nominal, sumberKas: sumberKas, catatan: catatan, anggotaId: aid });
+    }
+
+    // Jamaah baru dibuat dulu; ID hasilnya yang dipakai pada transaksi.
+    if (namaBaru) {
+      App.srv()
+        .withSuccessHandler(function(r) {
+          if (r && r.success && r.id) simpan(r.id);
+          else self.showError((r && r.message) || 'Gagal menambah jamaah.');
+        })
+        .withFailureHandler(function(e) { self.showError(e.message); })
+        .addAnggota({ nama: namaBaru, status: 'Aktif' });
+      return;
+    }
+    simpan(anggotaId);
   },
 
   hapusTrx: function(id) {

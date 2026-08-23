@@ -1022,17 +1022,35 @@
   // trx.edit.bank dan menolak transaksi dari periode yang sudah ditutup.
   var BUKU = {}, TRX_JENIS = { masuk: [], keluar: [] };
 
+  var TRX_ANGGOTA = [];
+
   function editTrx(id) {
     var t = BUKU[id];
     if (!t) { alert('Data transaksi tidak ditemukan. Muat ulang dashboard.'); return; }
     var tipe = t.tipe || (t.arah === 'in' ? 'masuk' : 'keluar');
-    if (TRX_JENIS[tipe].length) { gambarFormTrx(t, tipe); return; }
-    call(tipe === 'masuk' ? 'getMasterPemasukan' : 'getMasterPengeluaran', [], function(r) {
-      if (r && r.success) TRX_JENIS[tipe] = (r.data || []).filter(function(j) {
-        return String(j.status || 'Aktif').toLowerCase() !== 'nonaktif';
+    // Pemasukan perlu daftar jamaah agar nama bisa diperbaiki, bukan hanya nominal.
+    var perluAnggota = (tipe === 'masuk' && !TRX_ANGGOTA.length);
+    var perluJenis = !TRX_JENIS[tipe].length;
+    if (!perluJenis && !perluAnggota) { gambarFormTrx(t, tipe); return; }
+
+    var sisa = (perluJenis ? 1 : 0) + (perluAnggota ? 1 : 0);
+    function selesai() { if (--sisa <= 0) gambarFormTrx(t, tipe); }
+    if (perluJenis) {
+      call(tipe === 'masuk' ? 'getMasterPemasukan' : 'getMasterPengeluaran', [], function(r) {
+        if (r && r.success) TRX_JENIS[tipe] = (r.data || []).filter(function(j) {
+          return String(j.status || 'Aktif').toLowerCase() !== 'nonaktif';
+        });
+        selesai();
       });
-      gambarFormTrx(t, tipe);
-    });
+    }
+    if (perluAnggota) {
+      call('getAnggota', [], function(r) {
+        if (r && r.success) TRX_ANGGOTA = (r.data || []).slice().sort(function(a, b) {
+          return String(a.nama || '').localeCompare(String(b.nama || ''));
+        });
+        selesai();
+      });
+    }
   }
 
   function gambarFormTrx(t, tipe) {
@@ -1055,6 +1073,7 @@
           (tipe === 'masuk' ? 'Pemasukan' : 'Pengeluaran') + ' · dicatat oleh <b>' + esc(t.oleh) + '</b> · ' + esc(t.tgl) + '</p>' +
         '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">Jenis</label>' +
           '<select id="trx_jenisId" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' + opsiJenis + '</select></div>' +
+        (tipe === 'masuk' ? blokJamaah(t) : '') +
         fld('Tanggal', 'tanggal', 'date', t.tgl) +
         fld('Nominal (Rp)', 'nominal', 'number', t.nominal) +
         '<div style="margin-bottom:10px;"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">Sumber Kas</label>' +
@@ -1072,25 +1091,66 @@
     if (!host) { host = document.createElement('div'); host.id = 'trxModal'; document.body.appendChild(host); }
     host.innerHTML = html;
   }
+  // Pilihan jamaah + jalan pintas menambah nama baru bila belum terdaftar.
+  function blokJamaah(t) {
+    var opsi = TRX_ANGGOTA.map(function(a) {
+      return '<option value="' + esc(String(a.id)) + '"' + (String(a.id) === String(t.anggotaId) ? ' selected' : '') + '>' + esc(a.nama) + '</option>';
+    }).join('');
+    return '<div style="margin-bottom:10px;">' +
+      '<label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:4px;">Jamaah</label>' +
+      '<select id="trx_anggotaId" onchange="trxToggleJamaah()" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' +
+        '<option value="">— tanpa jamaah / umum —</option>' + opsi +
+        '<option value="__baru__">➕ Tambah jamaah baru…</option>' +
+      '</select>' +
+      '<div id="trx_boxJamaahBaru" style="display:none;margin-top:8px;">' +
+        '<input id="trx_namaBaru" type="text" placeholder="Nama jamaah baru" ' +
+        'style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;">' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Jamaah baru akan ditambahkan ke daftar Anggota dengan nilai acuan setoran 0 — lengkapi kemudian lewat menu Anggota.</div>' +
+      '</div></div>';
+  }
+  function trxToggleJamaah() {
+    var sel = document.getElementById('trx_anggotaId'), box = document.getElementById('trx_boxJamaahBaru');
+    if (!sel || !box) return;
+    box.style.display = (sel.value === '__baru__') ? '' : 'none';
+    if (sel.value === '__baru__') { var n = document.getElementById('trx_namaBaru'); if (n) n.focus(); }
+  }
   function tutupTrx() { var m = document.getElementById('trxModal'); if (m) m.innerHTML = ''; }
   function valTrx(k) { var el = document.getElementById('trx_' + k); return el ? el.value : ''; }
 
   function simpanTrx(id) {
     var t = BUKU[id]; if (!t) return;
     var err = document.getElementById('trxErr');
+    var tipe = t.tipe || (t.arah === 'in' ? 'masuk' : 'keluar');
     var data = {
-      id: id, tipe: t.tipe || (t.arah === 'in' ? 'masuk' : 'keluar'),
+      id: id, tipe: tipe,
       jenisId: valTrx('jenisId'), tanggal: valTrx('tanggal'),
       nominal: Number(valTrx('nominal')) || 0, sumberKas: valTrx('sumberKas'),
-      anggotaId: t.anggotaId || '', catatan: valTrx('catatan')
+      anggotaId: (tipe === 'masuk') ? valTrx('anggotaId') : (t.anggotaId || ''),
+      catatan: valTrx('catatan')
     };
     if (!data.jenisId) { err.textContent = 'Jenis wajib dipilih.'; return; }
     if (!(data.nominal > 0)) { err.textContent = 'Nominal harus lebih dari 0.'; return; }
-    err.textContent = 'Menyimpan…';
-    call('updateTransaksi', [data], function(r) {
-      if (r && r.success) { tutupTrx(); go('dashboard'); }
-      else err.textContent = (r && r.message) || 'Gagal menyimpan.';
-    });
+
+    function kirim() {
+      err.textContent = 'Menyimpan…';
+      call('updateTransaksi', [data], function(r) {
+        if (r && r.success) { tutupTrx(); TRX_ANGGOTA = []; go('dashboard'); }
+        else err.textContent = (r && r.message) || 'Gagal menyimpan.';
+      });
+    }
+
+    // Jamaah baru dibuat lebih dulu; ID hasilnya dipakai pada transaksi.
+    if (data.anggotaId === '__baru__') {
+      var nama = String(valTrx('namaBaru') || '').trim();
+      if (!nama) { err.textContent = 'Nama jamaah baru wajib diisi.'; return; }
+      err.textContent = 'Menambahkan jamaah…';
+      call('addAnggota', [{ nama: nama, status: 'Aktif' }], function(r) {
+        if (r && r.success && r.id) { data.anggotaId = r.id; kirim(); }
+        else err.textContent = (r && r.message) || 'Gagal menambah jamaah.';
+      });
+      return;
+    }
+    kirim();
   }
 
   function batalkanTrx(id) {
