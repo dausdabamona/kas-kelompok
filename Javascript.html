@@ -2519,18 +2519,27 @@ var App = {
         if (!res.success) { self.showError(res.message); return; }
         var periode = res.periode;
         var sis = res.saldoSistem || {};
+        // Tanggal tutup bawaan: akhir bulan lalu bila periode sudah melewati bulan
+        // itu (tutup buku terlambat), selain itu hari ini.
+        var tglDef = App._tglTutupDefault(res);
+        self._tbPeriode = periode;
         var html = self.pageWrapper('Tutup Buku',
           '<div class="card">' +
             '<div class="stat-row"><span class="stat-label">Periode Aktif</span><span class="stat-value">' + (periode ? periode.nama : '-') + '</span></div>' +
             '<div class="stat-row"><span class="stat-label">Tgl Mulai</span><span class="stat-value">' + (periode ? App.formatDate(periode.tanggalMulai) : '-') + '</span></div>' +
+            '<div class="form-group" style="margin-top:10px;"><label>Tanggal Tutup Buku (cut-off)</label>' +
+              '<input type="date" id="tbTglTutup" class="form-control" value="' + tglDef + '" max="' + App._hariIni() + '" onchange="App._muatPratinjauTutup()">' +
+              '<div class="text-small text-muted" style="margin-top:4px;">Transaksi bertanggal setelah tanggal ini otomatis dipindah ke periode baru.</div>' +
+            '</div>' +
           '</div>' +
-          '<div class="section-header"><span class="section-title">Saldo Sistem</span></div>' +
+          '<div class="section-header"><span class="section-title">Saldo Sistem <span id="tbPerTgl" class="text-small text-muted"></span></span></div>' +
           '<div class="card">' +
-            '<div class="stat-row"><span class="stat-label">Kas Tunai</span><span class="stat-value text-warning">' + App.formatNumber(sis.tunai || 0) + '</span></div>' +
-            '<div class="stat-row"><span class="stat-label">Kas Bank</span><span class="stat-value" style="color:var(--bank);">' + App.formatNumber(sis.bank || 0) + '</span></div>' +
-            '<div class="stat-row"><span class="stat-label">Total Kas</span><span class="stat-value font-bold">' + App.formatNumber(sis.total || 0) + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Kas Tunai</span><span class="stat-value text-warning" id="tbSisTunai">' + App.formatNumber(sis.tunai || 0) + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Kas Bank</span><span class="stat-value" style="color:var(--bank);" id="tbSisBank">' + App.formatNumber(sis.bank || 0) + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">Total Kas</span><span class="stat-value font-bold" id="tbSisTotal">' + App.formatNumber(sis.total || 0) + '</span></div>' +
           '</div>' +
-          '<div class="section-header"><span class="section-title">Saldo Aktual (Fisik)</span></div>' +
+          '<div id="tbPindahBox"></div>' +
+          '<div class="section-header"><span class="section-title">Saldo Aktual (Fisik) per Tanggal Tutup</span></div>' +
           '<div class="card">' +
             '<div class="form-group"><label>Kas Tunai Aktual</label>' +
               '<input type="text" id="tbTunaiAktual" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0" value="' + (sis.tunai || 0) + '">' +
@@ -2543,9 +2552,9 @@ var App = {
             '</div>' +
           '</div>' +
           '<div class="info-box" style="margin-top:16px;background:#fff8dc;border-color:#f0c040;color:#7a6000;">' +
-            '⚠️ Menutup buku akan mengubah status periode menjadi <strong>CLOSED</strong>. Transaksi baru tidak bisa ditambahkan setelah periode ditutup.' +
+            '⚠️ Menutup buku akan mengubah status periode menjadi <strong>CLOSED</strong> dan otomatis membuka periode baru. Transaksi baru tidak bisa ditambahkan ke periode yang sudah ditutup.' +
           '</div>' +
-          '<button class="btn btn-danger mt-8" style="width:100%;" onclick="App.konfirmasiTutupBuku()">🔒 Tutup Buku Periode Ini</button>' +
+          '<button class="btn btn-danger mt-8" style="width:100%;" id="tbBtnTutup" onclick="App.konfirmasiTutupBuku()">🔒 Tutup Buku Periode Ini</button>' +
           '<div class="section-header" style="margin-top:24px;"><span class="section-title">Setelah Tutup Buku</span></div>' +
           '<div class="kelola-menu-item" onclick="App.pageBukaPeriode()" style="background:#fff;">' +
             '<div class="kelola-menu-icon">📅</div>' +
@@ -2558,17 +2567,95 @@ var App = {
         ['tbTunaiAktual','tbBankAktual'].forEach(function(id) {
           var el = document.getElementById(id); if (el) App._formatTsep(el);
         });
+        App._muatPratinjauTutup();
       })
       .withFailureHandler(function(err) { self.showError(err.message); })
       .getPemeriksaanSaldo();
+  },
+
+  // yyyy-mm-dd → tanggal lokal tanpa jam (hindari tampil '09:00 WIB').
+  _fmtTgl: function(t) {
+    return App.formatDate(/^\d{4}-\d{2}-\d{2}$/.test(String(t)) ? t + 'T00:00:00' : t);
+  },
+
+  _hariIni: function() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  },
+
+  // Bawaan tanggal tutup: hari terakhir bulan lalu bila periode sudah berjalan
+  // sebelum tanggal itu; selain itu hari ini.
+  _tglTutupDefault: function(res) {
+    var hariIni = App._hariIni();
+    var d = new Date(); d.setDate(0); // hari terakhir bulan lalu
+    var akhirBulanLalu = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    var mulai = String((res && res.periode && res.periode.tanggalMulai) || '');
+    var m = mulai.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) mulai = m[3] + '-' + m[2] + '-' + m[1];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(mulai) && mulai <= akhirBulanLalu) return akhirBulanLalu;
+    return hariIni;
+  },
+
+  // Ambil saldo sistem per tanggal tutup + daftar transaksi yang akan dipindah.
+  _muatPratinjauTutup: function() {
+    var el = document.getElementById('tbTglTutup'); if (!el) return;
+    var tgl = el.value;
+    var box = document.getElementById('tbPindahBox');
+    var btn = document.getElementById('tbBtnTutup');
+    if (box) box.innerHTML = '<div class="info-box">Menghitung saldo per ' + App._fmtTgl(tgl) + '...</div>';
+    if (btn) btn.disabled = true;
+    App.srv()
+      .withSuccessHandler(function(r) {
+        if (btn) btn.disabled = false;
+        if (!r || !r.success) { if (box) box.innerHTML = '<div class="error-box">' + ((r && r.message) || 'Gagal memuat pratinjau') + '</div>'; if (btn) btn.disabled = true; return; }
+        App._tbPratinjau = r;
+        var s = r.saldoSistem;
+        document.getElementById('tbSisTunai').textContent = App.formatNumber(s.tunai);
+        document.getElementById('tbSisBank').textContent = App.formatNumber(s.bank);
+        document.getElementById('tbSisTotal').textContent = App.formatNumber(s.total);
+        document.getElementById('tbPerTgl').textContent = '— per ' + App._fmtTgl(r.tglTutup);
+        var t = document.getElementById('tbTunaiAktual'), b = document.getElementById('tbBankAktual');
+        if (t) { t.value = s.tunai; App._formatTsep(t); }
+        if (b) { b.value = s.bank; App._formatTsep(b); }
+        if (!box) return;
+        if (!r.pindah || !r.pindah.length) {
+          box.innerHTML = r.cutoff
+            ? '<div class="info-box">Tidak ada transaksi setelah ' + App._fmtTgl(r.tglTutup) + '. Periode baru: <b>' + r.namaPeriodeBaru + '</b> mulai ' + App._fmtTgl(r.tglMulaiBaru) + '.</div>'
+            : '';
+          return;
+        }
+        var neto = 0;
+        var baris = r.pindah.map(function(x) {
+          var sgn = x.arah === 'Masuk' ? 1 : (x.arah === 'Keluar' ? -1 : 0);
+          neto += sgn * x.nominal;
+          return '<div class="stat-row"><span class="stat-label">' + App._fmtTgl(x.tanggal) + ' · ' + x.arah + (x.catatan ? ' · ' + App.escapeHtml(x.catatan) : '') + '</span>' +
+            '<span class="stat-value">' + (sgn < 0 ? '−' : (sgn > 0 ? '+' : '')) + App.formatNumber(x.nominal) + ' <span class="text-small">' + App.escapeHtml(x.sumberKas) + '</span></span></div>';
+        }).join('');
+        box.innerHTML =
+          '<div class="card" style="background:#EFF6FF;border:1px solid #93C5FD;">' +
+            '<div class="section-title mb-8">📦 ' + r.pindah.length + ' transaksi dipindah ke ' + r.namaPeriodeBaru + ' (mulai ' + App._fmtTgl(r.tglMulaiBaru) + ')</div>' +
+            baris +
+            '<div class="stat-row"><span class="stat-label"><b>Neto dipindah</b></span><span class="stat-value font-bold">' + (neto < 0 ? '−' : '+') + App.formatNumber(Math.abs(neto)) + '</span></div>' +
+          '</div>';
+      })
+      .withFailureHandler(function(err) {
+        if (btn) btn.disabled = true;
+        if (box) box.innerHTML = '<div class="error-box">' + err.message + '</div>';
+      })
+      .getPratinjauTutupBuku(tgl);
   },
 
   konfirmasiTutupBuku: function() {
     var saldoTunai = App.num('tbTunaiAktual');
     var saldoBank  = App.num('tbBankAktual');
     var catatan    = (document.getElementById('tbCatatan') || {}).value || '';
-    if (!confirm('Tutup buku periode ini?\n\nSaldo Akhir:\n• Tunai: ' + App.formatNumber(saldoTunai) + '\n• Bank: ' + App.formatNumber(saldoBank) + '\n\nStatus periode akan diubah ke CLOSED. Lanjutkan?')) return;
-    this._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan });
+    var tgl        = (document.getElementById('tbTglTutup') || {}).value || '';
+    var pr = App._tbPratinjau || {};
+    var jmlPindah = (pr.pindah || []).length;
+    if (!confirm('Tutup buku per ' + App._fmtTgl(tgl) + '?\n\nSaldo Akhir:\n• Tunai: ' + App.formatNumber(saldoTunai) + '\n• Bank: ' + App.formatNumber(saldoBank) +
+      (jmlPindah ? '\n\n' + jmlPindah + ' transaksi setelah tanggal tutup dipindah ke ' + pr.namaPeriodeBaru + '.' : '') +
+      '\n\nStatus periode akan diubah ke CLOSED. Lanjutkan?')) return;
+    this._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan, tglTutup: tgl });
   },
 
   pageBukaPeriode: function() {

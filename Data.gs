@@ -789,7 +789,16 @@ function _getDashboardData_() {
   }
 }
 
-function calculateSaldo(periodeId, periode) {
+// Baris bertanggal SETELAH tglBatas (yyyy-MM-dd)? tglBatas kosong → selalu false.
+function _lewatBatas_(row, h, defIdx, tglBatas, kunciTgl) {
+  if (!tglBatas) return false;
+  var t = toDateStr_(hGet_(row, h, kunciTgl || 'tanggal', defIdx));
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) && t > tglBatas;
+}
+
+// tglBatas (opsional, yyyy-MM-dd): hanya hitung transaksi s.d. tanggal itu —
+// dipakai tutup buku dengan tanggal cut-off.
+function calculateSaldo(periodeId, periode, tglBatas) {
   // K3: TANPA periode, saldo awal hilang dan filter transaksi mati → hasilnya salah.
   // Jangan pernah kembalikan angka. Pemanggil wajib menangani ketiadaan periode.
   if (!periodeId || !periode) {
@@ -804,6 +813,7 @@ function calculateSaldo(periodeId, periode) {
     for (var i = 1; i < dp.length; i++) {
       if (barisDibatalkan_(dp[i], dpH)) continue; // T3: abaikan yang dibatalkan
       if (String(hGet_(dp[i], dpH, 'periodeid', 1)) !== String(periodeId)) continue;  // ← tegas
+      if (_lewatBatas_(dp[i], dpH, 4, tglBatas)) continue;
       var nominal = Number(hGet_(dp[i], dpH, 'nominal', 5)) || 0;
       var sumber  = String(hGet_(dp[i], dpH, 'sumberkas', 6) || '');
       if (sumber === 'Tunai') tunai += nominal;
@@ -818,6 +828,7 @@ function calculateSaldo(periodeId, periode) {
       if (barisDibatalkan_(dpk[j], dpkH)) continue; // T3
       if (barisDraft_(dpk[j], dpkH)) continue;       // T12: Draft belum masuk saldo
       if (String(hGet_(dpk[j], dpkH, 'periodeid', 1)) !== String(periodeId)) continue; // ← tegas
+      if (_lewatBatas_(dpk[j], dpkH, 3, tglBatas)) continue;
       var nomK = Number(hGet_(dpk[j], dpkH, 'nominal', 4)) || 0;
       var sumK = String(hGet_(dpk[j], dpkH, 'sumberkas', 5) || '');
       if (sumK === 'Tunai') tunai -= nomK;
@@ -831,6 +842,7 @@ function calculateSaldo(periodeId, periode) {
     for (var k = 1; k < ds.length; k++) {
       if (barisDibatalkan_(ds[k], dsH)) continue; // T3
       if (String(hGet_(ds[k], dsH, 'periodeid', 1)) !== String(periodeId)) continue;  // ← tegas
+      if (_lewatBatas_(ds[k], dsH, 2, tglBatas)) continue;
       var nomS = Number(hGet_(ds[k], dsH, 'nominal', 3)) || 0;
       var arah = String(hGet_(ds[k], dsH, 'arah', 4) || '');
       if (arah === 'setor')      { tunai -= nomS; bank += nomS; }
@@ -950,14 +962,14 @@ function submitPemeriksaanSaldo(data) {
 
 // FASE 2 — syarat wajib sebelum tutup buku (T5): tidak boleh ada uang
 // "menggantung" atau data belum lengkap.
-function cekSyaratTutupBuku_(periodeId) {
+function cekSyaratTutupBuku_(periodeId, tglBatas) {
   var ss = getSS_();
   // Bank Pending berstatus Pending
   var shBP = ss.getSheetByName(CONFIG.SHEETS.BANK_PENDING);
   if (shBP && shBP.getLastRow() > 1) {
     var bp = shBP.getDataRange().getValues(); var hbp = headerMap_(bp[0]);
     for (var i = 1; i < bp.length; i++) {
-      if (String(hGet_(bp[i], hbp, 'periodeid', 1)) === String(periodeId) && String(hGet_(bp[i], hbp, 'status', 6)) === 'Pending')
+      if (String(hGet_(bp[i], hbp, 'periodeid', 1)) === String(periodeId) && String(hGet_(bp[i], hbp, 'status', 6)) === 'Pending' && !_lewatBatas_(bp[i], hbp, 2, tglBatas))
         return { ok: false, message: 'Masih ada transaksi Bank berstatus Pending. Selesaikan rekonsiliasi bank dulu.' };
     }
   }
@@ -966,7 +978,7 @@ function cekSyaratTutupBuku_(periodeId) {
   if (shKP && shKP.getLastRow() > 1) {
     var kp = shKP.getDataRange().getValues(); var hkp = headerMap_(kp[0]);
     for (var i = 1; i < kp.length; i++) {
-      if (String(hGet_(kp[i], hkp, 'periodeid', 1)) === String(periodeId) && String(hGet_(kp[i], hkp, 'status', 9)) === 'Aktif')
+      if (String(hGet_(kp[i], hkp, 'periodeid', 1)) === String(periodeId) && String(hGet_(kp[i], hkp, 'status', 9)) === 'Aktif' && !_lewatBatas_(kp[i], hkp, 2, tglBatas))
         return { ok: false, message: 'Masih ada Kas Penerobos yang belum diserahterimakan. Selesaikan serah terima dulu.' };
     }
   }
@@ -975,7 +987,7 @@ function cekSyaratTutupBuku_(periodeId) {
   if (shST && shST.getLastRow() > 1) {
     var st = shST.getDataRange().getValues(); var hst = headerMap_(st[0]);
     for (var i = 1; i < st.length; i++) {
-      if (String(hGet_(st[i], hst, 'periodeid', 1)) === String(periodeId) && String(hGet_(st[i], hst, 'status', 7)) === 'Menunggu')
+      if (String(hGet_(st[i], hst, 'periodeid', 1)) === String(periodeId) && String(hGet_(st[i], hst, 'status', 7)) === 'Menunggu' && !_lewatBatas_(st[i], hst, 2, tglBatas, 'tanggalserah'))
         return { ok: false, message: 'Masih ada Serah Terima berstatus Menunggu. Konfirmasi dulu.' };
     }
   }
@@ -983,7 +995,11 @@ function cekSyaratTutupBuku_(periodeId) {
   try {
     var bir = getBukuIRData();
     var belum = (bir && bir.success && bir.data && bir.data.belumDirincikan) ? bir.data.belumDirincikan : [];
-    var blokir = belum.filter(function(t) { return !t.ditangguhkan; });
+    var blokir = belum.filter(function(t) {
+      if (t.ditangguhkan) return false;
+      if (tglBatas && /^\d{4}-\d{2}-\d{2}$/.test(t.tanggal) && t.tanggal > tglBatas) return false; // pindah ke periode baru
+      return true;
+    });
     if (blokir.length > 0)
       return { ok: false, bisaTangguhkan: true, jumlahBelumDirinci: blokir.length,
         message: 'Masih ada ' + blokir.length + ' transaksi Buku IR yang belum dirincikan.' };
@@ -994,7 +1010,7 @@ function cekSyaratTutupBuku_(periodeId) {
 // Tandai transaksi Buku IR periode ini yang BELUM dirinci sebagai "ditangguhkan",
 // agar tutup buku tidak terhalang dan rinciannya bisa diisi di periode berikutnya.
 // Uang tidak dipindah — hanya penanda pada baris transaksi. Mengembalikan jumlahnya.
-function _tangguhkanRincianBukuIR_(periodeId, email) {
+function _tangguhkanRincianBukuIR_(periodeId, email, tglBatas) {
   var ss = getSS_();
   var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
   if (!sheet || sheet.getLastRow() < 2) return 0;
@@ -1030,6 +1046,7 @@ function _tangguhkanRincianBukuIR_(periodeId, email) {
     if (!id || barisDibatalkan_(rows[i], h)) continue;
     if (String(hGet_(rows[i], h, 'periodeid', 1)) !== String(periodeId)) continue;
     if (!bukuIRIds[String(hGet_(rows[i], h, 'jenisid', 2) || '')]) continue;
+    if (_lewatBatas_(rows[i], h, 4, tglBatas)) continue; // ikut pindah ke periode baru
     if (sudah[id]) continue;                       // sudah dirinci
     if (rincianDitangguhkan_(rows[i], h)) continue; // sudah ditandai
     sheet.getRange(i + 1, colTgh + 1).setValue('Ya');
@@ -1111,6 +1128,176 @@ function _arsipUrlPeriode_(periodeId) {
   return '';
 }
 
+// ──────────────────────────────────────────────────────
+// TUTUP BUKU DENGAN TANGGAL CUT-OFF
+// Transaksi bertanggal SETELAH tanggal tutup dipindah ke periode baru, sehingga
+// saldo akhir periode lama = saldo per tanggal tutup (mis. 31 Agustus) walau
+// tutup buku baru dilakukan belakangan (mis. 24 September).
+// ──────────────────────────────────────────────────────
+
+// Validasi tanggal tutup terhadap periode aktif. Kosong → hari ini (perilaku lama).
+function _validasiTglTutup_(raw, periodeId) {
+  var today = toDateStr_(new Date());
+  var t = String(raw || '').trim();
+  if (!t) return { ok: true, tgl: today, cutoff: false };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return { ok: false, message: 'Format tanggal tutup tidak valid (yyyy-mm-dd).' };
+  if (t > today) return { ok: false, message: 'Tanggal tutup tidak boleh di masa depan.' };
+  var p = getPeriodeById_(periodeId);
+  if (p && /^\d{4}-\d{2}-\d{2}$/.test(p.tanggalMulai) && t < p.tanggalMulai) {
+    return { ok: false, message: 'Tanggal tutup (' + t + ') sebelum awal periode (' + p.tanggalMulai + ').' };
+  }
+  return { ok: true, tgl: t, cutoff: t < today };
+}
+
+function _hariBerikut_(tgl) {
+  var a = String(tgl).split('-');
+  return toDateStr_(new Date(Number(a[0]), Number(a[1]) - 1, Number(a[2]) + 1));
+}
+
+function _namaPeriodeDari_(tgl) {
+  var bulanID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  var a = String(tgl).split('-');
+  return 'Periode ' + bulanID[Number(a[1]) - 1] + ' ' + a[0];
+}
+
+// Daftar transaksi kas (penerimaan, pengeluaran, setoran/tarik bank) periode ini
+// yang bertanggal SETELAH tglBatas — untuk pratinjau di layar tutup buku.
+function _trxSetelahBatas_(periodeId, tglBatas) {
+  var hasil = [];
+  var cfg = [
+    [CONFIG.SHEETS.INPUT_PENERIMAAN, 4, 5, 6, 'Masuk'],
+    [CONFIG.SHEETS.INPUT_PENGELUARAN, 3, 4, 5, 'Keluar'],
+    [CONFIG.SHEETS.INPUT_SETORAN, 2, 3, -1, 'Mutasi']
+  ];
+  cfg.forEach(function(c) {
+    var rows = sheetValues_(c[0]);
+    if (rows.length < 2) return;
+    var h = headerMap_(rows[0]);
+    for (var i = 1; i < rows.length; i++) {
+      if (!rows[i][0]) continue;
+      if (barisDibatalkan_(rows[i], h)) continue;
+      if (String(hGet_(rows[i], h, 'periodeid', 1)) !== String(periodeId)) continue;
+      if (!_lewatBatas_(rows[i], h, c[1], tglBatas)) continue;
+      hasil.push({
+        arah: c[4],
+        tanggal: toDateStr_(hGet_(rows[i], h, 'tanggal', c[1])),
+        nominal: Number(hGet_(rows[i], h, 'nominal', c[2])) || 0,
+        sumberKas: c[3] >= 0 ? String(hGet_(rows[i], h, 'sumberkas', c[3]) || '') : String(hGet_(rows[i], h, 'arah', 4) || ''),
+        catatan: String(hGet_(rows[i], h, 'catatan', -1) || '')
+      });
+    }
+  });
+  hasil.sort(function(a, b) { return a.tanggal < b.tanggal ? -1 : (a.tanggal > b.tanggal ? 1 : 0); });
+  return hasil;
+}
+
+// Pratinjau tutup buku per tanggal: saldo sistem s.d. tanggal itu + transaksi
+// yang akan dipindah ke periode baru.
+function getPratinjauTutupBuku(tglTutup) {
+  try {
+    var auth = requirePerm('periode.manage');
+    if (!auth.success) return { success: false, message: auth.message };
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif' };
+    var v = _validasiTglTutup_(tglTutup, periode.id);
+    if (!v.ok) return { success: false, message: v.message };
+    var batas = v.cutoff ? v.tgl : '';
+    var sis = calculateSaldo(periode.id, periode, batas);
+    var pindah = batas ? _trxSetelahBatas_(periode.id, batas) : [];
+    return {
+      success: true,
+      tglTutup: v.tgl,
+      cutoff: v.cutoff,
+      saldoSistem: { tunai: sis.tunai, bank: sis.bank, total: sis.tunai + sis.bank },
+      pindah: pindah,
+      namaPeriodeBaru: _namaPeriodeDari_(_hariBerikut_(v.tgl)),
+      tglMulaiBaru: _hariBerikut_(v.tgl)
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// Pindahkan SEMUA baris periode lama bertanggal > tglBatas ke periode baru
+// (termasuk yang dibatalkan, agar jejaknya ikut). Detail Buku IR & Setoran Desa
+// mengikuti transaksi induknya. No Bukti baris yang dipindah diberi nomor baru
+// sesuai urutan periode baru; nomor lama dicatat di Activity Log.
+function _pindahkanTransaksiSetelah_(periodeLamaId, periodeBaruId, tglBatas, email) {
+  var ss = getSS_();
+  var S = CONFIG.SHEETS;
+  // [nama sheet, kunci tanggal, idx default tanggal, prefix No Bukti]
+  var daftar = [
+    [S.INPUT_PENERIMAAN, 'tanggal', 4, 'BKM'],
+    [S.INPUT_PENGELUARAN, 'tanggal', 3, 'BKK'],
+    [S.INPUT_SETORAN, 'tanggal', 2, ''],
+    [S.KAS_PENEROBOS, 'tanggal', 2, ''],
+    [S.SERAH_TERIMA, 'tanggalserah', 2, ''],
+    [S.BANK_DAILY, 'tanggal', 2, ''],
+    [S.BANK_PENDING, 'tanggal', 2, ''],
+    [S.PATUNGAN, 'tanggal', 2, ''],
+    [S.PEMBELAAN, 'tanggalsanggup', 5, '']
+  ];
+  var dipindah = {};     // id transaksi induk yang dipindah
+  var ringkas = [], nomorLog = [];
+  daftar.forEach(function(d) {
+    var sheet = ss.getSheetByName(d[0]);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    if (h['periodeid'] === undefined || h[d[1]] === undefined) return; // skema tak dikenal → lewati
+    var cPid = h['periodeid'];
+    var kolom = [], pindahIdx = [];
+    for (var i = 1; i < rows.length; i++) {
+      var pid = rows[i][cPid];
+      if (String(pid) === String(periodeLamaId) && _lewatBatas_(rows[i], h, d[2], tglBatas, d[1])) {
+        pid = periodeBaruId;
+        pindahIdx.push(i);
+        dipindah[String(rows[i][0])] = true;
+      }
+      kolom.push([pid]);
+    }
+    if (!pindahIdx.length) return;
+    sheet.getRange(2, cPid + 1, kolom.length, 1).setValues(kolom);
+    ringkas.push(d[0] + ': ' + pindahIdx.length);
+    // Nomor ulang No Bukti (BKM/BKK) untuk periode baru, urut tanggal lalu ID.
+    var cNB = h['nobukti'];
+    if (d[3] && cNB !== undefined) {
+      pindahIdx.sort(function(a, b) {
+        var ta = toDateStr_(hGet_(rows[a], h, d[1], d[2])), tb = toDateStr_(hGet_(rows[b], h, d[1], d[2]));
+        if (ta !== tb) return ta < tb ? -1 : 1;
+        return String(rows[a][0]) < String(rows[b][0]) ? -1 : 1;
+      });
+      var pseq = _periodeSeqCode_(ss, periodeBaruId);
+      pindahIdx.forEach(function(idx, n) {
+        var lama = String(rows[idx][cNB] || '');
+        var baru = d[3] + '-' + pseq + '-' + ('0000' + (n + 1)).slice(-4);
+        sheet.getRange(idx + 1, cNB + 1).setValue(baru);
+        if (lama) nomorLog.push(lama + '→' + baru);
+      });
+    }
+  });
+  // Turunan yang mengikuti transaksi induk.
+  [[S.BUKU_IR, 'transaksiid'], [S.SETORAN_DESA, 'pengeluaranid']].forEach(function(d) {
+    var sheet = ss.getSheetByName(d[0]);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    var rows = sheet.getDataRange().getValues();
+    var h = headerMap_(rows[0]);
+    if (h['periodeid'] === undefined || h[d[1]] === undefined) return;
+    var cPid = h['periodeid'], n = 0;
+    var kolom = rows.slice(1).map(function(r) {
+      if (String(r[cPid]) === String(periodeLamaId) && dipindah[String(r[h[d[1]]] || '')]) { n++; return [periodeBaruId]; }
+      return [r[cPid]];
+    });
+    if (n) { sheet.getRange(2, cPid + 1, kolom.length, 1).setValues(kolom); ringkas.push(d[0] + ': ' + n); }
+  });
+  if (ringkas.length) {
+    logActivityWajib_(email, 'PINDAH_TRX_CUTOFF',
+      'Cut-off ' + tglBatas + ' | ' + periodeLamaId + ' → ' + periodeBaruId + ' | ' + ringkas.join(', ') +
+      (nomorLog.length ? ' | No Bukti: ' + nomorLog.join(', ') : ''));
+  }
+  return ringkas;
+}
+
 function tutupBuku(data) {
   try {
     var auth = requirePerm('periode.manage');
@@ -1122,25 +1309,32 @@ function tutupBuku(data) {
     var ss = getSS_();
     var now = new Date();
 
+    // Tanggal tutup (cut-off). Kosong = hari ini (perilaku lama). Bila sebelum hari
+    // ini, transaksi setelah tanggal itu dipindah ke periode baru.
+    var vt = _validasiTglTutup_(data.tglTutup, periode.id);
+    if (!vt.ok) return { success: false, message: vt.message };
+    var tglTutup = vt.tgl;
+    var batas = vt.cutoff ? tglTutup : '';
+
     // Opsi: tangguhkan rincian Buku IR yang belum diisi ke periode berikutnya.
     // Uang TETAP di periode ini; hanya rincian (dan kewajiban setor yang timbul
     // darinya) yang dikerjakan di periode berikutnya.
     var jmlTangguh = 0;
     if (data.tangguhkanRincian) {
-      jmlTangguh = _tangguhkanRincianBukuIR_(periode.id, auth.user.email);
+      jmlTangguh = _tangguhkanRincianBukuIR_(periode.id, auth.user.email, batas);
     }
 
-    // FASE 2: syarat wajib sebelum tutup buku (T5).
-    var syarat = cekSyaratTutupBuku_(periode.id);
+    // FASE 2: syarat wajib sebelum tutup buku (T5) — dinilai per tanggal tutup.
+    var syarat = cekSyaratTutupBuku_(periode.id, batas);
     if (!syarat.ok) return { success: false, message: syarat.message, bisaTangguhkan: !!syarat.bisaTangguhkan, jumlahBelumDirinci: syarat.jumlahBelumDirinci || 0 };
 
-    // Saldo AKTUAL (hasil cash count) dari pengurus.
+    // Saldo AKTUAL (hasil cash count per tanggal tutup) dari pengurus.
     var aktualTunai = Number(data.saldoTunaiAktual) || 0;
     var aktualBank  = Number(data.saldoBankAktual)  || 0;
     if (aktualTunai < 0 || aktualBank < 0) return { success: false, message: 'Saldo aktual tidak boleh negatif.' };
 
-    // Saldo SISTEM dihitung di SERVER (jangan percaya angka klien).
-    var sis = calculateSaldo(periode.id, periode);
+    // Saldo SISTEM per tanggal tutup, dihitung di SERVER (jangan percaya angka klien).
+    var sis = calculateSaldo(periode.id, periode, batas);
     var selisihTunai = aktualTunai - sis.tunai;
     var selisihBank  = aktualBank  - sis.bank;
     var selisihTotal = selisihTunai + selisihBank;
@@ -1150,25 +1344,11 @@ function tutupBuku(data) {
         message: 'Ada selisih kas — Tunai Rp ' + selisihTunai.toLocaleString('id-ID') + ', Bank Rp ' + selisihBank.toLocaleString('id-ID') + '. Wajib isi alasan selisih untuk melanjutkan.' };
     }
 
-    // Buat baris penyesuaian agar saldo sistem = aktual setelah tutup buku (T5.7).
-    // Tanggal penyesuaian = tanggal tutup buku (tetap di dalam periode).
-    var tglTutup = toDateStr_(now);
+    // ── Semua pemeriksaan lolos; mulai menulis. ──
+
+    // Buat baris penyesuaian agar saldo sistem = aktual per tanggal tutup (T5.7).
     buatPenyesuaianSelisih_(periode, 'Tunai', selisihTunai, auth.user.email, tglTutup);
     buatPenyesuaianSelisih_(periode, 'Bank',  selisihBank,  auth.user.email, tglTutup);
-
-    // Arsip laporan (opsional; aktif bila Script Property FOLDER_ARSIP_ID diset) — T14.
-    var arsip = arsipkanLaporan_(periode.id, periode.nama) || {};
-
-    // Catat ke Saldo Tutup Buku (aktual + sistem + selisih + arsip).
-    var sheetSaldo = ss.getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
-    if (!sheetSaldo) {
-      sheetSaldo = ss.insertSheet(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
-      sheetSaldo.appendRow(['ID', 'Periode ID', 'Tanggal Tutup', 'Saldo Tunai Akhir', 'Saldo Bank Akhir', 'Total Kas', 'Status', 'Catatan', 'Created By', 'Created At', 'Saldo Tunai Sistem', 'Saldo Bank Sistem', 'Selisih Tunai', 'Selisih Bank', 'Selisih Total', 'Alasan Selisih', 'Arsip File ID', 'Arsip URL', 'Arsip Hash']);
-    }
-    var sldId = generateID('SLD');
-    var saldoTunai = aktualTunai, saldoBank = aktualBank; // saldo awal periode baru = aktual
-    sheetSaldo.appendRow([sldId, periode.id, toDateStr_(now), aktualTunai, aktualBank, aktualTunai + aktualBank, 'Tutup', data.catatan || '', auth.user.email, toDateStr_(now),
-      sis.tunai, sis.bank, selisihTunai, selisihBank, selisihTotal, alasanSelisih, arsip.fileId || '', arsip.url || '', arsip.hash || '']);
 
     // Update Master Period: ubah Status → CLOSED, isi Tgl Tutup
     var sheetPeriod = ss.getSheetByName(CONFIG.SHEETS.PERIOD);
@@ -1180,7 +1360,7 @@ function tutupBuku(data) {
       for (var i = 1; i < pRows.length; i++) {
         if (String(pRows[i][0]) === String(periode.id)) {
           sheetPeriod.getRange(i + 1, colStatus).setValue(CONFIG.STATUS.CLOSED);
-          sheetPeriod.getRange(i + 1, colTglTutup).setValue(toDateStr_(now));
+          sheetPeriod.getRange(i + 1, colTglTutup).setValue(tglTutup);
           break;
         }
       }
@@ -1188,27 +1368,45 @@ function tutupBuku(data) {
 
     // Otomatis buka periode baru agar SELALU ada periode aktif.
     // Saldo awal periode baru = saldo akhir aktual periode yang ditutup.
-    var newPeriode = null;
+    // Dengan cut-off: mulai sehari setelah tanggal tutup, nama dari bulannya.
+    var saldoTunai = aktualTunai, saldoBank = aktualBank;
+    var newPeriode = null, dipindah = [];
     if (sheetPeriod) {
-      var bulanID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+      var tglMulaiBaru = batas ? _hariBerikut_(tglTutup) : toDateStr_(now);
       var namaBaru = (data.namaPeriodeBaru && String(data.namaPeriodeBaru).trim())
-        || ('Periode ' + bulanID[now.getMonth()] + ' ' + now.getFullYear());
+        || _namaPeriodeDari_(tglMulaiBaru);
       var newId = generateID('PER');
       // Urutan kolom sama seperti bukaPeriode:
       // [Periode, Nama, Tgl Mulai, Tgl Tutup, Status, Saldo Awal Tunai, Saldo Awal Bank, Catatan]
-      sheetPeriod.appendRow([newId, namaBaru, toDateStr_(now), '', CONFIG.STATUS.OPEN,
+      sheetPeriod.appendRow([newId, namaBaru, tglMulaiBaru, '', CONFIG.STATUS.OPEN,
         saldoTunai, saldoBank, 'Lanjutan dari ' + periode.nama]);
-      newPeriode = { id: newId, nama: namaBaru, saldoAwalTunai: saldoTunai, saldoAwalBank: saldoBank };
+      newPeriode = { id: newId, nama: namaBaru, saldoAwalTunai: saldoTunai, saldoAwalBank: saldoBank, tglMulai: tglMulaiBaru };
+      if (batas) dipindah = _pindahkanTransaksiSetelah_(periode.id, newId, batas, auth.user.email);
     }
+
+    // Arsip laporan (opsional; aktif bila Script Property FOLDER_ARSIP_ID diset) — T14.
+    // Dijalankan SETELAH pemindahan agar isinya hanya transaksi s.d. tanggal tutup.
+    var arsip = arsipkanLaporan_(periode.id, periode.nama) || {};
+
+    // Catat ke Saldo Tutup Buku (aktual + sistem + selisih + arsip).
+    var sheetSaldo = ss.getSheetByName(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+    if (!sheetSaldo) {
+      sheetSaldo = ss.insertSheet(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
+      sheetSaldo.appendRow(['ID', 'Periode ID', 'Tanggal Tutup', 'Saldo Tunai Akhir', 'Saldo Bank Akhir', 'Total Kas', 'Status', 'Catatan', 'Created By', 'Created At', 'Saldo Tunai Sistem', 'Saldo Bank Sistem', 'Selisih Tunai', 'Selisih Bank', 'Selisih Total', 'Alasan Selisih', 'Arsip File ID', 'Arsip URL', 'Arsip Hash']);
+    }
+    var sldId = generateID('SLD');
+    sheetSaldo.appendRow([sldId, periode.id, tglTutup, aktualTunai, aktualBank, aktualTunai + aktualBank, 'Tutup', data.catatan || '', auth.user.email, toDateStr_(now),
+      sis.tunai, sis.bank, selisihTunai, selisihBank, selisihTotal, alasanSelisih, arsip.fileId || '', arsip.url || '', arsip.hash || '']);
 
     try {
       var c = CacheService.getScriptCache();
       c.remove('dashboard_saldo');
       c.remove('master_trx_data');
+      c.remove('buku_ir_data');
     } catch(e) {}
 
-    logActivityWajib_(auth.user.email, 'TUTUP_BUKU', 'Tutup: ' + periode.nama + ' | Aktual T/B: ' + aktualTunai + '/' + aktualBank + ' | Sistem T/B: ' + sis.tunai + '/' + sis.bank + ' | Selisih: ' + selisihTotal + (alasanSelisih ? ' | Alasan: ' + alasanSelisih : '') + (newPeriode ? ' | Buka: ' + newPeriode.nama : ''));
-    return { success: true, id: sldId, selisihTunai: selisihTunai, selisihBank: selisihBank, newPeriode: newPeriode, arsip: arsip.url || '' };
+    logActivityWajib_(auth.user.email, 'TUTUP_BUKU', 'Tutup: ' + periode.nama + ' per ' + tglTutup + ' | Aktual T/B: ' + aktualTunai + '/' + aktualBank + ' | Sistem T/B: ' + sis.tunai + '/' + sis.bank + ' | Selisih: ' + selisihTotal + (alasanSelisih ? ' | Alasan: ' + alasanSelisih : '') + (newPeriode ? ' | Buka: ' + newPeriode.nama : '') + (dipindah.length ? ' | Dipindah: ' + dipindah.join(', ') : ''));
+    return { success: true, id: sldId, tglTutup: tglTutup, selisihTunai: selisihTunai, selisihBank: selisihBank, newPeriode: newPeriode, dipindah: dipindah, jmlTangguh: jmlTangguh, arsip: arsip.url || '' };
     });
   } catch(e) {
     return { success: false, message: e.message };
