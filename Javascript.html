@@ -2573,6 +2573,37 @@ var App = {
       .getPemeriksaanSaldo();
   },
 
+  // Konfirmasi di dalam halaman (pengganti confirm()/prompt() yang bisa diblokir
+  // browser/iframe sehingga diam-diam dianggap "Batal"). cb(nilai|false).
+  // opsi.input=true → tampilkan isian teks (wajib diisi), cb menerima teksnya.
+  _konfirmasiModal: function(judul, pesanHtml, labelOk, cb, opsi) {
+    opsi = opsi || {};
+    var lama = document.getElementById('kfmOverlay'); if (lama) lama.remove();
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="modal-overlay" id="kfmOverlay">' +
+        '<div class="modal">' +
+          '<h3 class="modal-title">' + judul + '</h3>' +
+          '<div style="font-size:14px;line-height:1.5;margin-bottom:12px;">' + pesanHtml + '</div>' +
+          (opsi.input ? '<div class="form-group"><input type="text" id="kfmInput" class="form-control" placeholder="' + (opsi.placeholder || '') + '"></div>' : '') +
+          '<div id="kfmErr" class="text-danger text-small" style="margin-bottom:8px;"></div>' +
+          '<button class="btn ' + (opsi.kelasOk || 'btn-danger') + '" style="width:100%;" id="kfmOk">' + labelOk + '</button>' +
+          '<button class="btn btn-outline mt-8" style="width:100%;" id="kfmBatal">' + (opsi.labelBatal || 'Batal') + '</button>' +
+        '</div>' +
+      '</div>';
+    var ov = wrap.firstChild;
+    document.body.appendChild(ov);
+    var selesai = function(v) { ov.remove(); cb(v); };
+    document.getElementById('kfmBatal').onclick = function() { selesai(false); };
+    document.getElementById('kfmOk').onclick = function() {
+      if (opsi.input) {
+        var t = String((document.getElementById('kfmInput') || {}).value || '').trim();
+        if (!t) { document.getElementById('kfmErr').textContent = 'Wajib diisi.'; return; }
+        selesai(t);
+      } else selesai(true);
+    };
+  },
+
   // yyyy-mm-dd → tanggal lokal tanpa jam (hindari tampil '09:00 WIB').
   _fmtTgl: function(t) {
     return App.formatDate(/^\d{4}-\d{2}-\d{2}$/.test(String(t)) ? t + 'T00:00:00' : t);
@@ -2646,16 +2677,21 @@ var App = {
   },
 
   konfirmasiTutupBuku: function() {
+    var self = this;
     var saldoTunai = App.num('tbTunaiAktual');
     var saldoBank  = App.num('tbBankAktual');
     var catatan    = (document.getElementById('tbCatatan') || {}).value || '';
     var tgl        = (document.getElementById('tbTglTutup') || {}).value || '';
     var pr = App._tbPratinjau || {};
     var jmlPindah = (pr.pindah || []).length;
-    if (!confirm('Tutup buku per ' + App._fmtTgl(tgl) + '?\n\nSaldo Akhir:\n• Tunai: ' + App.formatNumber(saldoTunai) + '\n• Bank: ' + App.formatNumber(saldoBank) +
-      (jmlPindah ? '\n\n' + jmlPindah + ' transaksi setelah tanggal tutup dipindah ke ' + pr.namaPeriodeBaru + '.' : '') +
-      '\n\nStatus periode akan diubah ke CLOSED. Lanjutkan?')) return;
-    this._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan, tglTutup: tgl });
+    App._konfirmasiModal('🔒 Tutup buku per ' + App._fmtTgl(tgl) + '?',
+      'Saldo akhir:<br>• Tunai: <b>Rp ' + App.formatNumber(saldoTunai) + '</b><br>• Bank: <b>Rp ' + App.formatNumber(saldoBank) + '</b>' +
+      (jmlPindah ? '<br><br>' + jmlPindah + ' transaksi setelah tanggal tutup dipindah ke <b>' + (pr.namaPeriodeBaru || 'periode baru') + '</b>.' : '') +
+      '<br><br>Status periode menjadi <b>CLOSED</b> dan periode baru dibuka otomatis.',
+      'Ya, Tutup Buku', function(ok) {
+        if (!ok) return;
+        self._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan, tglTutup: tgl });
+      });
   },
 
   pageBukaPeriode: function() {
@@ -3023,8 +3059,10 @@ var App = {
     var saldoTunai = App.num('psTunai');
     var saldoBank  = App.num('psBank');
     var catatan    = (document.getElementById('psCatatan') || {}).value || '';
-    if (!confirm('Tutup buku periode ini?\n\nSaldo akhir dicatat final & status periode diubah ke CLOSED. Lanjutkan?')) return;
-    this._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan });
+    var self = this;
+    App._konfirmasiModal('🔒 Tutup buku periode ini?', 'Saldo akhir dicatat final dan status periode diubah ke <b>CLOSED</b>.', 'Ya, Tutup Buku', function(ok) {
+      if (ok) self._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan });
+    });
   },
 
   // Kirim tutup buku; bila server melapor ADA SELISIH, minta alasan lalu resubmit.
@@ -3041,27 +3079,30 @@ var App = {
         // Buku IR belum dirinci → tawarkan penangguhan ke periode berikutnya.
         if (res && res.bisaTangguhkan) {
           var n = res.jumlahBelumDirinci || 0;
-          var ok = confirm('⚠️ Masih ada ' + n + ' transaksi Buku IR yang BELUM DIRINCI.\n\n' +
-            'Pilih OK untuk MENANGGUHKAN rinciannya ke periode berikutnya:\n' +
-            '• Uang tetap tercatat di periode ini (saldo tidak berubah)\n' +
-            '• Rinciannya diisi di periode berikutnya\n' +
-            '• Kewajiban setor dari rincian itu jatuh di periode berikutnya\n\n' +
-            'Pilih Batal untuk merinci dulu sekarang (lebih rapi).');
-          if (!ok) { self.pageBukuIR ? self.pageBukuIR() : self.loadDashboard(); return; }
-          payload.tangguhkanRincian = true;
-          self._kirimTutupBuku(payload);
+          self.showLoading('Menunggu konfirmasi...');
+          App._konfirmasiModal('⚠️ ' + n + ' transaksi Buku IR belum dirinci',
+            'Tangguhkan rinciannya ke periode berikutnya?<br>' +
+            '• Uang tetap tercatat di periode ini (saldo tidak berubah)<br>' +
+            '• Rinciannya diisi di periode berikutnya<br>' +
+            '• Kewajiban setor dari rincian itu jatuh di periode berikutnya',
+            'Tangguhkan & Tutup Buku', function(ok) {
+              if (!ok) { self.pageBukuIR ? self.pageBukuIR() : self.loadDashboard(); return; }
+              payload.tangguhkanRincian = true;
+              self._kirimTutupBuku(payload);
+            }, { kelasOk: 'btn-primary', labelBatal: 'Batal, rinci dulu' });
           return;
         }
         if (res && res.adaSelisih) {
-          var al = prompt('⚠️ ADA SELISIH KAS antara sistem & hitungan aktual:\n' +
-            'Selisih Tunai: Rp ' + Number(res.selisihTunai || 0).toLocaleString('id-ID') + '\n' +
-            'Selisih Bank: Rp ' + Number(res.selisihBank || 0).toLocaleString('id-ID') + '\n\n' +
-            'Selisih akan dicatat sebagai penyesuaian. Alasan selisih (wajib):', '');
-          if (al === null) { self.pagePemeriksaanSaldo ? self.pagePemeriksaanSaldo() : self.loadDashboard(); return; }
-          al = String(al).trim();
-          if (!al) { self.showError('Alasan selisih wajib diisi. Ulangi tutup buku.'); return; }
-          payload.alasanSelisih = al;
-          self._kirimTutupBuku(payload);
+          self.showLoading('Menunggu konfirmasi...');
+          App._konfirmasiModal('⚠️ Ada selisih kas',
+            'Selisih Tunai: <b>Rp ' + Number(res.selisihTunai || 0).toLocaleString('id-ID') + '</b><br>' +
+            'Selisih Bank: <b>Rp ' + Number(res.selisihBank || 0).toLocaleString('id-ID') + '</b><br><br>' +
+            'Selisih akan dicatat sebagai penyesuaian. Isi alasan selisih:',
+            'Simpan & Tutup Buku', function(al) {
+              if (!al) { self.pageTutupBuku ? self.pageTutupBuku() : self.loadDashboard(); return; }
+              payload.alasanSelisih = al;
+              self._kirimTutupBuku(payload);
+            }, { input: true, placeholder: 'Alasan selisih (wajib)', kelasOk: 'btn-primary' });
           return;
         }
         self.showError((res && res.message) || 'Gagal tutup buku');
