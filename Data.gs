@@ -87,9 +87,20 @@ function komponenRincianAda_(irH) {
 
 // Konversi nilai tanggal ke string YYYY-MM-DD secara konsisten.
 // Diperlukan karena Date object dari spreadsheet tidak bisa di-JSON.stringify.
+// Zona waktu acuan = zona waktu SPREADSHEET (tempat tanggal disimpan).
+// Sebelumnya memakai zona waktu script (Asia/Jakarta) sementara spreadsheet
+// Asia/Jayapura, sehingga tanggal terbaca mundur 1 hari dan bergeser tiap disimpan.
+var _TZ_CACHE = null;
+function _tz_() {
+  if (_TZ_CACHE) return _TZ_CACHE;
+  try { _TZ_CACHE = getSS_().getSpreadsheetTimeZone(); } catch(e) {}
+  if (!_TZ_CACHE) _TZ_CACHE = Session.getScriptTimeZone();
+  return _TZ_CACHE;
+}
+
 function toDateStr_(val) {
   if (!val) return '';
-  if (val instanceof Date) return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (val instanceof Date) return Utilities.formatDate(val, _tz_(), 'yyyy-MM-dd');
   return String(val);
 }
 
@@ -317,6 +328,26 @@ function _simpanBukti1_(transaksiId, tipe, base64, email) {
   return { id: id, url: file.getUrl() };
 }
 
+// Simpan bukti rekening koran (gambar/PDF dataURL) ke folder bukti. Kembalikan URL.
+function _simpanBuktiRK_(sldId, dataUrl, email) {
+  var folderId = PropertiesService.getScriptProperties().getProperty('FOLDER_BUKTI_ID');
+  if (!folderId) throw new Error('folder bukti belum dikonfigurasi (FOLDER_BUKTI_ID)');
+  var m = String(dataUrl).match(/^data:([^;]+);base64,(.*)$/);
+  if (!m) throw new Error('format file tidak dikenal');
+  var mime = m[1];
+  if (!/^(image\/(jpeg|png)|application\/pdf)$/.test(mime)) throw new Error('hanya JPG, PNG, atau PDF');
+  var ext = mime === 'application/pdf' ? '.pdf' : (mime === 'image/png' ? '.png' : '.jpg');
+  var bytes = Utilities.base64Decode(m[2]);
+  if (bytes.length > 8 * 1024 * 1024) throw new Error('file lebih dari 8 MB');
+  var nama = 'rekening_koran_' + sldId + ext;
+  var file = DriveApp.getFolderById(folderId).createFile(Utilities.newBlob(bytes, mime, nama));
+  var ss = getSS_();
+  var sheet = ss.getSheetByName(CONFIG.SHEETS.LAMPIRAN);
+  if (!sheet) { sheet = ss.insertSheet(CONFIG.SHEETS.LAMPIRAN); sheet.appendRow(['ID', 'Transaksi ID', 'Tipe', 'Nama File', 'Drive File ID', 'URL', 'Diunggah By', 'Diunggah At', 'Status']); }
+  sheet.appendRow([generateID('LMP'), sldId, 'rekening_koran', nama, file.getId(), file.getUrl(), email || '', toDateStr_(new Date()), 'Aktif']);
+  return file.getUrl();
+}
+
 function _simpanBuktiList_(transaksiId, tipe, arr, email) {
   var n = 0;
   (arr || []).forEach(function(b) { if (b) { try { _simpanBukti1_(transaksiId, tipe, b, email); n++; } catch(e) {} } });
@@ -407,7 +438,7 @@ function getPeriodeAktif() {
       if (String(data[i][colStatus]).trim() === CONFIG.STATUS.OPEN) {
         var tgl = colTglMulai >= 0 ? data[i][colTglMulai] : '';
         if (tgl instanceof Date) {
-          try { tgl = Utilities.formatDate(tgl, Session.getScriptTimeZone(), 'dd/MM/yyyy'); } catch(e) { tgl = String(tgl); }
+          try { tgl = Utilities.formatDate(tgl, _tz_(), 'dd/MM/yyyy'); } catch(e) { tgl = String(tgl); }
         }
         return {
           id: String(data[i][0] || ''),
@@ -991,6 +1022,20 @@ function cekSyaratTutupBuku_(periodeId, tglBatas) {
         return { ok: false, message: 'Masih ada Serah Terima berstatus Menunggu. Konfirmasi dulu.' };
     }
   }
+  // Pengeluaran Draft (belum disetujui) s.d. tanggal tutup: uangnya mungkin sudah
+  // keluar tetapi belum masuk saldo sistem → saldo tutup buku tidak bisa dipercaya.
+  var shK = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENGELUARAN);
+  if (shK && shK.getLastRow() > 1) {
+    var kr = shK.getDataRange().getValues(); var hk = headerMap_(kr[0]); var nDraft = 0;
+    for (var i = 1; i < kr.length; i++) {
+      if (String(hGet_(kr[i], hk, 'periodeid', 1)) !== String(periodeId)) continue;
+      if (barisDibatalkan_(kr[i], hk) || !barisDraft_(kr[i], hk)) continue;
+      if (_lewatBatas_(kr[i], hk, 3, tglBatas)) continue;
+      nDraft++;
+    }
+    if (nDraft > 0)
+      return { ok: false, message: 'Masih ada ' + nDraft + ' pengeluaran berstatus Draft (belum disetujui). Setujui atau batalkan dulu di menu Setujui.' };
+  }
   // Buku IR belum dirincikan (yang sudah DITANGGUHKAN tidak memblokir).
   try {
     var bir = getBukuIRData();
@@ -1328,10 +1373,18 @@ function tutupBuku(data) {
     var syarat = cekSyaratTutupBuku_(periode.id, batas);
     if (!syarat.ok) return { success: false, message: syarat.message, bisaTangguhkan: !!syarat.bisaTangguhkan, jumlahBelumDirinci: syarat.jumlahBelumDirinci || 0 };
 
-    // Saldo AKTUAL (hasil cash count per tanggal tutup) dari pengurus.
+    // Saldo AKTUAL wajib diisi dari sumber independen: hitung fisik kas tunai dan
+    // saldo REKENING KORAN per tanggal tutup (bukan disalin dari saldo sistem).
+    if (data.saldoTunaiAktual === '' || data.saldoTunaiAktual === null || data.saldoTunaiAktual === undefined)
+      return { success: false, message: 'Isi saldo kas tunai hasil hitung fisik.' };
+    if (data.saldoBankAktual === '' || data.saldoBankAktual === null || data.saldoBankAktual === undefined)
+      return { success: false, message: 'Isi saldo bank menurut rekening koran / e-statement per tanggal tutup.' };
     var aktualTunai = Number(data.saldoTunaiAktual) || 0;
     var aktualBank  = Number(data.saldoBankAktual)  || 0;
     if (aktualTunai < 0 || aktualBank < 0) return { success: false, message: 'Saldo aktual tidak boleh negatif.' };
+    var refRK = String(data.refRekeningKoran || '').trim();
+    if (!refRK && !data.buktiRekeningKoran)
+      return { success: false, message: 'Sebutkan sumber saldo bank (mis. "e-statement BSI Agustus 2026") atau unggah file e-statement.' };
 
     // Saldo SISTEM per tanggal tutup, dihitung di SERVER (jangan percaya angka klien).
     var sis = calculateSaldo(periode.id, periode, batas);
@@ -1394,9 +1447,23 @@ function tutupBuku(data) {
       sheetSaldo = ss.insertSheet(CONFIG.SHEETS.SALDO_TUTUP_BUKU);
       sheetSaldo.appendRow(['ID', 'Periode ID', 'Tanggal Tutup', 'Saldo Tunai Akhir', 'Saldo Bank Akhir', 'Total Kas', 'Status', 'Catatan', 'Created By', 'Created At', 'Saldo Tunai Sistem', 'Saldo Bank Sistem', 'Selisih Tunai', 'Selisih Bank', 'Selisih Total', 'Alasan Selisih', 'Arsip File ID', 'Arsip URL', 'Arsip Hash']);
     }
+    ensureColumns_(sheetSaldo, ['Ref Rekening Koran', 'Bukti Rekening Koran URL']);
     var sldId = generateID('SLD');
+    // Bukti e-statement (opsional, bila folder bukti sudah dikonfigurasi).
+    var buktiUrl = '';
+    if (data.buktiRekeningKoran) {
+      try { buktiUrl = _simpanBuktiRK_(sldId, data.buktiRekeningKoran, auth.user.email); }
+      catch(e) { buktiUrl = ''; refRK = (refRK ? refRK + ' | ' : '') + 'unggah bukti gagal: ' + e.message; }
+    }
     sheetSaldo.appendRow([sldId, periode.id, tglTutup, aktualTunai, aktualBank, aktualTunai + aktualBank, 'Tutup', data.catatan || '', auth.user.email, toDateStr_(now),
       sis.tunai, sis.bank, selisihTunai, selisihBank, selisihTotal, alasanSelisih, arsip.fileId || '', arsip.url || '', arsip.hash || '']);
+    // Isi kolom rekening koran berbasis nama kolom (tahan urutan kolom).
+    try {
+      var hS = headerMap_(sheetSaldo.getRange(1, 1, 1, sheetSaldo.getLastColumn()).getValues()[0]);
+      var rS = sheetSaldo.getLastRow();
+      if (hS['refrekeningkoran'] !== undefined) sheetSaldo.getRange(rS, hS['refrekeningkoran'] + 1).setValue(refRK);
+      if (hS['buktirekeningkoranurl'] !== undefined) sheetSaldo.getRange(rS, hS['buktirekeningkoranurl'] + 1).setValue(buktiUrl);
+    } catch(e) {}
 
     try {
       var c = CacheService.getScriptCache();
@@ -1405,7 +1472,7 @@ function tutupBuku(data) {
       c.remove('buku_ir_data');
     } catch(e) {}
 
-    logActivityWajib_(auth.user.email, 'TUTUP_BUKU', 'Tutup: ' + periode.nama + ' per ' + tglTutup + ' | Aktual T/B: ' + aktualTunai + '/' + aktualBank + ' | Sistem T/B: ' + sis.tunai + '/' + sis.bank + ' | Selisih: ' + selisihTotal + (alasanSelisih ? ' | Alasan: ' + alasanSelisih : '') + (newPeriode ? ' | Buka: ' + newPeriode.nama : '') + (dipindah.length ? ' | Dipindah: ' + dipindah.join(', ') : ''));
+    logActivityWajib_(auth.user.email, 'TUTUP_BUKU', 'Tutup: ' + periode.nama + ' per ' + tglTutup + ' | Aktual T/B: ' + aktualTunai + '/' + aktualBank + ' | Sistem T/B: ' + sis.tunai + '/' + sis.bank + ' | Selisih: ' + selisihTotal + ' | Rek. koran: ' + (refRK || '-') + (buktiUrl ? ' (bukti terlampir)' : '') + (alasanSelisih ? ' | Alasan: ' + alasanSelisih : '') + (newPeriode ? ' | Buka: ' + newPeriode.nama : '') + (dipindah.length ? ' | Dipindah: ' + dipindah.join(', ') : ''));
     return { success: true, id: sldId, tglTutup: tglTutup, selisihTunai: selisihTunai, selisihBank: selisihBank, newPeriode: newPeriode, dipindah: dipindah, jmlTangguh: jmlTangguh, arsip: arsip.url || '' };
     });
   } catch(e) {
@@ -3895,7 +3962,7 @@ function buildPDFHTML(data) {
   var statusLabel = isFinal ? 'LAPORAN FINAL' : 'LAPORAN INTERIM';
   var statusColor = isFinal ? '#166534' : '#92400e';
   var statusBg   = isFinal ? '#dcfce7' : '#fef3c7';
-  var cetakTgl = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd MMMM yyyy HH:mm');
+  var cetakTgl = Utilities.formatDate(new Date(), _tz_(), 'dd MMMM yyyy HH:mm');
 
   // Semua style inline — Google Drive viewer memblokir <style> tag
   var S = {
@@ -6737,4 +6804,61 @@ function _getSemuaTransaksi_(periodeId) {
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+// ──────────────────────────────────────────────────────
+// MIGRASI SEKALI JALAN (jalankan dari editor Apps Script oleh pemilik script).
+// Merapikan tanggal transaksi Periode Agustus 2026 yang terdampak bug zona waktu:
+// baris bertanggal 01/09 tetapi milik periode Agustus, dan koreksi yang tanggalnya
+// sempat bergeser. Hanya kolom Tanggal yang diubah; nominal/periode tidak berubah.
+// Idempoten: baris yang tanggalnya sudah benar dilewati. Semua perubahan dicatat.
+// ──────────────────────────────────────────────────────
+function migrasiTanggalAgustus2026() {
+  var PERIODE = 'PER_1785557864678_219XK';
+  var target = {
+    // Pengeluaran bank — tanggal sesuai rekening koran
+    'TRX_1788269955486_XBYBP': '2026-08-08', // Ukhro Mubaleg 1.700.000 (TRF Brian)
+    'TRX_1788269998444_4REPK': '2026-08-08', // Listrik 500.000 (PLN prabayar)
+    'TRX_1788269974807_2UF3X': '2026-08-11', // Ukhro Mubaghot 300.000 (TRF Imas)
+    'PNK_1788269208133_TBMU2': '2026-08-24', // Setoran Desa: Persenan
+    'PNK_1788269289621_B1KVW': '2026-08-24', // Setoran Desa: Cicilan pusat
+    'PNK_1788269454581_AIXAI': '2026-08-24', // Setoran Desa: 1/10 dari IR
+    'PNK_1788269519769_FWT0M': '2026-08-24', // Setoran Desa: Organisasi
+    'PNK_1788269582357_X5ICB': '2026-08-24', // Setoran Desa: Jatah Desa
+    'PNK_1788269620060_QTC5N': '2026-08-24', // Setoran Desa: Infak Daerah
+    'PNK_1788269667112_MHW21': '2026-08-24', // Setoran Desa: jumatan
+    'PNK_1788269708428_U9K7I': '2026-08-24', // Setoran Desa: kesehatan
+    // Transaksi tunai milik Agustus yang tersimpan 01/09
+    'TRX_1788268632439_C7VUK': '2026-08-31', // Pinjaman Irfan
+    'TRX_1788268805812_19JQ3': '2026-08-31', // Musyawaroh kelompok
+    'TRX_1788268886329_6GDGW': '2026-08-31', // ATK
+    'TRX_1788268921148_Z67BQ': '2026-08-31', // Motor - Musyawaroh KU
+    'TRX_1788267481561_LEUV3': '2026-08-31', // Buku IR bpk Empar 360.000
+    'TRX_1788268247716_UF160': '2026-08-31', // Pengajian 63.000
+    // Koreksi yang tanggalnya bergeser saat disimpan
+    'TRX_1790237093450_P870C': '2026-08-28', // Infak Hasan 200.000
+    'TRX_1790237160428_R1PS0': '2026-08-21', // Infak Firdaus 200.000
+    'TRX_1788268168116_6S3H5': '2026-08-25'  // Infak Bu Njono 200.000
+  };
+  var ss = getSS_();
+  var hasil = [];
+  [CONFIG.SHEETS.INPUT_PENERIMAAN, CONFIG.SHEETS.INPUT_PENGELUARAN].forEach(function(nama) {
+    var sh = ss.getSheetByName(nama);
+    if (!sh || sh.getLastRow() < 2) return;
+    var rows = sh.getDataRange().getValues(); var h = headerMap_(rows[0]);
+    var cT = h['tanggal']; if (cT === undefined) return;
+    for (var i = 1; i < rows.length; i++) {
+      var id = String(rows[i][0] || '');
+      if (!target[id]) continue;
+      if (String(hGet_(rows[i], h, 'periodeid', 1)) !== PERIODE) continue;
+      var lama = toDateStr_(rows[i][cT]);
+      if (lama === target[id]) continue;
+      sh.getRange(i + 1, cT + 1).setValue(target[id]);
+      hasil.push(id + ': ' + lama + ' → ' + target[id]);
+    }
+  });
+  if (hasil.length) logActivityWajib_(Session.getActiveUser().getEmail() || 'editor', 'MIGRASI_TANGGAL_TZ', 'Periode Agustus 2026 | ' + hasil.length + ' baris | ' + hasil.join(', '));
+  try { var c = CacheService.getScriptCache(); c.remove('dashboard_saldo'); c.remove('master_trx_data'); c.remove('buku_ir_data'); } catch(e) {}
+  Logger.log(hasil.length + ' baris diperbarui:\n' + hasil.join('\n'));
+  return hasil;
 }

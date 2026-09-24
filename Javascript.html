@@ -2539,13 +2539,22 @@ var App = {
             '<div class="stat-row"><span class="stat-label">Total Kas</span><span class="stat-value font-bold" id="tbSisTotal">' + App.formatNumber(sis.total || 0) + '</span></div>' +
           '</div>' +
           '<div id="tbPindahBox"></div>' +
-          '<div class="section-header"><span class="section-title">Saldo Aktual (Fisik) per Tanggal Tutup</span></div>' +
+          '<div class="section-header"><span class="section-title">Saldo Aktual per Tanggal Tutup</span></div>' +
           '<div class="card">' +
-            '<div class="form-group"><label>Kas Tunai Aktual</label>' +
-              '<input type="text" id="tbTunaiAktual" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0" value="' + (sis.tunai || 0) + '">' +
+            '<div class="info-box" style="margin-bottom:10px;">Isi dari sumber nyata, <b>bukan</b> disalin dari saldo sistem: tunai = hasil hitung fisik uang, bank = saldo akhir di rekening koran / e-statement pada tanggal tutup.</div>' +
+            '<div class="form-group"><label>Kas Tunai — hasil hitung fisik <span class="text-danger">*</span></label>' +
+              '<input type="text" id="tbTunaiAktual" class="form-control" inputmode="numeric" data-tsep="1" placeholder="Hitung uang tunai" oninput="App._tbCekSelisih()">' +
+              '<div class="text-small" id="tbSelTunai"></div>' +
             '</div>' +
-            '<div class="form-group"><label>Kas Bank Aktual</label>' +
-              '<input type="text" id="tbBankAktual" class="form-control" inputmode="numeric" data-tsep="1" placeholder="0" value="' + (sis.bank || 0) + '">' +
+            '<div class="form-group"><label>Kas Bank — saldo rekening koran <span class="text-danger">*</span></label>' +
+              '<input type="text" id="tbBankAktual" class="form-control" inputmode="numeric" data-tsep="1" placeholder="Lihat saldo akhir e-statement" oninput="App._tbCekSelisih()">' +
+              '<div class="text-small" id="tbSelBank"></div>' +
+            '</div>' +
+            '<div class="form-group"><label>Sumber saldo bank <span class="text-danger">*</span></label>' +
+              '<input type="text" id="tbRefRK" class="form-control" placeholder="Contoh: e-statement rekening kelompok Agustus 2026">' +
+            '</div>' +
+            '<div class="form-group"><label>File e-statement (JPG/PNG/PDF, opsional)</label>' +
+              '<input type="file" id="tbBuktiRK" class="form-control" accept="image/jpeg,image/png,application/pdf">' +
             '</div>' +
             '<div class="form-group"><label>Catatan</label>' +
               '<input type="text" id="tbCatatan" class="form-control" placeholder="Opsional">' +
@@ -2645,9 +2654,7 @@ var App = {
         document.getElementById('tbSisBank').textContent = App.formatNumber(s.bank);
         document.getElementById('tbSisTotal').textContent = App.formatNumber(s.total);
         document.getElementById('tbPerTgl').textContent = '— per ' + App._fmtTgl(r.tglTutup);
-        var t = document.getElementById('tbTunaiAktual'), b = document.getElementById('tbBankAktual');
-        if (t) { t.value = s.tunai; App._formatTsep(t); }
-        if (b) { b.value = s.bank; App._formatTsep(b); }
+        App._tbCekSelisih();
         if (!box) return;
         if (!r.pindah || !r.pindah.length) {
           box.innerHTML = r.cutoff
@@ -2676,21 +2683,55 @@ var App = {
       .getPratinjauTutupBuku(tgl);
   },
 
+  // Tampilkan selisih aktual − sistem di bawah isian saldo aktual.
+  _tbCekSelisih: function() {
+    var pr = App._tbPratinjau; if (!pr || !pr.saldoSistem) return;
+    [['tbTunaiAktual', 'tbSelTunai', pr.saldoSistem.tunai], ['tbBankAktual', 'tbSelBank', pr.saldoSistem.bank]].forEach(function(x) {
+      var el = document.getElementById(x[0]), out = document.getElementById(x[1]);
+      if (!el || !out) return;
+      if (String(el.value).trim() === '') { out.innerHTML = '<span class="text-muted">Saldo sistem: Rp ' + App.formatNumber(x[2]) + '</span>'; return; }
+      var sel = App.num(el) - x[2];
+      out.innerHTML = sel === 0
+        ? '<span style="color:var(--success);">✓ cocok dengan sistem</span>'
+        : '<span style="color:var(--danger);">Selisih ' + (sel > 0 ? '+' : '−') + 'Rp ' + App.formatNumber(Math.abs(sel)) + ' dari sistem (Rp ' + App.formatNumber(x[2]) + ') — wajib diberi alasan</span>';
+    });
+  },
+
   konfirmasiTutupBuku: function() {
     var self = this;
-    var saldoTunai = App.num('tbTunaiAktual');
-    var saldoBank  = App.num('tbBankAktual');
+    var elT = document.getElementById('tbTunaiAktual'), elB = document.getElementById('tbBankAktual');
+    var refRK = String((document.getElementById('tbRefRK') || {}).value || '').trim();
+    var fileEl = document.getElementById('tbBuktiRK');
+    var file = fileEl && fileEl.files && fileEl.files[0];
+    var err = [];
+    if (!elT || String(elT.value).trim() === '') err.push('saldo kas tunai hasil hitung fisik');
+    if (!elB || String(elB.value).trim() === '') err.push('saldo bank menurut rekening koran');
+    if (!refRK && !file) err.push('sumber saldo bank (atau unggah e-statement)');
+    if (err.length) { self.toast('Lengkapi: ' + err.join(', ')); return; }
+    if (file && file.size > 8 * 1024 * 1024) { self.toast('File e-statement maksimal 8 MB'); return; }
+    var saldoTunai = App.num(elT);
+    var saldoBank  = App.num(elB);
     var catatan    = (document.getElementById('tbCatatan') || {}).value || '';
     var tgl        = (document.getElementById('tbTglTutup') || {}).value || '';
     var pr = App._tbPratinjau || {};
     var jmlPindah = (pr.pindah || []).length;
     App._konfirmasiModal('🔒 Tutup buku per ' + App._fmtTgl(tgl) + '?',
-      'Saldo akhir:<br>• Tunai: <b>Rp ' + App.formatNumber(saldoTunai) + '</b><br>• Bank: <b>Rp ' + App.formatNumber(saldoBank) + '</b>' +
+      'Saldo akhir:<br>• Tunai (hitung fisik): <b>Rp ' + App.formatNumber(saldoTunai) + '</b><br>• Bank (rekening koran): <b>Rp ' + App.formatNumber(saldoBank) + '</b>' +
+      '<br>• Sumber: ' + App.escapeHtml(refRK || (file ? file.name : '-')) + (file ? ' (file terlampir)' : '') +
       (jmlPindah ? '<br><br>' + jmlPindah + ' transaksi setelah tanggal tutup dipindah ke <b>' + (pr.namaPeriodeBaru || 'periode baru') + '</b>.' : '') +
       '<br><br>Status periode menjadi <b>CLOSED</b> dan periode baru dibuka otomatis.',
       'Ya, Tutup Buku', function(ok) {
         if (!ok) return;
-        self._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan, tglTutup: tgl });
+        var kirim = function(dataUrl) {
+          self._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan, tglTutup: tgl,
+            refRekeningKoran: refRK || (file ? file.name : ''), buktiRekeningKoran: dataUrl || '' });
+        };
+        if (!file) { kirim(''); return; }
+        self.showLoading('Membaca file e-statement...');
+        var rd = new FileReader();
+        rd.onload = function(e) { kirim(e.target.result); };
+        rd.onerror = function() { kirim(''); };
+        rd.readAsDataURL(file);
       });
   },
 
@@ -3056,13 +3097,8 @@ var App = {
   // Tutup buku dari halaman Pemeriksaan Saldo (pakai input ps*).
   // Memanggil tutupBuku yang benar-benar mengubah status periode → CLOSED.
   konfirmasiTutupSaldo: function() {
-    var saldoTunai = App.num('psTunai');
-    var saldoBank  = App.num('psBank');
-    var catatan    = (document.getElementById('psCatatan') || {}).value || '';
-    var self = this;
-    App._konfirmasiModal('🔒 Tutup buku periode ini?', 'Saldo akhir dicatat final dan status periode diubah ke <b>CLOSED</b>.', 'Ya, Tutup Buku', function(ok) {
-      if (ok) self._kirimTutupBuku({ saldoTunaiAktual: saldoTunai, saldoBankAktual: saldoBank, catatan: catatan });
-    });
+    // Tutup buku kini wajib lewat halaman Tutup Buku (tanggal cut-off, rekening koran).
+    this.pageTutupBuku();
   },
 
   // Kirim tutup buku; bila server melapor ADA SELISIH, minta alasan lalu resubmit.
