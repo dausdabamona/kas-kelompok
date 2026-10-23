@@ -60,6 +60,26 @@ function importRekapSetoran(payload) {
   }
 }
 
+// Data awal layar Input Rekap: periode aktif, jenis Buku IR, tanggal hari ini.
+function infoRekapSetoran() {
+  try {
+    var auth = authRekapSetoran_();
+    if (!auth.success) return auth;
+    var periode = getPeriodeAktif();
+    if (!periode) return { success: false, message: 'Tidak ada periode aktif.' };
+    return {
+      success: true,
+      periode: { id: periode.id, nama: periode.nama },
+      hariIni: toDateStr_(new Date()),
+      daftarJenis: jenisBukuIRAktif_(),
+      kolom: kolomRekapSetoran_(),
+      maksBaris: REKAP_MAKS_BARIS_
+    };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 // K11: butuh izin input pemasukan + rincian Buku IR. PENEROBOS tidak boleh,
 // karena pemasukan penerobos masuk Kas Penerobos, bukan kas utama.
 function authRekapSetoran_() {

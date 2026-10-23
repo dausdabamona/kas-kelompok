@@ -1,6 +1,6 @@
 # Desain Fitur — Input Rekap Setoran
 
-Status: **DIKUNCI 24-10-2026** — G2 (server) selesai, menunggu uji di salinan spreadsheet
+Status: **DIKUNCI 24-10-2026** — G2 (server) & G3 (layar) selesai, menunggu uji di deployment uji
 Tanggal: 23 Oktober 2026
 Repo: `dausdabamona/kas-kelompok` (acuan commit `d033428`, 24-09-2026)
 Menggantikan: rencana MCP Kas Kelompok (`mcp-kas-kelompok-desain.md`) — **ditunda**, input dilakukan lewat aplikasi.
@@ -166,4 +166,13 @@ Batas eksekusi Apps Script 6 menit. Penulisan dikumpulkan lalu ditulis dengan `s
 - `.claspignore` ditambah `!RekapSetoran.gs`. Tanpa baris ini file baru tidak ikut ter-deploy.
 - `ujiRekapSetoran` (uji dari editor, mode periksa saja) masuk denylist `apiCall`.
 - Uji simulasi (spreadsheet tiruan, data asli 23-10-2026): 34 uji lulus. Mencakup total Rp21.402.000 = GRAND TOTAL, 26 baris tersimpan Rp18.402.000, Roni ditahan, BKM berurutan, kode rekap ganda ditolak, nama ambigu, hak akses, dan form lama tetap sama.
+
+## 13. Catatan pelaksanaan G3
+
+- Layar di `Javascript.html` (blok `INPUT REKAP SETORAN`): `pageInputRekap`, `renderInputRekap`, `periksaRekap`, `renderHasilRekap`, `simpanRekap`, `renderSelesaiRekap`.
+- Tombol **📋 Input Rekap Setoran** di atas tab halaman Buku IR, hanya untuk peran yang lolos K11 (`bolehInputRekap`). Server tetap memeriksa ulang hak akses.
+- Endpoint tambahan `infoRekapSetoran` untuk mengisi form awal (periode aktif, jenis Buku IR, tanggal hari ini).
+- Kode Rekap otomatis `REKAP-<tanggal>` dan ikut berubah saat tanggal diganti, kecuali sudah diketik manual.
+- Mengubah isian setelah Periksa membuat hasil lama tidak berlaku; tombol Simpan baru muncul lagi setelah Periksa ulang.
+- Uji layar (jsdom + server simulasi, data 23-10-2026): 19 uji lulus, termasuk pilih anggota manual untuk nama ambigu, simpan 26 setoran Rp18.402.000, BKM-1-0004 s.d. 0029, kode rekap ganda ditolak, dan PENEROBOS tidak melihat menu.
 

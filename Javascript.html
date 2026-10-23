@@ -1368,8 +1368,11 @@ var App = {
           '</div>';
         }).join('');
 
+    var tombolRekap = this.bolehInputRekap()
+      ? '<button class="btn btn-secondary" style="width:100%;margin-bottom:12px;" onclick="App.pageInputRekap()">📋 Input Rekap Setoran (banyak jamaah sekaligus)</button>'
+      : '';
     var html = this.pageWrapper('Buku IR',
-      queueBanner +
+      queueBanner + tombolRekap +
       '<div class="tabs">' +
         '<button class="tab-btn' + (activeTab === 'belum' ? ' active' : '') + '" onclick="App.renderBukuIR(App._bukuIRData, \'belum\')">Belum Rincian <span class="badge">' + belum.length + '</span></button>' +
         '<button class="tab-btn' + (activeTab === 'sudah' ? ' active' : '') + '" onclick="App.renderBukuIR(App._bukuIRData, \'sudah\')">Sudah Rincian <span class="badge" style="background:var(--success);">' + sudah.length + '</span></button>' +
@@ -1377,6 +1380,251 @@ var App = {
       (activeTab === 'belum' ? listBelum : listSudah)
     );
     document.getElementById('app').innerHTML = html;
+  },
+
+  // ─────────────────────────────────────────────────
+  // INPUT REKAP SETORAN — banyak setoran jamaah sekaligus
+  // Desain: docs/DESAIN-INPUT-REKAP.md. Tabel tempelan diurai & diperiksa di
+  // server (importRekapSetoran); layar ini hanya menampilkan hasil periksa.
+  // ─────────────────────────────────────────────────
+  bolehInputRekap: function() {
+    var role = App.currentUser && App.currentUser.role;
+    return role !== 'PENEROBOS' && App.canInput('masuk') && App.can('bukuIR.input');
+  },
+
+  pageInputRekap: function() {
+    this.history.push('bukuIR');
+    this.showLoading('Memuat...');
+    var self = this;
+    App.srv()
+      .withSuccessHandler(function(r) {
+        if (r && r.success) self.renderInputRekap(r);
+        else self.showError((r && r.message) || 'Gagal memuat Input Rekap.');
+      })
+      .withFailureHandler(function(err) { self.showError('Gagal terhubung. ' + ((err && err.message) || '')); })
+      .infoRekapSetoran();
+  },
+
+  renderInputRekap: function(info) {
+    var esc = App.escapeHtml;
+    this._rekap = { info: info, pilihan: {}, hasil: null, kodeManual: false };
+    var jenis = info.daftarJenis || [];
+    var optJenis = jenis.length
+      ? jenis.map(function(j) { return '<option value="' + esc(j.id) + '">' + esc(j.nama || j.id) + '</option>'; }).join('')
+      : '<option value="">— belum ada jenis berkategori Buku IR —</option>';
+    var judulKolom = (info.kolom || []).map(function(c) {
+      return '<b>' + esc(c.judul.toUpperCase()) + '</b> → ' + esc(c.label);
+    }).join(', ');
+    var content =
+      '<div class="info-box" style="margin-bottom:12px;font-size:13px;line-height:1.5;">' +
+        'Salin tabel rekap dari spreadsheet <b>termasuk baris judul</b>, lalu tempel di bawah. ' +
+        'Kolom wajib: <b>Nama</b> dan <b>Total</b>. Komponen: ' + judulKolom + '. ' +
+        'Kolom <b>Ket</b>: CASH/kosong = Tunai, TF = Bank, <b>?</b> = ditahan (perlu konfirmasi).' +
+      '</div>' +
+      '<div class="text-small text-muted" style="margin-bottom:10px;">Periode aktif: <b>' + esc(info.periode.nama || info.periode.id) + '</b></div>' +
+      '<div class="form-group"><label>Tanggal setoran</label>' +
+        '<input type="date" id="rkTanggal" value="' + esc(info.hariIni) + '" max="' + esc(info.hariIni) + '" onchange="App._rkUbahTanggal()"/></div>' +
+      '<div class="form-group"><label>Jenis Pemasukan</label><select id="rkJenis" onchange="App._rkBasi()">' + optJenis + '</select></div>' +
+      '<div class="form-group"><label>Kode Rekap</label>' +
+        '<input type="text" id="rkKode" value="REKAP-' + esc(info.hariIni) + '" oninput="App._rekap.kodeManual=true;App._rkBasi()"/>' +
+        '<div class="text-small text-muted" style="margin-top:4px;">Pengaman agar rekap yang sama tidak tersimpan dua kali.</div></div>' +
+      '<div class="form-group"><label>Tabel rekap (tempel di sini)</label>' +
+        '<textarea id="rkTeks" rows="9" oninput="App._rekap.pilihan={};App._rkBasi()" ' +
+          'placeholder="No&#9;Tanggal&#9;Nama&#9;IR&#9;Cilepus&#9;Daerah&#9;KLP&#9;Tunggakan&#9;Total&#9;Ket" ' +
+          'style="font-family:monospace;font-size:12px;"></textarea></div>' +
+      '<button class="btn btn-secondary" style="width:100%;" onclick="App.periksaRekap()">🔍 Periksa</button>' +
+      '<div id="rkHasil" style="margin-top:14px;"></div>';
+    document.getElementById('app').innerHTML = this.pageWrapper('Input Rekap Setoran', content);
+  },
+
+  _rkUbahTanggal: function() {
+    if (!this._rekap.kodeManual) {
+      var t = document.getElementById('rkTanggal').value;
+      document.getElementById('rkKode').value = 'REKAP-' + t;
+    }
+    this._rkBasi();
+  },
+
+  // Isian berubah setelah diperiksa → hasil lama tidak berlaku lagi.
+  _rkBasi: function() {
+    if (!this._rekap || !this._rekap.hasil) return;
+    this._rekap.hasil = null;
+    var el = document.getElementById('rkHasil');
+    if (el) el.innerHTML = '<div class="info-box">Isian berubah — tekan <b>Periksa</b> lagi.</div>';
+  },
+
+  _rkPayload: function(mode) {
+    return {
+      mode: mode,
+      tanggal: document.getElementById('rkTanggal').value,
+      jenisId: document.getElementById('rkJenis').value,
+      kodeRekap: (document.getElementById('rkKode').value || '').trim(),
+      teks: document.getElementById('rkTeks').value || '',
+      pilihanAnggota: this._rekap.pilihan
+    };
+  },
+
+  periksaRekap: function() {
+    var self = this;
+    var el = document.getElementById('rkHasil');
+    if (!(document.getElementById('rkTeks').value || '').trim()) {
+      el.innerHTML = '<div class="error-box">Tempel tabel rekap dulu.</div>';
+      return;
+    }
+    el.innerHTML = '<div class="info-box">Memeriksa…</div>';
+    App.srv()
+      .withSuccessHandler(function(r) {
+        if (r && r.success) { self._rekap.hasil = r; self.renderHasilRekap(r); }
+        else el.innerHTML = '<div class="error-box">❌ ' + App.escapeHtml((r && r.message) || 'Gagal memeriksa.') + '</div>';
+      })
+      .withFailureHandler(function(err) { el.innerHTML = '<div class="error-box">❌ Gagal terhubung. ' + App.escapeHtml((err && err.message) || '') + '</div>'; })
+      .importRekapSetoran(this._rkPayload('periksa'));
+  },
+
+  // Pilih anggota manual untuk baris yang namanya tidak/ganda cocok (K5).
+  _rkPilihAnggota: function(no, sel) {
+    if (sel.value) this._rekap.pilihan[String(no)] = sel.value;
+    else delete this._rekap.pilihan[String(no)];
+    this.periksaRekap();
+  },
+
+  renderHasilRekap: function(h) {
+    var esc = App.escapeHtml;
+    var angka = function(n) { return Number(n || 0).toLocaleString('id-ID'); };
+    var rk = h.ringkasan, kolom = h.kolom || [];
+    var warnaBaris = { siap: '', peringatan: 'background:#FEF3C7;', ditahan: 'background:#F1F5F9;color:#64748B;', salah: 'background:#FEE2E2;' };
+    var lencana = {
+      siap: '<span class="badge-success">Siap</span>',
+      peringatan: '<span class="badge-warning">Cek</span>',
+      ditahan: '<span class="badge-muted">Ditahan</span>',
+      salah: '<span class="badge-warning" style="background:var(--danger)!important;">Salah</span>'
+    };
+    var td = 'padding:5px 6px;font-size:12px;border-top:1px solid var(--border);vertical-align:top;';
+    var tdR = td + 'text-align:right;white-space:nowrap;';
+
+    var opsiAnggota = function(b) {
+      var kand = b.kandidat || [];
+      var idKand = {};
+      kand.forEach(function(k) { idKand[k.id] = true; });
+      var pilih = String(h.baris && App._rekap.pilihan[String(b.no)] || '');
+      var o = '<option value="">— pilih anggota —</option>';
+      if (kand.length) {
+        o += '<optgroup label="Kandidat">' + kand.map(function(k) {
+          return '<option value="' + esc(k.id) + '"' + (pilih === k.id ? ' selected' : '') + '>' + esc(k.nama) + '</option>';
+        }).join('') + '</optgroup>';
+      }
+      o += '<optgroup label="Semua anggota">' + (h.daftarAnggota || []).filter(function(a) { return !idKand[a.id]; }).map(function(a) {
+        return '<option value="' + esc(a.id) + '"' + (pilih === a.id ? ' selected' : '') + '>' + esc(a.nama) + '</option>';
+      }).join('') + '</optgroup>';
+      return '<select style="font-size:12px;padding:3px;max-width:170px;" onchange="App._rkPilihAnggota(' + Number(b.no) + ', this)">' + o + '</select>';
+    };
+
+    var trs = (h.baris || []).map(function(b) {
+      var kolAnggota;
+      if (b.caraCocok === 'manual') {
+        kolAnggota = '<div>' + esc(b.anggotaNama) + ' <span class="text-small text-muted">(dipilih)</span></div>' + opsiAnggota(b);
+      } else if (b.anggotaId) {
+        kolAnggota = esc(b.anggotaNama) + (b.caraCocok === 'panggilan' ? ' <span class="text-small text-muted">(panggilan)</span>' : '');
+      } else if (b.status === 'ditahan') {
+        kolAnggota = '<span class="text-muted">—</span>';
+      } else {
+        kolAnggota = opsiAnggota(b);
+      }
+      var sel = kolom.map(function(c) { return '<td style="' + tdR + '">' + (b.komponen[c.kunci] ? angka(b.komponen[c.kunci]) : '') + '</td>'; }).join('');
+      return '<tr style="' + (warnaBaris[b.status] || '') + '">' +
+        '<td style="' + td + '">' + esc(String(b.no)) + '</td>' +
+        '<td style="' + td + '"><b>' + esc(b.namaBuku) + '</b></td>' +
+        '<td style="' + td + '">' + kolAnggota + '</td>' +
+        sel +
+        '<td style="' + tdR + 'font-weight:600;">' + angka(b.total) + '</td>' +
+        '<td style="' + td + '">' + esc(b.sumberKas || (b.status === 'ditahan' ? '?' : '')) + '</td>' +
+        '<td style="' + td + '">' + (lencana[b.status] || '') +
+          (b.pesan && b.pesan.length ? '<div class="text-small" style="margin-top:3px;min-width:160px;">' + b.pesan.map(esc).join('<br>') + '</div>' : '') +
+        '</td></tr>';
+    }).join('');
+    var th = 'padding:6px;font-size:11px;text-align:left;white-space:nowrap;';
+    var thR = th + 'text-align:right;';
+    var tabel =
+      '<div style="max-height:420px;overflow:auto;border:1px solid var(--border);border-radius:8px;">' +
+        '<table style="width:100%;border-collapse:collapse;">' +
+          '<thead><tr style="background:#F8FAFC;position:sticky;top:0;">' +
+            '<th style="' + th + '">No</th><th style="' + th + '">Nama di buku</th><th style="' + th + '">Anggota</th>' +
+            kolom.map(function(c) { return '<th style="' + thR + '">' + esc(c.label) + '</th>'; }).join('') +
+            '<th style="' + thR + '">Total</th><th style="' + th + '">Kas</th><th style="' + th + '">Status</th>' +
+          '</tr></thead><tbody>' + trs + '</tbody></table></div>';
+
+    var stat = function(label, nilai, gaya) {
+      return '<div class="stat-row"><span class="stat-label">' + label + '</span><span class="stat-value"' + (gaya ? ' style="' + gaya + '"' : '') + '>' + nilai + '</span></div>';
+    };
+    var cocokGT = rk.grandTotalBuku === null ? '' :
+      stat('GRAND TOTAL buku', App.formatNumber(rk.grandTotalBuku) + (rk.cocokGrandTotal ? ' ✅' : ' ⚠️'), rk.cocokGrandTotal ? '' : 'color:var(--warning);');
+    var ringkas =
+      '<div class="card" style="margin-bottom:10px;">' +
+        stat('Baris terbaca', rk.jumlahBaris + ' (siap ' + rk.siap + ', cek ' + rk.peringatan + ', ditahan ' + rk.ditahan + ', salah ' + rk.salah + ')') +
+        stat('Jumlah semua baris', App.formatNumber(rk.totalSemua)) +
+        cocokGT +
+        (rk.ditahan ? stat('Ditahan (tidak disimpan)', App.formatNumber(rk.totalDitahan), 'color:var(--text-muted);') : '') +
+        stat('<b>Akan disimpan</b>', '<b>' + App.formatNumber(rk.totalDisimpan) + '</b>', 'color:var(--success);') +
+        stat('— Tunai', App.formatNumber(rk.totalTunai)) +
+        stat('— Bank', App.formatNumber(rk.totalBank)) +
+        kolom.map(function(c) { return stat('— ' + esc(c.label), App.formatNumber(rk.perKomponen[c.kunci])); }).join('') +
+      '</div>';
+
+    var galat = (h.galat || []).map(function(g) { return '<div class="error-box" style="margin-bottom:8px;">❌ ' + esc(g) + '</div>'; }).join('');
+    var peringatan = (h.peringatan || []).map(function(g) { return '<div class="info-box" style="margin-bottom:8px;background:#FEF3C7;border-color:#F59E0B;">⚠️ ' + esc(g) + '</div>'; }).join('');
+    var tombol = h.bisaSimpan
+      ? '<button class="btn btn-primary" style="width:100%;margin-top:12px;" onclick="App.simpanRekap()">💾 Simpan ' + (rk.siap + rk.peringatan) + ' setoran · ' + App.formatNumber(rk.totalDisimpan) + '</button>'
+      : '<button class="btn btn-primary" style="width:100%;margin-top:12px;opacity:.5;" disabled>Perbaiki baris merah dulu</button>';
+
+    document.getElementById('rkHasil').innerHTML = galat + peringatan + ringkas + tabel +
+      '<div id="rkSimpanError" style="margin-top:10px;"></div>' + tombol;
+  },
+
+  simpanRekap: function() {
+    var self = this, h = this._rekap.hasil;
+    if (!h || !h.bisaSimpan) return;
+    var rk = h.ringkasan;
+    var pesan = 'Simpan ' + (rk.siap + rk.peringatan) + ' setoran senilai ' + App.formatNumber(rk.totalDisimpan) +
+      ' dengan kode ' + h.kodeRekap + '?' + (rk.ditahan ? '\n\n' + rk.ditahan + ' baris ditahan (' + App.formatNumber(rk.totalDitahan) + ') tidak ikut disimpan.' : '');
+    if (!confirm(pesan)) return;
+    var payload = this._rkPayload('simpan');
+    var errEl = document.getElementById('rkSimpanError');
+    errEl.innerHTML = '<div class="info-box">Menyimpan… jangan tutup halaman.</div>';
+    App.srv()
+      .withSuccessHandler(function(r) {
+        if (r && r.success) { self.renderSelesaiRekap(r); return; }
+        if (r && r.hasil) { self._rekap.hasil = r.hasil; self.renderHasilRekap(r.hasil); errEl = document.getElementById('rkSimpanError'); }
+        errEl.innerHTML = '<div class="error-box">❌ ' + App.escapeHtml((r && r.message) || 'Gagal menyimpan.') + '</div>';
+      })
+      .withFailureHandler(function(err) {
+        errEl.innerHTML = '<div class="error-box">❌ Gagal terhubung. Cek dulu di Buku IR apakah data sudah masuk sebelum mencoba lagi — kode rekap mencegah tersimpan dua kali. ' + App.escapeHtml((err && err.message) || '') + '</div>';
+      })
+      .importRekapSetoran(payload);
+  },
+
+  renderSelesaiRekap: function(r) {
+    var esc = App.escapeHtml;
+    var ditahan = (r.ditahan || []).length
+      ? '<div class="card" style="margin-top:12px;">' +
+          '<div style="font-weight:600;margin-bottom:6px;">Baris ditahan — input setelah dikonfirmasi</div>' +
+          r.ditahan.map(function(d) {
+            return '<div class="stat-row"><span class="stat-label">#' + esc(String(d.no)) + ' ' + esc(d.nama) + '</span><span class="stat-value">' + App.formatNumber(d.total) + '</span></div>';
+          }).join('') +
+        '</div>'
+      : '';
+    var content =
+      '<div class="card" style="text-align:center;padding:20px;">' +
+        '<div style="font-size:40px;">✅</div>' +
+        '<div style="font-size:16px;font-weight:700;margin:6px 0;">' + r.tersimpan + ' setoran tersimpan</div>' +
+        '<div style="font-size:20px;font-weight:700;color:var(--success);">' + App.formatNumber(r.totalTersimpan) + '</div>' +
+        '<div class="text-small text-muted" style="margin-top:6px;">' + esc(r.kodeRekap) +
+          (r.noBuktiAwal ? ' · ' + esc(r.noBuktiAwal) + (r.noBuktiAkhir !== r.noBuktiAwal ? ' s.d. ' + esc(r.noBuktiAkhir) : '') : '') + '</div>' +
+      '</div>' +
+      ditahan +
+      '<button class="btn btn-primary" style="width:100%;margin-top:14px;" onclick="App.pageBukuIR()">📖 Lihat Buku IR</button>' +
+      '<button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="App.history.pop();App.pageInputRekap()">➕ Input rekap lain</button>';
+    document.getElementById('app').innerHTML = this.pageWrapper('Rekap Tersimpan', content);
+    this.toast('Rekap tersimpan ✓');
   },
 
   // ── SEMUA TRANSAKSI — perbaiki salah input siapa pun ──
