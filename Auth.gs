@@ -732,7 +732,8 @@ var API_DENYLIST_ = {
   'fmtRp': true, 'fmtTanggal': true, 'generateID': true, 'logActivity': true,
   'getSpreadsheetId': true, 'calculateSaldo': true, 'buildPDFHTML': true,
   'hitungJumlahBulan': true, 'mapPosNamaToIRColName': true, 'mapPosNamaToBukuIRCol': true,
-  'testDashboard': true, 'testFindPeriode': true, 'testBukuIR': true
+  'testDashboard': true, 'testFindPeriode': true, 'testBukuIR': true,
+  'ujiRekapSetoran': true
 };
 
 function isAllowedEndpoint_(fnName) {

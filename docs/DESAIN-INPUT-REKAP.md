@@ -1,6 +1,6 @@
 # Desain Fitur — Input Rekap Setoran
 
-Status: **DRAFT — menunggu dikunci**
+Status: **DIKUNCI 24-10-2026** — G2 (server) selesai, menunggu uji di salinan spreadsheet
 Tanggal: 23 Oktober 2026
 Repo: `dausdabamona/kas-kelompok` (acuan commit `d033428`, 24-09-2026)
 Menggantikan: rencana MCP Kas Kelompok (`mcp-kas-kelompok-desain.md`) — **ditunda**, input dilakukan lewat aplikasi.
@@ -86,15 +86,12 @@ payload = {
   tanggal: '2026-10-23',
   jenisId: '<kode jenis Buku IR>',
   kodeRekap: 'REKAP-2026-10-23',
-  grandTotalBuku: 21402000,        // opsional, untuk pembanding
-  baris: [
-    { no: 1, nama: 'Heru', anggotaId: '<opsional, hasil pilih manual>',
-      ir: 400000, cicilan: 540000, infakDaerah: 30000, index: 30000, sewaKos: 0,
-      total: 1000000, ket: 'CASH', catatan: '...' },
-    ...
-  ]
+  teks: '<tabel yang ditempel, apa adanya>',
+  pilihanAnggota: { '<no baris>': '<anggotaId>' }   // hasil pilih manual (K5)
 }
 ```
+
+> **Penyesuaian saat G2:** tabel tempelan diurai **di server** (`uraiTeksRekap_`), bukan di layar. Dengan begitu aturan baca angka, judul kolom, dan GRAND TOTAL hanya ada di satu tempat, dan layar cukup menampilkan hasil periksa. Pemetaan kolom K1 ada di `kolomRekapSetoran_()`.
 
 - **Periksa**: tidak menulis apa pun. Mengembalikan status setiap baris dan ringkasan.
 - **Simpan**: menjalankan pemeriksaan yang sama **lagi di server** (hasil periksa dari klien tidak dipercaya), lalu menulis di dalam `withLock_`.
@@ -162,3 +159,11 @@ Batas eksekusi Apps Script 6 menit. Penulisan dikumpulkan lalu ditulis dengan `s
 1. ~~Tunggakan Ali~~ → **selesai**: Sewa Kos (K1).
 2. **Roni**: setelah dikonfirmasi CASH atau TF, diinput lewat form biasa atau lewat rekap susulan?
 3. **Nama di buku vs master Anggota**: dikomunikasikan ulang dengan bendahara (nama panggilan atau nama lengkap). Tidak menghambat pembangunan fitur karena K5 sudah menangani keduanya; yang perlu dipastikan sebelum G4 hanya: semua 27 jamaah sudah terdaftar, dan arti "Ikhsan-Era" (satu orang/keluarga atau dua orang). Pilihan manual tidak diingat aplikasi (YAGNI).
+
+## 12. Catatan pelaksanaan G2
+
+- Kode server: `RekapSetoran.gs` (baru), helper bersama `_barisPenerimaan_`, `_barisRincianIR_`, `_maxSeqNoBukti_` di `Data.gs`. `submitTransaksi`, `submitRincianIR`, dan `_isiNoBukti_` kini memakai helper itu tanpa perubahan perilaku.
+- `.claspignore` ditambah `!RekapSetoran.gs`. Tanpa baris ini file baru tidak ikut ter-deploy.
+- `ujiRekapSetoran` (uji dari editor, mode periksa saja) masuk denylist `apiCall`.
+- Uji simulasi (spreadsheet tiruan, data asli 23-10-2026): 34 uji lulus. Mencakup total Rp21.402.000 = GRAND TOTAL, 26 baris tersimpan Rp18.402.000, Roni ditahan, BKM berurutan, kode rekap ganda ditolak, nama ambigu, hak akses, dan form lama tetap sama.
+

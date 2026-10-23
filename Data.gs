@@ -247,21 +247,55 @@ function _isiNoBukti_(sheet, prefix, periodeId) {
     var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     var h = headerMap_(header);
     var cNB = h['nobukti']; if (cNB === undefined) return '';
-    var cPid = h['periodeid'] !== undefined ? h['periodeid'] : 1;
     var maxSeq = 0;
     if (sheet.getLastRow() > 1) {
       var rows = sheet.getRange(1, 1, sheet.getLastRow(), lastCol).getValues();
-      for (var i = 1; i < rows.length; i++) {
-        if (String(rows[i][cPid]) !== String(periodeId)) continue;
-        var m = String(rows[i][cNB] || '').match(/-(\d+)$/);
-        if (m) { var n = parseInt(m[1], 10); if (n > maxSeq) maxSeq = n; }
-      }
+      maxSeq = _maxSeqNoBukti_(rows, h, periodeId);
     }
     var pseq = _periodeSeqCode_(getSS_(), periodeId);
     var nb = prefix + '-' + pseq + '-' + ('0000' + (maxSeq + 1)).slice(-4);
     sheet.getRange(sheet.getLastRow(), cNB + 1).setValue(nb);
     return nb;
   } catch(e) { return ''; }
+}
+
+// Nomor urut No Bukti tertinggi dalam satu periode (baris 0 = judul).
+// Dipakai _isiNoBukti_ (satu baris) dan Input Rekap Setoran (banyak baris).
+function _maxSeqNoBukti_(rows, h, periodeId) {
+  var cNB = h['nobukti']; if (cNB === undefined) return 0;
+  var cPid = h['periodeid'] !== undefined ? h['periodeid'] : 1;
+  var maxSeq = 0;
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][cPid]) !== String(periodeId)) continue;
+    var m = String(rows[i][cNB] || '').match(/-(\d+)$/);
+    if (m) { var n = parseInt(m[1], 10); if (n > maxSeq) maxSeq = n; }
+  }
+  return maxSeq;
+}
+
+// K10 Input Rekap: susunan SATU baris Input Penerimaan (urutan kolom tetap
+// seperti sejak awal). Dipakai submitTransaksi & importRekapSetoran.
+function _barisPenerimaan_(o) {
+  return [o.id, o.periodeId, o.jenisId, o.anggotaId || '', o.tanggal, o.nominal,
+          o.sumberKas, o.catatan || '', o.email, o.createdAt, 'Aktif'];
+}
+
+// K10 Input Rekap: susunan SATU baris baru Detail Buku IR, dirakit mengikuti
+// judul kolom (bukan urutan tetap). Dipakai submitRincianIR & importRekapSetoran.
+// o.nilai = { kunci komponen: nominal }.
+function _barisRincianIR_(lebar, irH, komp, o) {
+  var baris = [];
+  for (var i = 0; i < lebar; i++) baris.push('');
+  function setKol(h, v) { if (irH[h] !== undefined) baris[irH[h]] = v; }
+  setKol('id', o.id);
+  setKol('transaksiid', o.transaksiId);
+  setKol('periodeid', o.periodeId);
+  setKol('anggotaid', o.anggotaId);
+  setKol('tanggal', o.tanggal);
+  setKol('createdby', o.email);
+  setKol('createdat', o.createdAt);
+  for (var k = 0; k < komp.length; k++) baris[komp[k].col] = Number(o.nilai[komp[k].kunci]) || 0;
+  return baris;
 }
 
 // FASE 5 (T12): set kolom approval pada baris TERAKHIR (setelah append).
@@ -1777,7 +1811,10 @@ function submitTransaksi(data) {
       }
       var sheet = ss.getSheetByName(CONFIG.SHEETS.INPUT_PENERIMAAN);
       if (!sheet) return { success: false, message: 'Sheet penerimaan tidak ditemukan' };
-      sheet.appendRow([id, periode.id, data.jenisId, data.anggotaId || '', tgl, nominal, data.sumberKas, data.catatan || '', auth.user.email, toDateStr_(now), 'Aktif']);
+      sheet.appendRow(_barisPenerimaan_({
+        id: id, periodeId: periode.id, jenisId: data.jenisId, anggotaId: data.anggotaId, tanggal: tgl,
+        nominal: nominal, sumberKas: data.sumberKas, catatan: data.catatan, email: auth.user.email, createdAt: toDateStr_(now)
+      }));
       var noBuktiMasuk = _isiNoBukti_(sheet, 'BKM', periode.id);
       logActivity(auth.user.email, 'PEMASUKAN', 'Nominal: ' + nominal);
     } else if (data.tipe === 'keluar') {
@@ -3108,18 +3145,10 @@ function submitRincianIR(data) {
       // Anggota/tanggal dari transaksi (server), bukan klien (A1). PeriodeID memakai
       // periodeRincian: sama dengan transaksi, atau periode berjalan bila ditangguhkan.
       // Baris dirakit mengikuti header sheet, bukan urutan kolom tetap.
-      var baris = [];
-      for (var bi = 0; bi < irRows[0].length; bi++) baris.push('');
-      function setKol_(h, v) { if (irH[h] !== undefined) baris[irH[h]] = v; }
-      setKol_('id', id);
-      setKol_('transaksiid', data.transaksiId);
-      setKol_('periodeid', periodeRincian);
-      setKol_('anggotaid', trxAnggotaId);
-      setKol_('tanggal', trxTanggal);
-      setKol_('createdby', auth.user.email);
-      setKol_('createdat', toDateStr_(new Date()));
-      for (var kb = 0; kb < komp.length; kb++) baris[komp[kb].col] = nilai[komp[kb].kunci];
-      sheet.appendRow(baris);
+      sheet.appendRow(_barisRincianIR_(irRows[0].length, irH, komp, {
+        id: id, transaksiId: data.transaksiId, periodeId: periodeRincian, anggotaId: trxAnggotaId,
+        tanggal: trxTanggal, nilai: nilai, email: auth.user.email, createdAt: toDateStr_(new Date())
+      }));
       if (ditangguhkan) {
         logActivityWajib_(auth.user.email, 'RINCIAN_TANGGUHAN_DIISI',
           'Transaksi: ' + data.transaksiId + ' | periode asal: ' + trxPeriodeId + ' | dicatat di periode: ' + periodeRincian);
