@@ -30,7 +30,7 @@ Bendahara **menempel rekap dari spreadsheet/buku** satu kali, aplikasi **memerik
 | K2 | Kolom Ket → Sumber Kas | **CASH → Tunai**, **TF → Bank**, **kosong → Tunai** |
 | K3 | Ket bertanda **`?`** (perlu konfirmasi) | Baris **ditahan**: tampil di pratinjau, **tidak disimpan**, dilaporkan agar diinput setelah dikonfirmasi |
 | K4 | Nama jamaah sama muncul lebih dari sekali | **Boleh**, tetap disimpan semua, tetapi ditandai kuning di pratinjau |
-| K5 | Pencocokan nama ke master Anggota | Tidak peka huruf besar/kecil dan spasi. Nama yang tidak cocok **wajib dipilih manual** dari daftar anggota di pratinjau. |
+| K5 | Pencocokan nama ke master Anggota | Nama di buku bisa **nama panggilan atau nama lengkap**. Urutan cocok: (1) sama persis; (2) bila tidak ada, **satu-satunya** anggota yang nama lengkapnya memuat nama itu sebagai kata utuh (mis. "Heru" → "Heru Santoso"). Tidak peka huruf besar/kecil dan spasi. Bila tidak ada yang cocok **atau lebih dari satu** kandidat, nama **wajib dipilih manual** dari daftar anggota di pratinjau. Hasil cocok otomatis selalu ditampilkan berdampingan dengan nama di buku agar bisa dicek. |
 | K6 | Jenis pemasukan | Dipilih sekali per rekap, hanya dari jenis berkategori **"Buku IR"** di Master Pemasukan |
 | K7 | Satu rekap = satu tanggal | Tanggal diisi sekali, wajib berada dalam **periode aktif** |
 | K8 | Cegah input dobel | Setiap rekap diberi **Kode Rekap** (mis. `REKAP-2026-10-23`). Kode yang sama ditolak pada simpan kedua. |
@@ -40,7 +40,7 @@ Bendahara **menempel rekap dari spreadsheet/buku** satu kali, aplikasi **memerik
 | K12 | Rapelan | Semua baris disimpan dengan rapel **1 bulan**. Rapel lebih dari 1 diedit lewat form rincian lama bila perlu. |
 | K13 | Batas | Maksimal **200 baris** per rekap |
 
-> **Catatan pemetaan K1:** Sewa Kos dicatat sebagai **milik kelompok**. Jika tunggakan Ali (Rp1.000.000 = 500.000 + 500.000) sebenarnya tunggakan **IR**, uang itu milik **desa** dan seharusnya masuk IR dengan rapel 3 bulan. Mohon dipastikan sebelum dikunci.
+> **Catatan pemetaan K1:** Tunggakan dicatat sebagai **Sewa Kos (milik kelompok)** — sudah dikonfirmasi Firdaus pada 24-10-2026 untuk tunggakan Ali (Rp1.000.000 = 500.000 + 500.000).
 
 ## 4. Format yang ditempel
 
@@ -139,6 +139,8 @@ Batas eksekusi Apps Script 6 menit. Penulisan dikumpulkan lalu ditulis dengan `s
 |-----|-----------------------|
 | Tempel 27 baris + GRAND TOTAL | 26 baris hijau/kuning, 1 baris abu-abu (Roni, bila Ket diisi `?`) |
 | Heru dua kali | Kuning, keduanya tersimpan |
+| Nama panggilan ("Heru") dengan satu anggota "Heru …" | Cocok otomatis, tampil berdampingan |
+| Nama panggilan dengan dua kandidat | Merah sampai dipilih manual |
 | Total pratinjau vs buku | Rp21.402.000 sama dengan GRAND TOTAL (Rp18.402.000 tersimpan + Rp3.000.000 ditahan) |
 | Komponen Ali | IR 1.000.000, Cicilan 200.000, Infak Daerah 5.000, Index 100.000, Sewa Kos 1.000.000 |
 | Ubah satu Total jadi salah | Baris merah, tombol Simpan mati |
@@ -157,6 +159,6 @@ Batas eksekusi Apps Script 6 menit. Penulisan dikumpulkan lalu ditulis dengan `s
 
 ## 11. Pertanyaan terbuka
 
-1. **Tunggakan Ali**: tunggakan Sewa Kos, atau tunggakan IR? (lihat catatan K1)
+1. ~~Tunggakan Ali~~ → **selesai**: Sewa Kos (K1).
 2. **Roni**: setelah dikonfirmasi CASH atau TF, diinput lewat form biasa atau lewat rekap susulan?
-3. **Nama di buku vs master Anggota**: apakah semua 27 nama sudah terdaftar? Nama ganda seperti "Ikhsan-Era" (dua orang atau satu keluarga?) dan "Tajudin S." perlu dicocokkan sekali; pilihan manual tidak diingat aplikasi (YAGNI).
+3. **Nama di buku vs master Anggota**: dikomunikasikan ulang dengan bendahara (nama panggilan atau nama lengkap). Tidak menghambat pembangunan fitur karena K5 sudah menangani keduanya; yang perlu dipastikan sebelum G4 hanya: semua 27 jamaah sudah terdaftar, dan arti "Ikhsan-Era" (satu orang/keluarga atau dua orang). Pilihan manual tidak diingat aplikasi (YAGNI).
