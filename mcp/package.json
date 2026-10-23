@@ -1,0 +1,11 @@
+{
+  "name": "kas-kelompok-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Server MCP baca-saja untuk aplikasi Kas Kelompok (Google Apps Script)",
+  "type": "module",
+  "bin": { "kas-kelompok-mcp": "server.js" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.12.1"
+  }
+}

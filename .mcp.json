@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kas-kelompok": {
+      "command": "node",
+      "args": ["mcp/server.js"],
+      "env": {
+        "KAS_EXEC_URL": "${KAS_EXEC_URL}",
+        "KAS_TOKEN": "${KAS_TOKEN}"
+      }
+    }
+  }
+}

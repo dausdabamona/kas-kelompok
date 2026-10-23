@@ -725,7 +725,9 @@ function resolveUser_(token) {
 // Denylist fungsi global yang TIDAK boleh dipanggil via dispatcher
 // (setup/migrasi/util/rahasia). Helper privat (akhiran '_') otomatis ditolak.
 var API_DENYLIST_ = {
-  'apiCall': true, 'doGet': true, 'include': true,
+  'apiCall': true, 'doGet': true, 'doPost': true, 'include': true,
+  // Jalur API MCP: pembuatan/pencabutan token tidak boleh dipanggil dari halaman.
+  'aktifkanApiMCP': true, 'matikanApiMCP': true,
   'loginWithEmail': true, 'getGoogleEmail': true, 'getCurrentUser': true,
   'setupSheets': true, 'repairSheetHeaders': true, 'migratePosSetoran': true,
   'migrasiKeamanan': true, 'migrasiPengendalian': true, 'bersihkanCache': true,
@@ -932,4 +934,108 @@ function cleanupSessions_() {
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+// ══════════════════════════════════════════════════════
+// API JSON BACA-SAJA (untuk MCP / integrasi luar)
+//
+// Pintu masuk terpisah dari dispatcher apiCall, dengan tiga pembatas:
+//   1. Token sendiri (Script Property MCP_TOKEN), bukan session token pengguna.
+//      Bisa dicabut kapan saja tanpa mengganggu siapa pun yang sedang login.
+//   2. DAFTAR-PUTIH (allowlist), bukan denylist — endpoint baru TIDAK otomatis
+//      terbuka. Semua yang ada di sini hanya membaca; tak satu pun menulis.
+//   3. Identitas tetap dari Master User (MCP_USER_EMAIL), sehingga requirePerm
+//      di tiap endpoint tetap berlaku. Beri user itu peran seperlunya saja.
+//
+// Mati total selama MCP_TOKEN belum diisi.
+// ══════════════════════════════════════════════════════
+var MCP_ALLOW_ = {
+  getDashboardData: true,
+  getKepemilikanSaldo: true,
+  getPantauIR: true,
+  getRekapSetoran: true,
+  getPengeluaranRutin: true,
+  getRincianIR: true,
+  getBukuIRData: true,
+  getSemuaTransaksi: true,
+  getRekapitulasiData: true,
+  getAllPeriode: true,
+  getAnggota: true,
+  getPemeriksaanSaldo: true,
+  getActivityLog: true
+};
+
+// Perbandingan string yang tidak membocorkan panjang kecocokan lewat waktu.
+function _samaAman_(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (a.length !== b.length) return false;
+  var beda = 0;
+  for (var i = 0; i < a.length; i++) beda |= (a.charCodeAt(i) ^ b.charCodeAt(i));
+  return beda === 0;
+}
+
+function doPost(e) {
+  function kirim(obj) {
+    return ContentService.createTextOutput(JSON.stringify(obj))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  try {
+    var body = {};
+    try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
+    catch (err) { return kirim({ success: false, message: 'Body harus JSON.' }); }
+
+    var props = PropertiesService.getScriptProperties();
+    var tokenAsli = String(props.getProperty('MCP_TOKEN') || '');
+    // Belum disetel → API dianggap tidak ada. Token pendek ditolak agar tidak
+    // ada yang mengaktifkannya dengan kata sandi sepele.
+    if (tokenAsli.length < 32) return kirim({ success: false, message: 'API tidak aktif.' });
+    if (!_samaAman_(body.token, tokenAsli)) return kirim({ success: false, message: 'Token tidak sah.' });
+
+    var fnName = String(body.fn || '');
+    if (!MCP_ALLOW_[fnName]) return kirim({ success: false, message: 'Endpoint tidak diizinkan: ' + fnName });
+
+    var email = String(props.getProperty('MCP_USER_EMAIL') || '').toLowerCase().trim();
+    if (!email) return kirim({ success: false, message: 'MCP_USER_EMAIL belum disetel.' });
+    var user = getUserByEmail_(email);
+    if (!user) return kirim({ success: false, message: 'User API tidak terdaftar di Master User.' });
+    if (String(user.status || 'Aktif').toLowerCase() === 'nonaktif') {
+      return kirim({ success: false, message: 'User API nonaktif.' });
+    }
+
+    try {
+      user.perms = getPermsForRole_(user.role);
+      __REQ_USER_ = user;
+      var fn = (typeof globalThis !== 'undefined') ? globalThis[fnName] : this[fnName];
+      if (typeof fn !== 'function') return kirim({ success: false, message: 'Endpoint tidak ditemukan.' });
+      var args = Array.isArray(body.args) ? body.args : [];
+      return kirim(fn.apply(null, args));
+    } finally {
+      __REQ_USER_ = null;   // jangan bocor antar permintaan
+    }
+  } catch (err) {
+    return kirim({ success: false, message: err.message });
+  }
+}
+
+// Dijalankan sekali dari editor Apps Script untuk mengaktifkan API MCP.
+// Mencetak token ke log — salin, lalu simpan di tempat aman. Jalankan ulang
+// untuk mengganti token (yang lama langsung tidak berlaku).
+function aktifkanApiMCP() {
+  if (!_setupAccessOk_()) return 'Akses ditolak.';
+  var token = '';
+  var huruf = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  for (var i = 0; i < 48; i++) token += huruf.charAt(Math.floor(Math.random() * huruf.length));
+  PropertiesService.getScriptProperties().setProperty('MCP_TOKEN', token);
+  var email = PropertiesService.getScriptProperties().getProperty('MCP_USER_EMAIL') || '(BELUM DISETEL)';
+  Logger.log('MCP_TOKEN  = ' + token);
+  Logger.log('MCP_USER_EMAIL = ' + email);
+  Logger.log('Salin token di atas. Isi MCP_USER_EMAIL lewat Project Settings bila masih kosong.');
+  return 'Token MCP dibuat. Lihat Execution log.';
+}
+
+// Cabut akses API tanpa menyentuh apa pun yang lain.
+function matikanApiMCP() {
+  if (!_setupAccessOk_()) return 'Akses ditolak.';
+  PropertiesService.getScriptProperties().deleteProperty('MCP_TOKEN');
+  return 'API MCP dimatikan.';
 }
